@@ -1,4 +1,4 @@
-.PHONY: proto build run test up down tidy fmt
+.PHONY: proto build run test up down tidy fmt compose-config
 
 proto:
 	@test -f pkg/proto/ingest.pb.go
@@ -7,14 +7,16 @@ fmt:
 	gofmt -w $(shell rg --files -g '*.go')
 
 build: proto
-	go build -o bin/server ./cmd/server
-	go build -o bin/fake-agent ./cmd/fake-agent
+	go build ./...
 
 run: proto
 	go run ./cmd/server
 
 test: proto
 	go test ./...
+
+compose-config:
+	docker compose config
 
 up:
 	docker compose up --build

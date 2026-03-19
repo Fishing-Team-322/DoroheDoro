@@ -1,120 +1,132 @@
-# DoroheDoro Server Data Plane MVP
+# DoroheDoro Data Plane MVP
 
-Runnable MVP backend data plane for self-hosted Linux log collection and analysis.
+Hackathon MVP data plane for a self-hosted log platform. The repo keeps the existing ingest path intact and extends it with enrollment, policy sync, diagnostics, better parsing, and optional ClickHouse analytics.
 
-## What is included
+## What works now
 
-Single Go binary `server` with internal modules for:
+Core path preserved:
 
-- gRPC ingestion endpoint for batched logs
-- lightweight normalization into one unified event model
-- NATS JetStream as the internal bus
-- OpenSearch indexer consumer
-- HTTP search/query API for the UI
-- WebSocket live stream hub for new events
-- `fake-agent` demo client for sending test batches
+`fake-agent -> HTTP enroll -> gRPC ingest -> normalize/parser -> NATS JetStream -> OpenSearch -> HTTP search -> WS live stream`
 
-## Repository structure
+Additional MVP pieces:
 
-```text
-.
-├── .env.example
-├── Makefile
-├── README.md
-├── cmd
-│   ├── fake-agent
-│   │   └── main.go
-│   └── server
-│       └── main.go
-├── deployments
-│   └── docker
-│       ├── fake-agent.Dockerfile
-│       └── server.Dockerfile
-├── docker-compose.yml
-├── go.mod
-├── internal
-│   ├── app
-│   │   └── app.go
-│   ├── bus
-│   │   └── jetstream.go
-│   ├── config
-│   │   └── config.go
-│   ├── grpcapi
-│   │   └── server.go
-│   ├── httpapi
-│   │   └── router.go
-│   ├── indexer
-│   │   └── opensearch
-│   │       └── indexer.go
-│   ├── ingest
-│   │   └── service.go
-│   ├── model
-│   │   └── event.go
-│   ├── normalize
-│   │   ├── errors.go
-│   │   └── normalizer.go
-│   ├── query
-│   │   └── opensearch.go
-│   ├── stream
-│   │   └── hub.go
-│   └── telemetry
-│       └── logger.go
-├── pkg
-│   └── proto
-│       ├── ingest.pb.go
-│       └── json_codec.go
-├── proto
-│   └── ingest.proto
-└── scripts
-    └── sample-batch.json
+- Agent Enrollment API over HTTP with dev bootstrap token.
+- Policy Sync API over HTTP with in-memory default policy.
+- Diagnostics API for agent runtime state.
+- Better parser on top of the normalizer:
+  - JSON message parsing into `fields`
+  - extraction of `severity`, `service`, `source_type`, `timestamp`, `message`
+  - severity fallback is now `unknown`
+  - more stable fingerprinting with number / UUID / IP normalization
+- OpenSearch indexer improvements:
+  - index existence cache
+  - batched bulk flush
+- Optional ClickHouse analytics consumer and HTTP analytics endpoints.
+
+## Current scope / honest caveats
+
+- gRPC ingest currently runs in dev mode without TLS by default.
+- `INGEST_MTLS_ENABLED` and `INGEST_TLS_MODE` exist as config scaffolding, but full certificate bootstrap / mTLS verification is still TODO.
+- Agent registry, policy store, and diagnostics are in-memory for the hackathon MVP.
+- Alert engine and Telegram notifier are not implemented yet.
+
+## Main APIs
+
+### Health
+
+- `GET /healthz`
+- `GET /readyz`
+
+### Enrollment / policy
+
+- `POST /api/v1/enroll`
+- `GET /api/v1/policy?agent_id=<id>&current_revision=<rev>`
+
+Example enroll request:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/enroll \
+  -H 'content-type: application/json' \
+  -d '{
+    "bootstrap_token": "dev-bootstrap-token",
+    "host": "demo-host",
+    "metadata": {"agent": "fake-agent"}
+  }'
 ```
 
-## Unified normalized event model
+### Logs
 
-Each ingested event is normalized into one internal shape:
+- `GET /api/v1/logs/search`
+- `GET /api/v1/logs/{id}/context`
 
-- `id`
-- `timestamp`
-- `host`
+`/api/v1/logs/{id}/context` now returns:
+
+- `anchor` event
+- `before` nearby events
+- `after` nearby events
+
+Context is built from the anchor event timestamp plus nearby events from the same host and, when available, service.
+
+### Diagnostics
+
+- `GET /api/v1/agents`
+- `GET /api/v1/agents/{id}`
+- `GET /api/v1/agents/{id}/diagnostics`
+
+Tracked fields include:
+
 - `agent_id`
-- `source_type`
-- `source`
-- `service`
-- `severity`
-- `message`
-- `fingerprint`
-- `labels`
-- `fields`
-- `raw`
+- `host`
+- `enrolled_at`
+- `last_seen`
+- `policy_revision`
+- `sent_batches`
+- `accepted_events`
+- `rejected_events`
+- `last_error`
+- `health`
+- `status`
 
-## Runtime flow
+### Analytics
 
-1. `fake-agent` sends `LogBatch` to gRPC ingestion.
-2. `server` validates and normalizes events.
-3. normalized events are published to JetStream subject `logs.normalized`.
-4. OpenSearch indexer consumes from JetStream and writes into `logs-YYYY.MM.DD` indices.
-5. HTTP API searches OpenSearch.
-6. WebSocket endpoint broadcasts newly accepted events in-process.
+Available when `CLICKHOUSE_ENABLED=true` and ClickHouse is reachable:
+
+- `GET /api/v1/analytics/histogram`
+- `GET /api/v1/analytics/severity`
+- `GET /api/v1/analytics/top-hosts`
+- `GET /api/v1/analytics/top-services`
 
 ## Quick start
 
-### Start infra and server
+### Infra + server
 
 ```bash
 docker compose up --build server nats opensearch
 ```
 
-### Start fake-agent once
+### Infra + server + repeating demo sender
+
+```bash
+docker compose --profile demo up --build
+```
+
+### Enable analytics profile
+
+```bash
+CLICKHOUSE_ENABLED=true docker compose --profile analytics up --build
+```
+
+### One-shot fake-agent run
 
 ```bash
 docker compose run --rm fake-agent
 ```
 
-### Start fake-agent as repeating demo sender
+The fake agent now:
 
-```bash
-docker compose --profile demo up --build
-```
+1. enrolls over HTTP,
+2. receives `agent_id` + initial policy,
+3. sends logs over gRPC using the issued `agent_id`.
 
 ### Search logs
 
@@ -128,16 +140,7 @@ curl 'http://localhost:8080/api/v1/logs/search?q=nginx&limit=20'
 curl 'http://localhost:8080/api/v1/logs/<event-id>/context'
 ```
 
-### Health checks
-
-```bash
-curl http://localhost:8080/healthz
-curl http://localhost:8080/readyz
-```
-
-### WebSocket live stream
-
-Any WebSocket client can connect:
+### Watch live stream
 
 ```bash
 wscat -c ws://localhost:8080/api/v1/stream/ws
@@ -149,62 +152,7 @@ Optional filters:
 wscat -c 'ws://localhost:8080/api/v1/stream/ws?host=demo-host&service=nginx&severity=warn'
 ```
 
-### Send a custom batch file
-
-```bash
-docker compose run --rm \
-  -e FAKE_AGENT_FILE=/app/scripts/sample-batch.json \
-  fake-agent
-```
-
-## Main HTTP API
-
-### `GET /healthz`
-Basic liveness.
-
-### `GET /readyz`
-Checks OpenSearch reachability.
-
-### `GET /api/v1/logs/search`
-Query params:
-
-- `q`
-- `from` (RFC3339 or unix ms)
-- `to` (RFC3339 or unix ms)
-- `host`
-- `service`
-- `severity`
-- `limit`
-- `offset`
-
-Response:
-
-```json
-{
-  "items": [],
-  "total": 0,
-  "took_ms": 4
-}
-```
-
-### `GET /api/v1/logs/:id/context`
-Returns the matching event and nearby entries from OpenSearch.
-
-### `GET /api/v1/stream/ws`
-Streams accepted normalized events as:
-
-```json
-{
-  "type": "event",
-  "event": {
-    "id": "...",
-    "timestamp": "...",
-    "host": "demo-host"
-  }
-}
-```
-
-## Main env vars
+## Important env vars
 
 - `HTTP_LISTEN_ADDR`
 - `GRPC_LISTEN_ADDR`
@@ -212,29 +160,31 @@ Streams accepted normalized events as:
 - `NATS_STREAM_NAME`
 - `NATS_SUBJECT`
 - `NATS_INDEXER_CONSUMER`
+- `NATS_ANALYTICS_CONSUMER`
 - `OPENSEARCH_URL`
 - `OPENSEARCH_INDEX_PREFIX`
-- `OPENSEARCH_USERNAME`
-- `OPENSEARCH_PASSWORD`
-- `LOG_LEVEL`
+- `OPENSEARCH_BULK_FLUSH_SIZE`
+- `OPENSEARCH_BULK_FLUSH_INTERVAL`
+- `OPENSEARCH_INDEX_CACHE_TTL`
+- `ENROLLMENT_TOKEN`
+- `INGEST_TLS_MODE`
+- `INGEST_MTLS_ENABLED`
+- `DEFAULT_POLICY_REVISION`
+- `DEFAULT_POLICY_BATCH_SIZE`
+- `DEFAULT_POLICY_BATCH_WAIT`
+- `CLICKHOUSE_ENABLED`
+- `CLICKHOUSE_DSN`
+- `CLICKHOUSE_DATABASE`
+- `CLICKHOUSE_TABLE`
 - `WS_BUFFER_SIZE`
 
-See `.env.example` for sane defaults.
+## Notes about Go modules in restricted environments
 
-## Notes about protobuf generation in this environment
+This repository now targets Go `1.23`. In fully networked environments, run:
 
-The repository includes the `.proto` contract in `proto/ingest.proto` and checked-in `pkg/proto/ingest.pb.go` so the MVP can stay runnable even in restricted environments where `protoc` plugins cannot be downloaded on the fly.
+```bash
+go mod tidy
+go build ./...
+```
 
-## Restricted environment caveats
-
-If your local or CI environment blocks access to `proxy.golang.org`, GitHub, or Docker, then `go mod tidy`, `go test`, and `docker compose up --build` will fail before the application code is exercised. In a normal developer machine or CI runner with outbound network access, the provided `go.mod`, Dockerfiles, and compose stack are intended to build the full demo path end-to-end.
-
-## TODO after hackathon demo
-
-- swap the checked-in lightweight gRPC shim for fully generated protobuf code in CI
-- add batch bulk flushing for OpenSearch consumer
-- add proper OpenSearch mappings/templates
-- add ClickHouse analytics indexer + endpoints
-- add ingestion authn/authz
-- add replay / DLQ / retention controls
-- add persistent subscription filters for live stream
+If your environment blocks `proxy.golang.org` / GitHub module downloads, dependency resolution and `go build` will fail before application code is compiled.
