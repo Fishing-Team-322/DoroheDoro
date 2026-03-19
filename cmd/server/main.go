@@ -15,7 +15,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer application.Close()
 	if err := application.Run(ctx); err != nil {
 		panic(err)
 	}
