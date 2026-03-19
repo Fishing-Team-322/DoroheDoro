@@ -1,0 +1,25 @@
+{
+  "agent_id": "demo-agent",
+  "host": "demo-host",
+  "sent_at_unix_ms": 1710000000000,
+  "events": [
+    {
+      "timestamp_unix_ms": 1710000000000,
+      "message": "sshd accepted publickey for root",
+      "source": "/var/log/auth.log",
+      "source_type": "file",
+      "service": "sshd",
+      "severity": "info",
+      "labels": {"env": "demo", "team": "platform"}
+    },
+    {
+      "timestamp_unix_ms": 1710000005000,
+      "message": "nginx upstream timed out while reading response header",
+      "source": "nginx",
+      "source_type": "journald",
+      "service": "nginx",
+      "severity": "warning",
+      "labels": {"env": "demo", "team": "edge"}
+    }
+  ]
+}
