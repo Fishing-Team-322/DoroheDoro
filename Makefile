@@ -1,31 +1,30 @@
-.PHONY: proto build run test up down tidy fmt compose-config swagger
+.PHONY: build run test tidy fmt compose-config server-up server-down swagger
 
-proto:
-	@test -f pkg/proto/ingest.pb.go
+APP_DIR := defay1x9
 
-swagger:
-	go run github.com/swaggo/swag/cmd/swag init -g cmd/server/main.go -o docs --parseInternal
+build:
+	cd $(APP_DIR) && go build ./...
 
-fmt:
-	gofmt -w $(shell rg --files -g '*.go')
+run:
+	cd $(APP_DIR) && go run ./cmd/server
 
-build: proto
-	go build ./...
-
-run: proto
-	go run ./cmd/server
-
-test: proto
-	go test ./...
-
-compose-config:
-	docker compose config
-
-up:
-	docker compose up --build
-
-down:
-	docker compose down -v
+test:
+	cd $(APP_DIR) && go test ./...
 
 tidy:
-	go mod tidy
+	cd $(APP_DIR) && go mod tidy
+
+fmt:
+	cd $(APP_DIR) && gofmt -w $$(find . -name '*.go' -type f | sort)
+
+swagger:
+	cd $(APP_DIR) && go run github.com/swaggo/swag/cmd/swag init -g cmd/server/main.go -o docs --parseInternal
+
+compose-config:
+	docker compose -f docker-compose.server.yml config
+
+server-up:
+	docker compose -f docker-compose.server.yml up -d --build
+
+server-down:
+	docker compose -f docker-compose.server.yml down
