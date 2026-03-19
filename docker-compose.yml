@@ -9,17 +9,24 @@ services:
   opensearch:
     image: opensearchproject/opensearch:2.19.1
     environment:
-      discovery.type: single-node
-      plugins.security.disabled: "true"
-      bootstrap.memory_lock: "true"
+      discovery.type: "single-node"
+      DISABLE_SECURITY_PLUGIN: "true"
       OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9600:9600"
     ulimits:
       memlock:
         soft: -1
         hard: -1
-    ports:
-      - "9200:9200"
-      - "9600:9600"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.12
@@ -52,7 +59,7 @@ services:
       DEFAULT_POLICY_REVISION: rev-1
       DEFAULT_POLICY_BATCH_SIZE: 100
       DEFAULT_POLICY_BATCH_WAIT: 5s
-      CLICKHOUSE_ENABLED: "false"
+      CLICKHOUSE_ENABLED: "${CLICKHOUSE_ENABLED:-false}"
       CLICKHOUSE_DSN: http://clickhouse:8123
       CLICKHOUSE_DATABASE: default
       CLICKHOUSE_TABLE: logs_analytics
@@ -60,8 +67,10 @@ services:
       CLICKHOUSE_FLUSH_INTERVAL: 2s
       WS_BUFFER_SIZE: 256
     depends_on:
-      - nats
-      - opensearch
+      nats:
+        condition: service_started
+      opensearch:
+        condition: service_healthy
     ports:
       - "8080:8080"
       - "9090:9090"
@@ -80,3 +89,6 @@ services:
     depends_on:
       - server
     profiles: ["demo"]
+
+volumes:
+  opensearch-data:
