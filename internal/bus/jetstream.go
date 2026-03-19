@@ -27,6 +27,7 @@ func New(ctx context.Context, cfg config.NATSConfig, logger *zap.Logger) (*JetSt
 	}
 	js, err := conn.JetStream()
 	if err != nil {
+		conn.Close()
 		return nil, fmt.Errorf("jetstream: %w", err)
 	}
 	bus := &JetStream{conn: conn, js: js, cfg: cfg, logger: logger}
@@ -48,7 +49,7 @@ func (b *JetStream) ensureStream(ctx context.Context) error {
 		Storage:   nats.FileStorage,
 		Retention: nats.LimitsPolicy,
 		MaxAge:    72 * time.Hour,
-	})
+	}, nats.Context(ctx))
 	if err != nil && err != nats.ErrStreamNameAlreadyInUse {
 		return fmt.Errorf("add stream: %w", err)
 	}
@@ -67,10 +68,10 @@ func (b *JetStream) PublishEvent(ctx context.Context, event model.Event) error {
 	return nil
 }
 
-func (b *JetStream) SubscribeDurable(ctx context.Context, handler nats.MsgHandler) (*nats.Subscription, error) {
+func (b *JetStream) SubscribeDurable(ctx context.Context, consumer string, handler nats.MsgHandler) (*nats.Subscription, error) {
 	return b.js.Subscribe(b.cfg.Subject, handler,
 		nats.ManualAck(),
-		nats.Durable(b.cfg.IndexerConsumer),
+		nats.Durable(consumer),
 		nats.DeliverAll(),
 		nats.AckExplicit(),
 		nats.BindStream(b.cfg.StreamName),
@@ -80,7 +81,7 @@ func (b *JetStream) SubscribeDurable(ctx context.Context, handler nats.MsgHandle
 
 func (b *JetStream) Close() {
 	if b.conn != nil {
-		b.conn.Drain()
+		_ = b.conn.Drain()
 		b.conn.Close()
 	}
 }

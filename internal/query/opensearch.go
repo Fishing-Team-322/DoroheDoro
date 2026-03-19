@@ -15,11 +15,14 @@ import (
 )
 
 type Searcher struct {
-	baseURL     string
-	indexPrefix string
-	username    string
-	password    string
-	httpClient  *http.Client
+	baseURL       string
+	indexPrefix   string
+	username      string
+	password      string
+	httpClient    *http.Client
+	contextWindow time.Duration
+	contextBefore int
+	contextAfter  int
 }
 
 type SearchParams struct {
@@ -39,23 +42,81 @@ type SearchResult struct {
 	TookMS int           `json:"took_ms"`
 }
 
-func NewSearcher(baseURL, indexPrefix, username, password string) *Searcher {
-	return &Searcher{baseURL: strings.TrimRight(baseURL, "/"), indexPrefix: indexPrefix, username: username, password: password, httpClient: &http.Client{Timeout: 10 * time.Second}}
+type ContextResult struct {
+	Anchor model.Event   `json:"anchor"`
+	Before []model.Event `json:"before"`
+	After  []model.Event `json:"after"`
+	TookMS int           `json:"took_ms"`
+}
+
+func NewSearcher(baseURL, indexPrefix, username, password string, contextWindow time.Duration, before, after int) *Searcher {
+	return &Searcher{
+		baseURL:       strings.TrimRight(baseURL, "/"),
+		indexPrefix:   indexPrefix,
+		username:      username,
+		password:      password,
+		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		contextWindow: contextWindow,
+		contextBefore: before,
+		contextAfter:  after,
+	}
 }
 
 func (s *Searcher) Search(ctx context.Context, params SearchParams) (SearchResult, error) {
 	return s.search(ctx, buildQuery(params))
 }
 
-func (s *Searcher) GetContext(ctx context.Context, id string) (SearchResult, error) {
-	return s.search(ctx, map[string]any{
-		"size": 10,
-		"sort": []any{map[string]any{"timestamp": map[string]any{"order": "asc"}}},
+func (s *Searcher) GetContext(ctx context.Context, id string) (ContextResult, error) {
+	anchorRes, err := s.search(ctx, map[string]any{
+		"size": 1,
 		"query": map[string]any{"bool": map[string]any{"should": []any{
 			map[string]any{"term": map[string]any{"id.keyword": id}},
 			map[string]any{"term": map[string]any{"id": id}},
 		}, "minimum_should_match": 1}},
 	})
+	if err != nil {
+		return ContextResult{}, err
+	}
+	if len(anchorRes.Items) == 0 {
+		return ContextResult{}, fmt.Errorf("event %s not found", id)
+	}
+	anchor := anchorRes.Items[0]
+	windowStart := anchor.Timestamp.Add(-s.contextWindow).UTC().Format(time.RFC3339)
+	windowEnd := anchor.Timestamp.Add(s.contextWindow).UTC().Format(time.RFC3339)
+	filters := []any{
+		termFilter("host.keyword", anchor.Host, "host", anchor.Host),
+		map[string]any{"range": map[string]any{"timestamp": map[string]any{"gte": windowStart, "lte": windowEnd}}},
+	}
+	if anchor.Service != "" && anchor.Service != "unknown-service" {
+		filters = append(filters, termFilter("service.keyword", anchor.Service, "service", anchor.Service))
+	}
+	neighbours, err := s.search(ctx, map[string]any{
+		"size":  s.contextBefore + s.contextAfter + 1,
+		"sort":  []any{map[string]any{"timestamp": map[string]any{"order": "asc"}}},
+		"query": map[string]any{"bool": map[string]any{"must": []any{map[string]any{"match_all": map[string]any{}}}, "filter": filters}},
+	})
+	if err != nil {
+		return ContextResult{}, err
+	}
+	before := make([]model.Event, 0, s.contextBefore)
+	after := make([]model.Event, 0, s.contextAfter)
+	for _, item := range neighbours.Items {
+		if item.ID == anchor.ID {
+			continue
+		}
+		if item.Timestamp.Before(anchor.Timestamp) || item.Timestamp.Equal(anchor.Timestamp) {
+			before = append(before, item)
+			continue
+		}
+		after = append(after, item)
+	}
+	if len(before) > s.contextBefore {
+		before = before[len(before)-s.contextBefore:]
+	}
+	if len(after) > s.contextAfter {
+		after = after[:s.contextAfter]
+	}
+	return ContextResult{Anchor: anchor, Before: before, After: after, TookMS: anchorRes.TookMS + neighbours.TookMS}, nil
 }
 
 func (s *Searcher) search(ctx context.Context, query map[string]any) (SearchResult, error) {

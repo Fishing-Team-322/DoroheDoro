@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -13,11 +14,15 @@ import (
 
 	"github.com/example/dorohedoro/internal/bus"
 	"github.com/example/dorohedoro/internal/config"
+	"github.com/example/dorohedoro/internal/diagnostics"
+	"github.com/example/dorohedoro/internal/enrollment"
 	"github.com/example/dorohedoro/internal/grpcapi"
 	"github.com/example/dorohedoro/internal/httpapi"
+	chindexer "github.com/example/dorohedoro/internal/indexer/clickhouse"
 	osindexer "github.com/example/dorohedoro/internal/indexer/opensearch"
 	"github.com/example/dorohedoro/internal/ingest"
 	"github.com/example/dorohedoro/internal/normalize"
+	"github.com/example/dorohedoro/internal/policy"
 	"github.com/example/dorohedoro/internal/query"
 	"github.com/example/dorohedoro/internal/stream"
 	"github.com/example/dorohedoro/internal/telemetry"
@@ -25,11 +30,17 @@ import (
 )
 
 type App struct {
-	cfg        config.Config
-	logger     *zap.Logger
-	httpServer *http.Server
-	grpcServer *grpc.Server
-	bus        *bus.JetStream
+	cfg         config.Config
+	logger      *zap.Logger
+	httpServer  *http.Server
+	grpcServer  *grpc.Server
+	bus         *bus.JetStream
+	osIndexer   *osindexer.Indexer
+	chIndexer   *chindexer.Indexer
+	closeOnce   sync.Once
+	diagnostics *diagnostics.Store
+	enrollment  *enrollment.Store
+	policy      *policy.Store
 }
 
 func New(ctx context.Context) (*App, error) {
@@ -50,12 +61,34 @@ func New(ctx context.Context) (*App, error) {
 		jsBus.Close()
 		return nil, fmt.Errorf("init opensearch: %w", err)
 	}
+	var ch *chindexer.Indexer
+	if cfg.ClickHouse.Enabled {
+		ch, err = retryValue(ctx, func() (*chindexer.Indexer, error) { return chindexer.New(ctx, cfg.ClickHouse, logger) })
+		if err != nil {
+			_ = indexer.Close(context.Background())
+			jsBus.Close()
+			return nil, fmt.Errorf("init clickhouse: %w", err)
+		}
+	}
+
 	streamHub := stream.NewHub(cfg.Stream.BufferSize)
 	normalizer := normalize.New()
-	ingestService := ingest.NewService(normalizer, jsBus, streamHub, logger)
+	diagnosticsStore := diagnostics.NewStore()
+	defaultPolicy := policy.Policy{
+		Revision:   cfg.Policy.DefaultRevision,
+		Sources:    []string{"/var/log/*.log", "journald"},
+		Labels:     map[string]string{"env": "dev", "plane": "data"},
+		BatchSize:  cfg.Policy.DefaultBatchSize,
+		BatchWait:  cfg.Policy.DefaultBatchWait.String(),
+		SourceType: cfg.Policy.DefaultSourceType,
+		UpdatedAt:  time.Now().UTC(),
+	}
+	policyStore := policy.NewStore(defaultPolicy)
+	enrollmentStore := enrollment.NewStore(cfg.Enrollment.DevBootstrapToken)
+	ingestService := ingest.NewService(normalizer, jsBus, streamHub, logger, diagnosticsStore, enrollmentStore, policyStore, cfg.Ingest.AllowUnknownAgents)
 	grpcSvc := grpcapi.New(ingestService)
-	searcher := query.NewSearcher(indexer.BaseURL(), indexer.IndexPrefix(), cfg.OpenSearch.Username, cfg.OpenSearch.Password)
-	app := &App{cfg: cfg, logger: logger, bus: jsBus}
+	searcher := query.NewSearcher(indexer.BaseURL(), indexer.IndexPrefix(), cfg.OpenSearch.Username, cfg.OpenSearch.Password, cfg.OpenSearch.ContextWindow, cfg.OpenSearch.ContextBefore, cfg.OpenSearch.ContextAfter)
+	app := &App{cfg: cfg, logger: logger, bus: jsBus, osIndexer: indexer, chIndexer: ch, diagnostics: diagnosticsStore, enrollment: enrollmentStore, policy: policyStore}
 
 	grpcServer := grpc.NewServer(grpc.ForceServerCodec(logsv1.JSONCodec{}))
 	logsv1.RegisterIngestionServiceServer(grpcServer, grpcSvc)
@@ -63,18 +96,28 @@ func New(ctx context.Context) (*App, error) {
 	app.httpServer = &http.Server{
 		Addr: cfg.HTTP.ListenAddr,
 		Handler: httpapi.NewRouter(httpapi.RouterDeps{
-			Searcher: searcher,
-			Hub:      streamHub,
-			Logger:   logger,
-			Ready: func(ctx context.Context) bool {
-				return searcher.Ping(ctx)
-			},
+			Searcher:         searcher,
+			Analytics:        ch,
+			Hub:              streamHub,
+			Logger:           logger,
+			Ready:            func(ctx context.Context) bool { return searcher.Ping(ctx) },
+			Enrollment:       enrollmentStore,
+			Policy:           policyStore,
+			Diagnostics:      diagnosticsStore,
+			GRPCListenAddr:   cfg.GRPC.ListenAddr,
+			EnrollmentConfig: cfg.Enrollment,
 		}),
 	}
 
-	if _, err := jsBus.SubscribeDurable(ctx, func(msg *nats.Msg) { indexer.HandleNATS(context.Background(), msg) }); err != nil {
+	if _, err := jsBus.SubscribeDurable(ctx, cfg.NATS.IndexerConsumer, func(msg *nats.Msg) { indexer.HandleNATS(context.Background(), msg) }); err != nil {
 		app.Close()
-		return nil, fmt.Errorf("subscribe jetstream consumer: %w", err)
+		return nil, fmt.Errorf("subscribe opensearch consumer: %w", err)
+	}
+	if ch != nil {
+		if _, err := jsBus.SubscribeDurable(ctx, cfg.NATS.AnalyticsConsumer, func(msg *nats.Msg) { ch.HandleNATS(context.Background(), msg) }); err != nil {
+			app.Close()
+			return nil, fmt.Errorf("subscribe analytics consumer: %w", err)
+		}
 	}
 	return app, nil
 }
@@ -86,6 +129,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	httpLn, err := net.Listen("tcp", a.cfg.HTTP.ListenAddr)
 	if err != nil {
+		grpcLn.Close()
 		return fmt.Errorf("listen http: %w", err)
 	}
 
@@ -107,6 +151,7 @@ func (a *App) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		return a.Shutdown(context.Background())
 	case err := <-errCh:
+		_ = a.Shutdown(context.Background())
 		return err
 	}
 }
@@ -125,12 +170,20 @@ func (a *App) Shutdown(ctx context.Context) error {
 }
 
 func (a *App) Close() {
-	if a.bus != nil {
-		a.bus.Close()
-	}
-	if a.logger != nil {
-		_ = a.logger.Sync()
-	}
+	a.closeOnce.Do(func() {
+		if a.chIndexer != nil {
+			_ = a.chIndexer.Close(context.Background())
+		}
+		if a.osIndexer != nil {
+			_ = a.osIndexer.Close(context.Background())
+		}
+		if a.bus != nil {
+			a.bus.Close()
+		}
+		if a.logger != nil {
+			_ = a.logger.Sync()
+		}
+	})
 }
 
 func retryValue[T any](ctx context.Context, fn func() (T, error)) (T, error) {
