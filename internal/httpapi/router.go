@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+	httpSwagger "github.com/swaggo/http-swagger/v2"
 	"go.uber.org/zap"
 
 	"github.com/example/dorohedoro/internal/config"
@@ -37,6 +38,7 @@ type RouterDeps struct {
 
 func NewRouter(deps RouterDeps) http.Handler {
 	r := chi.NewRouter()
+	r.Get("/swagger/*", httpSwagger.Handler(httpSwagger.URL("/swagger/doc.json")))
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
