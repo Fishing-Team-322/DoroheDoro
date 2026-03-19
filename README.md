@@ -96,6 +96,11 @@ Available when `CLICKHOUSE_ENABLED=true` and ClickHouse is reachable:
 - `GET /api/v1/analytics/top-hosts`
 - `GET /api/v1/analytics/top-services`
 
+### Swagger / OpenAPI
+
+- `GET /swagger/index.html` — Swagger UI
+- `GET /swagger/doc.json` — generated OpenAPI document
+
 ## Quick start
 
 ### Infra + server
@@ -133,6 +138,14 @@ The fake agent now:
 ```bash
 curl 'http://localhost:8080/api/v1/logs/search?q=nginx&limit=20'
 ```
+
+### Generate Swagger docs
+
+```bash
+make swagger
+```
+
+Then open: `http://localhost:8080/swagger/index.html`
 
 ### Get event context
 

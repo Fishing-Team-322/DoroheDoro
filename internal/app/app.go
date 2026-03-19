@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	_ "github.com/example/dorohedoro/docs"
 	"net"
 	"net/http"
 	"sync"
