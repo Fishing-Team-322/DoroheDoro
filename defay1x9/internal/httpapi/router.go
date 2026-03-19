@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
+	"github.com/swaggo/swag"
 	"go.uber.org/zap"
 
 	"github.com/example/dorohedoro/internal/config"
@@ -38,19 +39,54 @@ type RouterDeps struct {
 
 func NewRouter(deps RouterDeps) http.Handler {
 	r := chi.NewRouter()
-	r.Get("/swagger/*", httpSwagger.Handler(httpSwagger.URL("/swagger/doc.json")))
+	docsHandler := httpSwagger.Handler(httpSwagger.URL("/openapi.json"))
 	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"service":       "defay1x9-api",
+			"status":        "ok",
+			"docs":          "/docs",
+			"openapi":       "/openapi.json",
+			"health":        "/health",
+			"readiness":     "/ready",
+			"grpc_listener": deps.GRPCListenAddr,
+		})
 	})
-	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+		doc, err := swag.ReadDoc("swagger")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(doc))
+	})
+	r.Get("/docs", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/docs/index.html", http.StatusTemporaryRedirect)
+	})
+	r.Get("/docs/*", docsHandler)
+	r.Get("/swagger", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/docs", http.StatusPermanentRedirect)
+	})
+	r.Get("/swagger/*", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/docs", http.StatusPermanentRedirect)
+	})
+
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+	readyHandler := func(w http.ResponseWriter, r *http.Request) {
 		if deps.Ready != nil && deps.Ready(r.Context()) {
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 			return
 		}
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not-ready"})
-	})
+	}
+	r.Get("/health", healthHandler)
+	r.Get("/healthz", healthHandler)
+	r.Get("/ready", readyHandler)
+	r.Get("/readyz", readyHandler)
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Post("/enroll", func(w http.ResponseWriter, r *http.Request) {
