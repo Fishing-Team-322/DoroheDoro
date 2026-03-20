@@ -37,23 +37,21 @@ func NewRouter(deps RouterDeps) http.Handler {
 	r.Use(middleware.AccessLog(deps.Logger))
 	r.Use(deps.Auth.HTTPMiddleware)
 
-<<<<<<< HEAD:defay1x9/internal/httpapi/router.go
 	registerDocsRoutes(r)
+
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		middleware.WriteJSON(w, http.StatusOK, map[string]any{
+			"service":   "edge-api",
+			"status":    "ok",
+			"docs":      "/docs",
+			"openapi":   "/openapi.json",
+			"health":    "/healthz",
+			"readiness": "/readyz",
+		})
+	})
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-=======
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"service":       "edge-api",
-			"status":        "ok",
-			"docs":          "/docs",
-			"openapi":       "/openapi.json",
-			"health":        "/health",
-			"readiness":     "/ready",
-			"grpc_listener": deps.GRPCListenAddr,
-		})
->>>>>>> origin/main:edge_api/internal/httpapi/router.go
 	})
 	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if deps.ReadyFn != nil && deps.ReadyFn() {
