@@ -8,151 +8,172 @@ import (
 )
 
 type Config struct {
-	LogLevel   string
-	HTTP       HTTPConfig
-	GRPC       GRPCConfig
-	NATS       NATSConfig
-	OpenSearch OpenSearchConfig
-	ClickHouse ClickHouseConfig
-	Stream     StreamConfig
-	Enrollment EnrollmentConfig
-	Policy     PolicyConfig
-	Ingest     IngestConfig
+	ServiceName string
+	LogLevel    string
+	HTTP        HTTPConfig
+	GRPC        GRPCConfig
+	NATS        NATSConfig
+	Timeouts    TimeoutConfig
+	Limits      LimitsConfig
+	Auth        AuthConfig
+	Stream      StreamConfig
 }
 
-type HTTPConfig struct{ ListenAddr string }
-type GRPCConfig struct{ ListenAddr string }
+type HTTPConfig struct {
+	ListenAddr string
+	TLSCert    string
+	TLSKey     string
+}
+
+type GRPCConfig struct {
+	ListenAddr   string
+	TLSCert      string
+	TLSKey       string
+	MTLSEnabled  bool
+	ClientCA     string
+	MaxRecvBytes int
+	MaxSendBytes int
+	Keepalive    time.Duration
+}
 
 type NATSConfig struct {
-	URL               string
-	StreamName        string
-	Subject           string
-	IndexerConsumer   string
-	AnalyticsConsumer string
+	URL            string
+	RequestTimeout time.Duration
+	Subjects       Subjects
 }
 
-type OpenSearchConfig struct {
-	URL           string
-	IndexPrefix   string
-	Username      string
-	Password      string
-	FlushSize     int
-	FlushInterval time.Duration
-	IndexCacheTTL time.Duration
-	ContextWindow time.Duration
-	ContextBefore int
-	ContextAfter  int
+type Subjects struct {
+	AgentsEnrollRequest string
+	AgentsPolicyFetch   string
+	AgentsHeartbeat     string
+	AgentsDiagnostics   string
+	LogsIngestRaw       string
+	DeploymentsCreate   string
+	DeploymentsGet      string
+	DeploymentsList     string
+	LogsSearch          string
+	LogsHistogram       string
+	LogsSeverity        string
+	LogsTopHosts        string
+	LogsTopServices     string
+	AgentsList          string
+	AgentsGet           string
+	AgentDiagnosticsGet string
+	PoliciesList        string
+	PoliciesGet         string
+	UIStreamLogs        string
 }
 
-type ClickHouseConfig struct {
-	Enabled       bool
-	DSN           string
-	Database      string
-	Table         string
-	FlushSize     int
-	FlushInterval time.Duration
+type TimeoutConfig struct {
+	HTTP time.Duration
+	GRPC time.Duration
 }
 
-type StreamConfig struct{ BufferSize int }
-
-type EnrollmentConfig struct {
-	DevBootstrapToken string
-	MTLSEnabled       bool
-	TLSMode           string
+type LimitsConfig struct {
+	HTTPBodyBytes     int64
+	RateLimitRPS      int
+	RateLimitBurst    int
+	AgentLogBatchSize int
 }
 
-type PolicyConfig struct {
-	DefaultRevision   string
-	DefaultBatchSize  int
-	DefaultBatchWait  time.Duration
-	DefaultSourceType string
+type AuthConfig struct {
+	HTTPStubEnabled bool
+	MTLSHookEnabled bool
 }
 
-type IngestConfig struct {
-	AllowUnknownAgents bool
+type StreamConfig struct {
+	HeartbeatInterval time.Duration
+	RetryInterval     time.Duration
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		LogLevel: env("LOG_LEVEL", "info"),
-		HTTP:     HTTPConfig{ListenAddr: env("HTTP_LISTEN_ADDR", ":8080")},
-		GRPC:     GRPCConfig{ListenAddr: env("GRPC_LISTEN_ADDR", ":9090")},
+		ServiceName: env("SERVICE_NAME", "edge-api"),
+		LogLevel:    env("LOG_LEVEL", "info"),
+		HTTP: HTTPConfig{
+			ListenAddr: env("HTTP_LISTEN_ADDR", ":8080"),
+			TLSCert:    os.Getenv("HTTP_TLS_CERT_FILE"),
+			TLSKey:     os.Getenv("HTTP_TLS_KEY_FILE"),
+		},
+		GRPC: GRPCConfig{
+			ListenAddr:   env("GRPC_LISTEN_ADDR", ":9090"),
+			TLSCert:      os.Getenv("GRPC_TLS_CERT_FILE"),
+			TLSKey:       os.Getenv("GRPC_TLS_KEY_FILE"),
+			MTLSEnabled:  envBool("GRPC_MTLS_ENABLED", false),
+			ClientCA:     os.Getenv("GRPC_CLIENT_CA_FILE"),
+			MaxRecvBytes: envInt("GRPC_MAX_RECV_BYTES", 4<<20),
+			MaxSendBytes: envInt("GRPC_MAX_SEND_BYTES", 4<<20),
+			Keepalive:    parseDuration(env("GRPC_KEEPALIVE", "30s"), 30*time.Second),
+		},
 		NATS: NATSConfig{
-			URL:               env("NATS_URL", "nats://localhost:4222"),
-			StreamName:        env("NATS_STREAM_NAME", "LOGS"),
-			Subject:           env("NATS_SUBJECT", "logs.normalized"),
-			IndexerConsumer:   env("NATS_INDEXER_CONSUMER", "logs-opensearch-indexer"),
-			AnalyticsConsumer: env("NATS_ANALYTICS_CONSUMER", "logs-clickhouse-indexer"),
+			URL:            env("NATS_URL", "nats://localhost:4222"),
+			RequestTimeout: parseDuration(env("NATS_REQUEST_TIMEOUT", "3s"), 3*time.Second),
+			Subjects: Subjects{
+				AgentsEnrollRequest: env("SUBJECT_AGENTS_ENROLL_REQUEST", "agents.enroll.request"),
+				AgentsPolicyFetch:   env("SUBJECT_AGENTS_POLICY_FETCH", "agents.policy.fetch"),
+				AgentsHeartbeat:     env("SUBJECT_AGENTS_HEARTBEAT", "agents.heartbeat"),
+				AgentsDiagnostics:   env("SUBJECT_AGENTS_DIAGNOSTICS", "agents.diagnostics"),
+				LogsIngestRaw:       env("SUBJECT_LOGS_INGEST_RAW", "logs.ingest.raw"),
+				DeploymentsCreate:   env("SUBJECT_DEPLOYMENTS_CREATE", "deployments.jobs.create"),
+				DeploymentsGet:      env("SUBJECT_DEPLOYMENTS_GET", "deployments.jobs.get"),
+				DeploymentsList:     env("SUBJECT_DEPLOYMENTS_LIST", "deployments.jobs.list"),
+				LogsSearch:          env("SUBJECT_QUERY_LOGS_SEARCH", "query.logs.search"),
+				LogsHistogram:       env("SUBJECT_QUERY_LOGS_HISTOGRAM", "query.logs.histogram"),
+				LogsSeverity:        env("SUBJECT_QUERY_LOGS_SEVERITY", "query.logs.severity"),
+				LogsTopHosts:        env("SUBJECT_QUERY_LOGS_TOP_HOSTS", "query.logs.top_hosts"),
+				LogsTopServices:     env("SUBJECT_QUERY_LOGS_TOP_SERVICES", "query.logs.top_services"),
+				AgentsList:          env("SUBJECT_AGENTS_LIST", "agents.list"),
+				AgentsGet:           env("SUBJECT_AGENTS_GET", "agents.get"),
+				AgentDiagnosticsGet: env("SUBJECT_AGENTS_DIAGNOSTICS_GET", "agents.diagnostics.get"),
+				PoliciesList:        env("SUBJECT_POLICIES_LIST", "policies.list"),
+				PoliciesGet:         env("SUBJECT_POLICIES_GET", "policies.get"),
+				UIStreamLogs:        env("SUBJECT_UI_STREAM_LOGS", "ui.stream.logs"),
+			},
 		},
-		OpenSearch: OpenSearchConfig{
-			URL:           env("OPENSEARCH_URL", "http://localhost:9200"),
-			IndexPrefix:   env("OPENSEARCH_INDEX_PREFIX", "logs"),
-			Username:      os.Getenv("OPENSEARCH_USERNAME"),
-			Password:      os.Getenv("OPENSEARCH_PASSWORD"),
-			FlushSize:     envInt("OPENSEARCH_BULK_FLUSH_SIZE", 200),
-			FlushInterval: ParseDuration(env("OPENSEARCH_BULK_FLUSH_INTERVAL", "2s"), 2*time.Second),
-			IndexCacheTTL: ParseDuration(env("OPENSEARCH_INDEX_CACHE_TTL", "10m"), 10*time.Minute),
-			ContextWindow: ParseDuration(env("OPENSEARCH_CONTEXT_WINDOW", "15m"), 15*time.Minute),
-			ContextBefore: envInt("OPENSEARCH_CONTEXT_BEFORE", 10),
-			ContextAfter:  envInt("OPENSEARCH_CONTEXT_AFTER", 10),
+		Timeouts: TimeoutConfig{
+			HTTP: parseDuration(env("HTTP_REQUEST_TIMEOUT", "15s"), 15*time.Second),
+			GRPC: parseDuration(env("GRPC_REQUEST_TIMEOUT", "15s"), 15*time.Second),
 		},
-		ClickHouse: ClickHouseConfig{
-			Enabled:       envBool("CLICKHOUSE_ENABLED", false),
-			DSN:           env("CLICKHOUSE_DSN", "http://localhost:8123"),
-			Database:      env("CLICKHOUSE_DATABASE", "default"),
-			Table:         env("CLICKHOUSE_TABLE", "logs_analytics"),
-			FlushSize:     envInt("CLICKHOUSE_FLUSH_SIZE", 200),
-			FlushInterval: ParseDuration(env("CLICKHOUSE_FLUSH_INTERVAL", "2s"), 2*time.Second),
+		Limits: LimitsConfig{
+			HTTPBodyBytes:     envInt64("HTTP_MAX_BODY_BYTES", 1<<20),
+			RateLimitRPS:      envInt("RATE_LIMIT_RPS", 0),
+			RateLimitBurst:    envInt("RATE_LIMIT_BURST", 0),
+			AgentLogBatchSize: envInt("AGENT_LOG_BATCH_SIZE", 1000),
 		},
-		Stream: StreamConfig{BufferSize: envInt("WS_BUFFER_SIZE", 256)},
-		Enrollment: EnrollmentConfig{
-			DevBootstrapToken: env("ENROLLMENT_TOKEN", "dev-bootstrap-token"),
-			MTLSEnabled:       envBool("INGEST_MTLS_ENABLED", false),
-			TLSMode:           env("INGEST_TLS_MODE", "disabled"),
+		Auth: AuthConfig{
+			HTTPStubEnabled: envBool("HTTP_AUTH_STUB_ENABLED", true),
+			MTLSHookEnabled: envBool("GRPC_MTLS_HOOK_ENABLED", false),
 		},
-		Policy: PolicyConfig{
-			DefaultRevision:   env("DEFAULT_POLICY_REVISION", "rev-1"),
-			DefaultBatchSize:  envInt("DEFAULT_POLICY_BATCH_SIZE", 100),
-			DefaultBatchWait:  ParseDuration(env("DEFAULT_POLICY_BATCH_WAIT", "5s"), 5*time.Second),
-			DefaultSourceType: env("DEFAULT_POLICY_SOURCE_TYPE", "file"),
+		Stream: StreamConfig{
+			HeartbeatInterval: parseDuration(env("STREAM_HEARTBEAT_INTERVAL", "25s"), 25*time.Second),
+			RetryInterval:     parseDuration(env("STREAM_RETRY_INTERVAL", "5s"), 5*time.Second),
 		},
-		Ingest: IngestConfig{AllowUnknownAgents: envBool("INGEST_ALLOW_UNKNOWN_AGENTS", true)},
 	}
-
-	if cfg.Stream.BufferSize <= 0 {
-		return Config{}, fmt.Errorf("WS_BUFFER_SIZE must be positive")
+	if cfg.HTTP.ListenAddr == "" || cfg.GRPC.ListenAddr == "" || cfg.NATS.URL == "" {
+		return Config{}, fmt.Errorf("HTTP_LISTEN_ADDR, GRPC_LISTEN_ADDR and NATS_URL are required")
 	}
-	if cfg.OpenSearch.FlushSize <= 0 {
-		cfg.OpenSearch.FlushSize = 200
+	if cfg.Limits.HTTPBodyBytes <= 0 {
+		cfg.Limits.HTTPBodyBytes = 1 << 20
 	}
-	if cfg.ClickHouse.FlushSize <= 0 {
-		cfg.ClickHouse.FlushSize = 200
-	}
-	if cfg.Policy.DefaultBatchSize <= 0 {
-		cfg.Policy.DefaultBatchSize = 100
-	}
-	if cfg.OpenSearch.ContextBefore < 0 {
-		cfg.OpenSearch.ContextBefore = 10
-	}
-	if cfg.OpenSearch.ContextAfter < 0 {
-		cfg.OpenSearch.ContextAfter = 10
+	if cfg.Limits.AgentLogBatchSize <= 0 {
+		cfg.Limits.AgentLogBatchSize = 1000
 	}
 	return cfg, nil
 }
 
 func env(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
 	return fallback
 }
 
 func envBool(key string, fallback bool) bool {
-	value := os.Getenv(key)
-	if value == "" {
+	v := os.Getenv(key)
+	if v == "" {
 		return fallback
 	}
-	parsed, err := strconv.ParseBool(value)
+	parsed, err := strconv.ParseBool(v)
 	if err != nil {
 		return fallback
 	}
@@ -160,22 +181,31 @@ func envBool(key string, fallback bool) bool {
 }
 
 func envInt(key string, fallback int) int {
-	value := os.Getenv(key)
-	if value == "" {
+	v := os.Getenv(key)
+	if v == "" {
 		return fallback
 	}
-	parsed, err := strconv.Atoi(value)
+	parsed, err := strconv.Atoi(v)
 	if err != nil {
 		return fallback
 	}
 	return parsed
 }
 
-func ParseDuration(value string, fallback time.Duration) time.Duration {
-	if value == "" {
+func envInt64(key string, fallback int64) int64 {
+	v := os.Getenv(key)
+	if v == "" {
 		return fallback
 	}
-	d, err := time.ParseDuration(value)
+	parsed, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func parseDuration(v string, fallback time.Duration) time.Duration {
+	d, err := time.ParseDuration(v)
 	if err != nil {
 		return fallback
 	}

@@ -1,7 +1,7 @@
 services:
   nats:
     image: nats:2.11-alpine
-    command: ["-js", "-m", "8222"]
+    command: ["-m", "8222"]
     ports:
       - "4222:4222"
       - "8222:8222"
@@ -54,58 +54,41 @@ services:
 
   server:
     build:
-      context: .
-      dockerfile: deployments/docker/server.Dockerfile
+      context: ./defay1x9
+      dockerfile: Dockerfile
     environment:
+      SERVICE_NAME: edge-api
       LOG_LEVEL: info
       HTTP_LISTEN_ADDR: :8080
       GRPC_LISTEN_ADDR: :9090
       NATS_URL: nats://nats:4222
-      NATS_STREAM_NAME: LOGS
-      NATS_SUBJECT: logs.normalized
-      NATS_INDEXER_CONSUMER: logs-opensearch-indexer
-      NATS_ANALYTICS_CONSUMER: logs-clickhouse-indexer
-      OPENSEARCH_URL: http://opensearch:9200
-      OPENSEARCH_INDEX_PREFIX: logs
-      OPENSEARCH_BULK_FLUSH_SIZE: 200
-      OPENSEARCH_BULK_FLUSH_INTERVAL: 2s
-      OPENSEARCH_INDEX_CACHE_TTL: 10m
-      ENROLLMENT_TOKEN: dev-bootstrap-token
-      INGEST_TLS_MODE: disabled
-      INGEST_MTLS_ENABLED: "false"
-      DEFAULT_POLICY_REVISION: rev-1
-      DEFAULT_POLICY_BATCH_SIZE: 100
-      DEFAULT_POLICY_BATCH_WAIT: 5s
-      CLICKHOUSE_ENABLED: "${CLICKHOUSE_ENABLED:-false}"
-      CLICKHOUSE_DSN: http://clickhouse:8123
-      CLICKHOUSE_DATABASE: default
-      CLICKHOUSE_TABLE: logs_analytics
-      CLICKHOUSE_FLUSH_SIZE: 200
-      CLICKHOUSE_FLUSH_INTERVAL: 2s
-      WS_BUFFER_SIZE: 256
+      NATS_REQUEST_TIMEOUT: 3s
+      HTTP_REQUEST_TIMEOUT: 15s
+      GRPC_REQUEST_TIMEOUT: 15s
+      HTTP_MAX_BODY_BYTES: 1048576
+      AGENT_LOG_BATCH_SIZE: 1000
+      STREAM_HEARTBEAT_INTERVAL: 25s
+      STREAM_RETRY_INTERVAL: 5s
+      HTTP_AUTH_STUB_ENABLED: "true"
+      GRPC_MTLS_HOOK_ENABLED: "false"
     depends_on:
-      nats:
-        condition: service_started
-      opensearch:
-        condition: service_healthy
+      - nats
     ports:
       - "8080:8080"
       - "9090:9090"
 
   fake-agent:
     build:
-      context: .
-      dockerfile: deployments/docker/fake-agent.Dockerfile
+      context: ./defay1x9
+      dockerfile: Dockerfile
+    command: ["/usr/local/bin/fake-agent"]
     environment:
-      INGEST_GRPC_ADDR: server:9090
-      SERVER_HTTP_ADDR: http://server:8080
-      FAKE_AGENT_HOST: demo-host
+      EDGE_API_GRPC_ADDR: edge-api:9090
       FAKE_AGENT_ENROLLMENT_TOKEN: dev-bootstrap-token
-      FAKE_AGENT_GENERATE: "true"
-      FAKE_AGENT_INTERVAL: 10s
+      FAKE_AGENT_HOST: smoke-host
     depends_on:
-      - server
-    profiles: ["demo"]
+      - edge-api
+    profiles: ["smoke"]
 
 volumes:
   opensearch-data:

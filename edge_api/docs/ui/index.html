@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DoroheDoro Edge API Docs</title>
+    <link rel="stylesheet" href="/docs/openapi-explorer.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div>
+          <p class="eyebrow">OpenAPI</p>
+          <h1>DoroheDoro Edge API</h1>
+          <p id="spec-version" class="muted">Loading spec…</p>
+        </div>
+        <div class="sidebar-card">
+          <p class="card-title">Routes</p>
+          <ul>
+            <li><a href="/openapi.json" target="_blank" rel="noreferrer">/openapi.json</a></li>
+            <li><a href="/openapi.yaml" target="_blank" rel="noreferrer">/openapi.yaml</a></li>
+          </ul>
+        </div>
+        <div class="sidebar-card">
+          <label for="endpoint-filter" class="card-title">Filter endpoints</label>
+          <input id="endpoint-filter" type="search" placeholder="healthz, agents, logs…" />
+        </div>
+        <nav id="tag-nav" class="tag-nav"></nav>
+      </aside>
+
+      <main class="content">
+        <header class="hero">
+          <p class="eyebrow">Self-hosted API docs</p>
+          <h2 id="spec-title">Loading…</h2>
+          <p id="spec-description" class="description"></p>
+          <div id="server-list" class="servers"></div>
+        </header>
+
+        <section id="operations" class="operations">
+          <div class="empty-state">Loading OpenAPI contract…</div>
+        </section>
+      </main>
+    </div>
+
+    <template id="operation-template">
+      <article class="operation-card">
+        <div class="operation-header">
+          <span class="method"></span>
+          <div>
+            <h3 class="path"></h3>
+            <p class="summary"></p>
+          </div>
+        </div>
+        <div class="chips"></div>
+        <details open>
+          <summary>Details</summary>
+          <div class="details-grid">
+            <section>
+              <h4>Description</h4>
+              <p class="description"></p>
+            </section>
+            <section>
+              <h4>Parameters</h4>
+              <div class="parameters empty">No parameters.</div>
+            </section>
+            <section>
+              <h4>Request body</h4>
+              <div class="request-body empty">No request body.</div>
+            </section>
+            <section>
+              <h4>Responses</h4>
+              <div class="responses"></div>
+            </section>
+          </div>
+        </details>
+      </article>
+    </template>
+
+    <script src="/docs/openapi-explorer.js" defer></script>
+  </body>
+</html>
