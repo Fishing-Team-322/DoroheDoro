@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -20,9 +21,10 @@ type Config struct {
 }
 
 type HTTPConfig struct {
-	ListenAddr string
-	TLSCert    string
-	TLSKey     string
+	ListenAddr         string
+	TLSCert            string
+	TLSKey             string
+	CORSAllowedOrigins []string
 }
 
 type GRPCConfig struct {
@@ -77,8 +79,12 @@ type LimitsConfig struct {
 }
 
 type AuthConfig struct {
-	HTTPStubEnabled bool
-	MTLSHookEnabled bool
+	HTTPStubEnabled     bool
+	MTLSHookEnabled     bool
+	SessionCookieName   string
+	CSRFCookieName      string
+	SessionCookieSecure bool
+	SessionTTL          time.Duration
 }
 
 type StreamConfig struct {
@@ -91,9 +97,10 @@ func Load() (Config, error) {
 		ServiceName: env("SERVICE_NAME", "edge-api"),
 		LogLevel:    env("LOG_LEVEL", "info"),
 		HTTP: HTTPConfig{
-			ListenAddr: env("HTTP_LISTEN_ADDR", ":8080"),
-			TLSCert:    os.Getenv("HTTP_TLS_CERT_FILE"),
-			TLSKey:     os.Getenv("HTTP_TLS_KEY_FILE"),
+			ListenAddr:         env("HTTP_LISTEN_ADDR", ":8080"),
+			TLSCert:            os.Getenv("HTTP_TLS_CERT_FILE"),
+			TLSKey:             os.Getenv("HTTP_TLS_KEY_FILE"),
+			CORSAllowedOrigins: envCSV("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000"}),
 		},
 		GRPC: GRPCConfig{
 			ListenAddr:   env("GRPC_LISTEN_ADDR", ":9090"),
@@ -141,8 +148,12 @@ func Load() (Config, error) {
 			AgentLogBatchSize: envInt("AGENT_LOG_BATCH_SIZE", 1000),
 		},
 		Auth: AuthConfig{
-			HTTPStubEnabled: envBool("HTTP_AUTH_STUB_ENABLED", true),
-			MTLSHookEnabled: envBool("GRPC_MTLS_HOOK_ENABLED", false),
+			HTTPStubEnabled:     envBool("HTTP_AUTH_STUB_ENABLED", true),
+			MTLSHookEnabled:     envBool("GRPC_MTLS_HOOK_ENABLED", false),
+			SessionCookieName:   env("SESSION_COOKIE_NAME", "session_token"),
+			CSRFCookieName:      env("CSRF_COOKIE_NAME", "csrf_token"),
+			SessionCookieSecure: envBool("SESSION_COOKIE_SECURE", false),
+			SessionTTL:          parseDuration(env("SESSION_TTL", "12h"), 12*time.Hour),
 		},
 		Stream: StreamConfig{
 			HeartbeatInterval: parseDuration(env("STREAM_HEARTBEAT_INTERVAL", "25s"), 25*time.Second),
@@ -210,4 +221,23 @@ func parseDuration(v string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+func envCSV(key string, fallback []string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	parts := strings.Split(v, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
+	}
+	if len(result) == 0 {
+		return fallback
+	}
+	return result
 }
