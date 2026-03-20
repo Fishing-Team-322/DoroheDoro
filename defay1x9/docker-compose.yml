@@ -8,7 +8,7 @@ services:
 
   edge-api:
     build:
-      context: ./defay1x9
+      context: .
       dockerfile: Dockerfile
     environment:
       SERVICE_NAME: edge-api
@@ -32,7 +32,7 @@ services:
 
   fake-agent:
     build:
-      context: ./defay1x9
+      context: .
       dockerfile: Dockerfile
     command: ["/usr/local/bin/fake-agent"]
     environment:
