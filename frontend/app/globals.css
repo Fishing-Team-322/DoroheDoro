@@ -11,10 +11,14 @@
   --surface-muted: rgba(255, 255, 255, 0.04);
   --surface-overlay: rgba(17, 17, 17, 0.85);
   --border: #27272a;
-  --border-strong: #3f3f46;
-  --input-background: #09090b;
-  --input-border: #27272a;
-  --input-border-hover: #3f3f46;
+  --border-strong: #06060e;
+
+  /* input */
+  --input-background: #1a1a1a;
+  --input-background-hover: #202020;
+  --input-background-focus: #222222;
+  --input-border: #2a2a31;
+  --input-border-hover: #3a3a44;
   --ring: #71717a;
 
   --button-primary-bg: #fafafa;
