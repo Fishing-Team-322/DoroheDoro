@@ -1,49 +1,51 @@
 # edge-api
 
-Thin ingress/orchestration layer:
+Thin Edge API ingress / gateway / bridge layer:
 
-- WEB -> HTTP ingress -> NATS
-- AGENT -> gRPC ingress -> NATS
-- UI stream -> SSE gateway -> NATS
+- WEB -> HTTP ingress -> NATS -> Rust responders
+- AGENT -> gRPC ingress -> NATS -> Rust responders
+- UI live logs -> SSE gateway <- NATS
 
-## Что удалено / отключено из текущего PoC
+`endpoints-matrix.md` is the local contract snapshot for the MVP scope implemented in Go.
 
-- in-memory enrollment / policy / diagnostics stores;
-- OpenSearch ownership и прямые query handlers;
-- ClickHouse ownership и analytics engine в Go;
-- normalizer / indexers / alerting-like ownership в startup path;
-- fat handlers с доменной логикой;
-- WebSocket stream hub как runtime source-of-truth.
+## Cleanup under MVP Edge API
 
-## Целевая структура
+The Go service was simplified to keep ownership out of the ingress layer:
+
+- removed alerts routes from the startup path because they are outside the current MVP matrix;
+- removed response-only NATS subjects from config (`agents.enroll.response`, `agents.policy.response`) to keep the bridge focused on request/reply and publish subjects actually used by the ingress layer;
+- renamed deployment status transport to `deployments.jobs.get` so the bridge matches the matrix contract;
+- kept handlers thin: transport validation, request/correlation IDs, NATS bridge calls, SSE fan-out only;
+- preserved only stub auth hooks and fake-agent tooling needed for local smoke tests.
+
+## Project structure
 
 ```text
 /defay1x9
   /cmd
     /edge-api
-      main.go
     /fake-agent
-      main.go
-  /internal
-    /app
-    /config
-    /httpapi
-    /grpcapi
-    /natsbridge
-    /stream
-    /auth
-    /middleware
-    /transport
-    /model
-    /observability
   /contracts
     /proto
   /docs
+  /internal
+    /app
+    /auth
+    /config
+    /grpcapi
+    /httpapi
+    /middleware
+    /model
+    /natsbridge
+    /observability
+    /stream
+    /transport
   Dockerfile
   README.md
+  endpoints-matrix.md
 ```
 
-## HTTP endpoints
+## MVP HTTP endpoints
 
 - `GET /healthz`
 - `GET /readyz`
@@ -54,18 +56,16 @@ Thin ingress/orchestration layer:
 - `GET /api/v1/policies`
 - `GET /api/v1/policies/{id}`
 - `POST /api/v1/deployments`
-- `GET /api/v1/deployments/{id}`
 - `GET /api/v1/deployments`
+- `GET /api/v1/deployments/{id}`
 - `POST /api/v1/logs/search`
 - `GET /api/v1/logs/histogram`
 - `GET /api/v1/logs/severity`
 - `GET /api/v1/logs/top-hosts`
 - `GET /api/v1/logs/top-services`
-- `GET /api/v1/alerts`
-- `GET /api/v1/alerts/{id}`
 - `GET /api/v1/stream/logs`
 
-## gRPC methods
+## MVP gRPC methods
 
 Service: `dorohedoro.edge.v1.AgentIngressService`
 
@@ -75,75 +75,67 @@ Service: `dorohedoro.edge.v1.AgentIngressService`
 - `SendDiagnostics`
 - `IngestLogs`
 
-## Обязательные NATS subjects
+## MVP NATS bridge subjects
+
+Required matrix subjects:
 
 - `agents.enroll.request`
-- `agents.enroll.response`
 - `agents.policy.fetch`
-- `agents.policy.response`
 - `agents.heartbeat`
 - `agents.diagnostics`
 - `logs.ingest.raw`
-- `deployments.jobs.create`
-- `deployments.jobs.status`
+- `ui.stream.logs`
 - `query.logs.search`
 - `query.logs.histogram`
 - `query.logs.severity`
 - `query.logs.top_hosts`
 - `query.logs.top_services`
-- `alerts.list`
-- `alerts.get`
-- `ui.stream.logs`
+- `deployments.jobs.create`
+- `deployments.jobs.get`
+- `deployments.jobs.list`
 
-Дополнительно для UI read-model edge-api ожидает subjects:
+Additional HTTP read-model subjects still required to serve MVP list/get routes:
 
 - `agents.list`
 - `agents.get`
 - `agents.diagnostics.get`
 - `policies.list`
 - `policies.get`
-- `deployments.jobs.list`
 
-## Env
+## Transport behavior
 
-Минимально нужны:
+- HTTP returns a single JSON error envelope with `request_id`.
+- gRPC maps bridge failures to `InvalidArgument`, `Unavailable`, or `Internal` status codes.
+- `/readyz` is green only when the NATS bridge is connected.
+- `/api/v1/stream/logs` serves SSE and supports optional `host`, `service`, and `severity` filters.
 
-- `HTTP_LISTEN_ADDR`
-- `GRPC_LISTEN_ADDR`
-- `NATS_URL`
-
-Опционально:
-
-- TLS hooks: `HTTP_TLS_CERT_FILE`, `HTTP_TLS_KEY_FILE`, `GRPC_TLS_CERT_FILE`, `GRPC_TLS_KEY_FILE`
-- mTLS hook flags: `GRPC_MTLS_ENABLED`, `GRPC_CLIENT_CA_FILE`, `GRPC_MTLS_HOOK_ENABLED`
-- limits: `HTTP_MAX_BODY_BYTES`, `AGENT_LOG_BATCH_SIZE`
-- timeouts: `HTTP_REQUEST_TIMEOUT`, `GRPC_REQUEST_TIMEOUT`
-- stream: `STREAM_HEARTBEAT_INTERVAL`
-
-## Запуск локально
+## Local run
 
 ```bash
-cd /workspace/DoroheDoro
-cd defay1x9 && go build ./...
+cd /workspace/DoroheDoro/defay1x9
+go build ./...
 docker compose config
-docker compose up --build
+docker compose up --build nats edge-api
 ```
 
 ## Smoke test
 
-В одном терминале поднимите `nats` и `edge-api`, а в другом прогоните fake-agent:
+1. Start NATS and edge-api.
+2. Start Rust responders for the request/reply subjects listed above.
+3. In another shell run:
 
 ```bash
 cd /workspace/DoroheDoro/defay1x9
 EDGE_API_GRPC_ADDR=localhost:9090 go run ./cmd/fake-agent
+curl http://localhost:8080/healthz
+curl http://localhost:8080/readyz
+curl http://localhost:8080/api/v1/me
+curl -N 'http://localhost:8080/api/v1/stream/logs?severity=error'
 ```
 
-Для полноценного smoke test Rust components должны отвечать на request/reply subjects и публиковать `ui.stream.logs`.
+## TODO for Rust responders
 
-## TODO для интеграции с Rust services
-
-- Реализовать Rust responders для request/reply subjects списков и статусов.
-- Реализовать Rust ownership policy / inventory / alerts / deployments / logs query.
-- Подключить реальное gRPC mTLS verify вместо stub hooks.
-- Добавить protobuf/codegen pipeline вместо ручного lightweight pb.go.
-- Добавить contract tests между edge-api и Rust responders.
+- respond on request/reply subjects used by HTTP list/get/search endpoints;
+- own policy, inventory, deployment, and log-query business logic outside of Go;
+- publish UI log events to `ui.stream.logs` for SSE consumers;
+- replace stub auth/mTLS hooks with real verification when the Rust runtime contract is ready.

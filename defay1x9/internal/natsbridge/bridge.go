@@ -3,6 +3,7 @@ package natsbridge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,35 @@ import (
 
 	"github.com/example/dorohedoro/internal/config"
 )
+
+type ErrorKind string
+
+const (
+	ErrorKindUnavailable ErrorKind = "unavailable"
+	ErrorKindTimeout     ErrorKind = "timeout"
+	ErrorKindBadResponse ErrorKind = "bad_response"
+	ErrorKindEncode      ErrorKind = "encode"
+)
+
+type BridgeError struct {
+	Kind    ErrorKind
+	Subject string
+	Err     error
+}
+
+func (e *BridgeError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("nats %s on %s", e.Kind, e.Subject)
+}
+
+func (e *BridgeError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
 
 type Bridge struct {
 	conn   *nats.Conn
@@ -42,19 +72,19 @@ func (b *Bridge) Ready() bool {
 func (b *Bridge) Request(ctx context.Context, subject string, payload any, out any) error {
 	data, err := marshalPayload(payload)
 	if err != nil {
-		return err
+		return &BridgeError{Kind: ErrorKindEncode, Subject: subject, Err: err}
 	}
 	msg := &nats.Msg{Subject: subject, Data: data, Header: nats.Header{}}
 	msg.Header.Set("X-Request-ID", RequestIDFromContext(ctx))
 	reply, err := b.conn.RequestMsgWithContext(ctx, msg)
 	if err != nil {
-		return fmt.Errorf("nats request %s: %w", subject, err)
+		return classify(subject, err)
 	}
 	if out == nil || len(reply.Data) == 0 {
 		return nil
 	}
 	if err := json.Unmarshal(reply.Data, out); err != nil {
-		return fmt.Errorf("decode %s response: %w", subject, err)
+		return &BridgeError{Kind: ErrorKindBadResponse, Subject: subject, Err: err}
 	}
 	return nil
 }
@@ -62,18 +92,22 @@ func (b *Bridge) Request(ctx context.Context, subject string, payload any, out a
 func (b *Bridge) Publish(ctx context.Context, subject string, payload any) error {
 	data, err := marshalPayload(payload)
 	if err != nil {
-		return err
+		return &BridgeError{Kind: ErrorKindEncode, Subject: subject, Err: err}
 	}
 	msg := &nats.Msg{Subject: subject, Data: data, Header: nats.Header{}}
 	msg.Header.Set("X-Request-ID", RequestIDFromContext(ctx))
 	if err := b.conn.PublishMsg(msg); err != nil {
-		return fmt.Errorf("nats publish %s: %w", subject, err)
+		return classify(subject, err)
 	}
 	return nil
 }
 
 func (b *Bridge) Subscribe(subject string, ch chan *nats.Msg) (*nats.Subscription, error) {
-	return b.conn.ChanSubscribe(subject, ch)
+	sub, err := b.conn.ChanSubscribe(subject, ch)
+	if err != nil {
+		return nil, classify(subject, err)
+	}
+	return sub, nil
 }
 
 func marshalPayload(payload any) ([]byte, error) {
@@ -85,6 +119,20 @@ func marshalPayload(payload any) ([]byte, error) {
 		return nil, fmt.Errorf("marshal nats payload: %w", err)
 	}
 	return data, nil
+}
+
+func classify(subject string, err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return &BridgeError{Kind: ErrorKindTimeout, Subject: subject, Err: err}
+	case strings.Contains(strings.ToLower(err.Error()), "no responders"):
+		return &BridgeError{Kind: ErrorKindUnavailable, Subject: subject, Err: err}
+	default:
+		return &BridgeError{Kind: ErrorKindUnavailable, Subject: subject, Err: err}
+	}
 }
 
 type requestIDKey string

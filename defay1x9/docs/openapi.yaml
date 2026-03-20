@@ -1,0 +1,223 @@
+openapi: 3.0.3
+info:
+  title: DoroheDoro Edge API MVP
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Process is alive
+  /readyz:
+    get:
+      summary: Readiness probe
+      responses:
+        '200':
+          description: NATS bridge ready
+        '503':
+          description: NATS bridge unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/me:
+    get:
+      summary: Stub current user context
+      responses:
+        '200':
+          description: Auth stub payload
+  /api/v1/agents:
+    get:
+      summary: List agents
+      responses:
+        '200':
+          description: Bridged response from NATS
+  /api/v1/agents/{id}:
+    get:
+      summary: Get agent
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Bridged response from NATS
+        '400':
+          description: Invalid id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/agents/{id}/diagnostics:
+    get:
+      summary: Get agent diagnostics
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Bridged response from NATS
+  /api/v1/policies:
+    get:
+      summary: List policies
+      responses:
+        '200':
+          description: Bridged response from NATS
+  /api/v1/policies/{id}:
+    get:
+      summary: Get policy
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Bridged response from NATS
+  /api/v1/deployments:
+    get:
+      summary: List deployments
+      responses:
+        '200':
+          description: Bridged response from NATS
+    post:
+      summary: Create deployment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeploymentCreateRequest'
+      responses:
+        '202':
+          description: Accepted response from deployment plane
+        '400':
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /api/v1/deployments/{id}:
+    get:
+      summary: Get deployment
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: Bridged response from NATS
+  /api/v1/logs/search:
+    post:
+      summary: Search logs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogSearchRequest'
+      responses:
+        '200':
+          description: Search result from query plane
+  /api/v1/logs/histogram:
+    get:
+      summary: Logs histogram
+      responses:
+        '200':
+          description: Histogram result from query plane
+  /api/v1/logs/severity:
+    get:
+      summary: Severity aggregation
+      responses:
+        '200':
+          description: Severity result from query plane
+  /api/v1/logs/top-hosts:
+    get:
+      summary: Top hosts aggregation
+      responses:
+        '200':
+          description: Top hosts result from query plane
+  /api/v1/logs/top-services:
+    get:
+      summary: Top services aggregation
+      responses:
+        '200':
+          description: Top services result from query plane
+  /api/v1/stream/logs:
+    get:
+      summary: Live log stream via SSE
+      parameters:
+        - in: query
+          name: host
+          schema:
+            type: string
+        - in: query
+          name: service
+          schema:
+            type: string
+        - in: query
+          name: severity
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+components:
+  parameters:
+    Id:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+  schemas:
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            request_id:
+              type: string
+    DeploymentCreateRequest:
+      type: object
+      required: [policy_id]
+      properties:
+        policy_id:
+          type: string
+        agent_ids:
+          type: array
+          items:
+            type: string
+        params:
+          type: object
+          additionalProperties:
+            type: string
+    LogSearchRequest:
+      type: object
+      properties:
+        query:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        agent_id:
+          type: string
+        host:
+          type: string
+        service:
+          type: string
+        severity:
+          type: string
+        limit:
+          type: integer
+        cursor:
+          type: string
+        filters:
+          type: object
+          additionalProperties:
+            type: string

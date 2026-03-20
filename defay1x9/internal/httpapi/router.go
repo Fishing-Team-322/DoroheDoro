@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -48,42 +49,65 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Get("/me", func(w http.ResponseWriter, r *http.Request) {
-			middleware.WriteJSON(w, http.StatusOK, auth.Context(r.Context()))
+			middleware.WriteJSON(w, http.StatusOK, map[string]any{
+				"user": auth.Context(r.Context()),
+				"auth": map[string]any{"mode": "stub", "rbac": "todo"},
+			})
 		})
 		api.Get("/agents", requestReplyJSON(deps.Bridge, deps.Config.NATS.Subjects.AgentsList, nil, deps.Logger))
 		api.Get("/agents/{id}", func(w http.ResponseWriter, r *http.Request) {
-			requestReplyJSON(deps.Bridge, deps.Config.NATS.Subjects.AgentsGet, map[string]string{"id": chi.URLParam(r, "id")}, deps.Logger).ServeHTTP(w, r)
+			id := strings.TrimSpace(chi.URLParam(r, "id"))
+			if id == "" {
+				middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "agent id is required")
+				return
+			}
+			callRequestReply(w, r, deps.Bridge, deps.Config.NATS.Subjects.AgentsGet, map[string]string{"id": id}, deps.Logger, http.StatusOK)
 		})
 		api.Get("/agents/{id}/diagnostics", func(w http.ResponseWriter, r *http.Request) {
-			requestReplyJSON(deps.Bridge, deps.Config.NATS.Subjects.AgentDiagnosticsGet, map[string]string{"id": chi.URLParam(r, "id")}, deps.Logger).ServeHTTP(w, r)
+			id := strings.TrimSpace(chi.URLParam(r, "id"))
+			if id == "" {
+				middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "agent id is required")
+				return
+			}
+			callRequestReply(w, r, deps.Bridge, deps.Config.NATS.Subjects.AgentDiagnosticsGet, map[string]string{"id": id}, deps.Logger, http.StatusOK)
 		})
 
 		api.Get("/policies", requestReplyJSON(deps.Bridge, deps.Config.NATS.Subjects.PoliciesList, nil, deps.Logger))
 		api.Get("/policies/{id}", func(w http.ResponseWriter, r *http.Request) {
-			requestReplyJSON(deps.Bridge, deps.Config.NATS.Subjects.PoliciesGet, map[string]string{"id": chi.URLParam(r, "id")}, deps.Logger).ServeHTTP(w, r)
+			id := strings.TrimSpace(chi.URLParam(r, "id"))
+			if id == "" {
+				middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "policy id is required")
+				return
+			}
+			callRequestReply(w, r, deps.Bridge, deps.Config.NATS.Subjects.PoliciesGet, map[string]string{"id": id}, deps.Logger, http.StatusOK)
 		})
 
 		api.Post("/deployments", func(w http.ResponseWriter, r *http.Request) {
 			var req transport.DeploymentCreateRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "invalid JSON body")
+			if err := decodeJSONBody(r, &req); err != nil {
+				writeDecodeError(w, r, err)
 				return
 			}
 			if strings.TrimSpace(req.PolicyID) == "" {
-				middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "deployment policy_id is required")
+				middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "policy_id is required")
 				return
 			}
 			callRequestReply(w, r, deps.Bridge, deps.Config.NATS.Subjects.DeploymentsCreate, req, deps.Logger, http.StatusAccepted)
 		})
 		api.Get("/deployments/{id}", func(w http.ResponseWriter, r *http.Request) {
-			callRequestReply(w, r, deps.Bridge, deps.Config.NATS.Subjects.DeploymentsStatus, map[string]string{"id": chi.URLParam(r, "id")}, deps.Logger, http.StatusOK)
+			id := strings.TrimSpace(chi.URLParam(r, "id"))
+			if id == "" {
+				middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "deployment id is required")
+				return
+			}
+			callRequestReply(w, r, deps.Bridge, deps.Config.NATS.Subjects.DeploymentsGet, map[string]string{"id": id}, deps.Logger, http.StatusOK)
 		})
 		api.Get("/deployments", requestReplyJSON(deps.Bridge, deps.Config.NATS.Subjects.DeploymentsList, nil, deps.Logger))
 
 		api.Post("/logs/search", func(w http.ResponseWriter, r *http.Request) {
 			var req transport.LogSearchRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "invalid JSON body")
+			if err := decodeJSONBody(r, &req); err != nil {
+				writeDecodeError(w, r, err)
 				return
 			}
 			callRequestReply(w, r, deps.Bridge, deps.Config.NATS.Subjects.LogsSearch, req, deps.Logger, http.StatusOK)
@@ -92,12 +116,6 @@ func NewRouter(deps RouterDeps) http.Handler {
 		api.Get("/logs/severity", queryRequestReply(deps.Bridge, deps.Config.NATS.Subjects.LogsSeverity, deps.Logger))
 		api.Get("/logs/top-hosts", queryRequestReply(deps.Bridge, deps.Config.NATS.Subjects.LogsTopHosts, deps.Logger))
 		api.Get("/logs/top-services", queryRequestReply(deps.Bridge, deps.Config.NATS.Subjects.LogsTopServices, deps.Logger))
-
-		api.Get("/alerts", requestReplyJSON(deps.Bridge, deps.Config.NATS.Subjects.AlertsList, nil, deps.Logger))
-		api.Get("/alerts/{id}", func(w http.ResponseWriter, r *http.Request) {
-			callRequestReply(w, r, deps.Bridge, deps.Config.NATS.Subjects.AlertsGet, map[string]string{"id": chi.URLParam(r, "id")}, deps.Logger, http.StatusOK)
-		})
-
 		api.Get("/stream/logs", func(w http.ResponseWriter, r *http.Request) {
 			deps.Stream.ServeLogs(w, r, deps.Config.NATS.Subjects.UIStreamLogs)
 		})
@@ -128,9 +146,29 @@ func callRequestReply(w http.ResponseWriter, r *http.Request, bridge *natsbridge
 	var resp any
 	if err := bridge.Request(r.Context(), subject, payload, &resp); err != nil {
 		logger.Error("nats request failed", zap.String("subject", subject), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
-		middleware.WriteError(w, r, http.StatusBadGateway, "unavailable", err.Error())
+		middleware.WriteTransportError(w, r, err)
 		return
 	}
 	w.Header().Set("X-NATS-Subject", subject)
 	middleware.WriteJSON(w, successStatus, resp)
+}
+
+func decodeJSONBody(r *http.Request, dst any) error {
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+	if decoder.More() {
+		return errors.New("multiple JSON documents are not allowed")
+	}
+	return nil
+}
+
+func writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
+	if err == nil {
+		return
+	}
+	middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "invalid JSON body")
 }
