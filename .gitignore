@@ -3,3 +3,6 @@
 /dist/
 .env
 *.log
+*/target
+/server-rs/.env
+*/.env/
