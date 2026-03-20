@@ -107,7 +107,9 @@ func (h *compatAuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) 
 	if !h.ensureStubEnabled(w) {
 		return
 	}
-	if err := h.validateCSRF(r, true); err != nil {
+	// Login happens before a session exists, so the frontend-compatible flow
+	// only requires a valid CSRF cookie/header pair from GET /auth/csrf here.
+	if err := h.validateCSRF(r, false); err != nil {
 		writeCompatError(w, http.StatusForbidden, "forbidden", err.Error())
 		return
 	}
