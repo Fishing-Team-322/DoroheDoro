@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	apidocs "github.com/example/dorohedoro/docs"
 	"github.com/example/dorohedoro/internal/auth"
 	"github.com/example/dorohedoro/internal/config"
 	"github.com/example/dorohedoro/internal/middleware"
@@ -35,6 +36,8 @@ func NewRouter(deps RouterDeps) http.Handler {
 	r.Use(middleware.Timeout(deps.Config.Timeouts.HTTP))
 	r.Use(middleware.AccessLog(deps.Logger))
 	r.Use(deps.Auth.HTTPMiddleware)
+
+	registerDocsRoutes(r)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -122,6 +125,33 @@ func NewRouter(deps RouterDeps) http.Handler {
 	})
 
 	return r
+}
+
+func registerDocsRoutes(r chi.Router) {
+	r.Get("/docs", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/docs/index.html", http.StatusTemporaryRedirect)
+	})
+	r.Get("/docs/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/docs/index.html", http.StatusTemporaryRedirect)
+	})
+	r.Get("/openapi.json", serveEmbeddedFile("openapi.json", "application/json; charset=utf-8"))
+	r.Get("/openapi.yaml", serveEmbeddedFile("openapi.yaml", "application/yaml; charset=utf-8"))
+	r.Get("/docs/index.html", serveEmbeddedFile("ui/index.html", "text/html; charset=utf-8"))
+	r.Get("/docs/openapi-explorer.js", serveEmbeddedFile("ui/openapi-explorer.js", "application/javascript; charset=utf-8"))
+	r.Get("/docs/openapi-explorer.css", serveEmbeddedFile("ui/openapi-explorer.css", "text/css; charset=utf-8"))
+}
+
+func serveEmbeddedFile(name, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		payload, err := apidocs.Files.ReadFile(name)
+		if err != nil {
+			middleware.WriteError(w, r, http.StatusInternalServerError, "internal", "embedded docs asset is missing")
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	}
 }
 
 func requestReplyJSON(bridge *natsbridge.Bridge, subject string, payload any, logger *zap.Logger) http.HandlerFunc {
