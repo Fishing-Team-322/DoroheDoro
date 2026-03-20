@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package dorohedoro.agent.v1;
+
+option go_package = "github.com/example/dorohedoro/contracts/agentproto;agentv1";
+
+message AgentReplyEnvelope {
+  string status = 1;
+  string code = 2;
+  string message = 3;
+  bytes payload = 4;
+  string correlation_id = 5;
+}
+
+message EnrollRequest {
+  string correlation_id = 1;
+  string bootstrap_token = 2;
+  string hostname = 3;
+  string version = 4;
+  map<string, string> metadata = 5;
+  string existing_agent_id = 6;
+}
+
+message EnrollResponse {
+  string agent_id = 1;
+  string policy_id = 2;
+  string policy_revision = 3;
+  string policy_body_json = 4;
+  string status = 5;
+  int64 responded_at_unix_ms = 6;
+}
+
+message FetchPolicyRequest {
+  string correlation_id = 1;
+  string agent_id = 2;
+}
+
+message FetchPolicyResponse {
+  string agent_id = 1;
+  string policy_id = 2;
+  string policy_revision = 3;
+  string policy_body_json = 4;
+  string status = 5;
+  int64 responded_at_unix_ms = 6;
+}
+
+message HeartbeatPayload {
+  string agent_id = 1;
+  string hostname = 2;
+  string version = 3;
+  string status = 4;
+  map<string, string> host_metadata = 5;
+  int64 sent_at_unix_ms = 6;
+}
+
+message DiagnosticsPayload {
+  string agent_id = 1;
+  string payload_json = 2;
+  int64 sent_at_unix_ms = 3;
+}

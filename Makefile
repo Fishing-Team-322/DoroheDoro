@@ -1,6 +1,6 @@
 .PHONY: build run test tidy fmt compose-config server-up server-down swagger
 
-APP_DIR := defay1x9
+APP_DIR := edge_api
 
 build:
 	cd $(APP_DIR) && go build ./...
