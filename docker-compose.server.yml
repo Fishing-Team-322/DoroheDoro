@@ -1,0 +1,10 @@
+services:
+  edge-api:
+    build:
+      context: ./edge_api
+      dockerfile: Dockerfile
+    env_file:
+      - ./edge_api/.env.server
+    ports:
+      - "127.0.0.1:18080:8080"
+    restart: unless-stopped
