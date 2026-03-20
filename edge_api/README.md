@@ -1,62 +1,45 @@
-<<<<<<< HEAD:defay1x9/README.md
 # edge-api
 
-Thin Edge API ingress / gateway / bridge layer:
-=======
-# Edge API
+Go Edge API lives in `edge_api/` and stays a thin ingress / gateway / bridge layer for the 3-service platform:
 
-Go API lives in `edge_api/` so the repository root can host shared infrastructure files while deployment still runs from the root-level `docker-compose.server.yml`.
->>>>>>> origin/main:edge_api/README.md
-
-- WEB -> HTTP ingress -> NATS -> Rust responders
-- AGENT -> gRPC ingress -> NATS -> Rust responders
+- WEB -> HTTP ingress -> NATS -> internal SERVER responders
+- AGENT -> gRPC ingress -> NATS -> internal SERVER responders
 - UI live logs -> SSE gateway <- NATS
 
-`endpoints-matrix.md` is the local contract snapshot for the MVP scope implemented in Go.
+The current implementation keeps Go focused on transport concerns and MVP bridge behavior without reintroducing the old swagger runtime layer.
 
-## Cleanup under MVP Edge API
+## What works
 
-The Go service was simplified to keep ownership out of the ingress layer:
+### HTTP routes
 
-- removed alerts routes from the startup path because they are outside the current MVP matrix;
-- removed response-only NATS subjects from config (`agents.enroll.response`, `agents.policy.response`) to keep the bridge focused on request/reply and publish subjects actually used by the ingress layer;
-- renamed deployment status transport to `deployments.jobs.get` so the bridge matches the matrix contract;
-- kept handlers thin: transport validation, request/correlation IDs, NATS bridge calls, SSE fan-out only;
-- preserved only stub auth hooks and fake-agent tooling needed for local smoke tests.
+- `GET /`
+- `GET /healthz`
+- `GET /readyz`
+- `GET /docs`
+- `GET /docs/index.html`
+- `GET /openapi.json`
+- `GET /openapi.yaml`
+- current `GET/POST /api/v1/*` MVP routes
 
-## Project structure
+### gRPC
 
-```text
-/defay1x9
-  /cmd
-    /edge-api
-    /fake-agent
-  /contracts
-    /proto
-  /docs
-    openapi.json
-    openapi.yaml
-    /ui
-  /internal
-    /app
-    /auth
-    /config
-    /grpcapi
-    /httpapi
-    /middleware
-    /model
-    /natsbridge
-    /observability
-    /stream
-    /transport
-  Dockerfile
-  README.md
-  endpoints-matrix.md
-```
+Service: `dorohedoro.edge.v1.AgentIngressService`
 
-## OpenAPI / Swagger docs
+- `Enroll`
+- `FetchPolicy`
+- `SendHeartbeat`
+- `SendDiagnostics`
+- `IngestLogs`
 
-After startup the embedded docs are available locally and in deployed environments without any CDN:
+### Infra paths kept intact
+
+- NATS bridge
+- SSE log stream via `/api/v1/stream/logs`
+- fake-agent smoke path via `cmd/fake-agent`
+
+## OpenAPI docs
+
+The static docs are embedded into the binary and served directly by edge-api:
 
 - `GET /docs`
 - `GET /docs/index.html`
@@ -70,81 +53,12 @@ Local URLs:
 - http://localhost:8080/openapi.json
 - http://localhost:8080/openapi.yaml
 
-The `/docs` page is a self-hosted browser UI for the same OpenAPI contract served by `/openapi.json` and `/openapi.yaml`.
+`/docs` redirects to the local self-hosted browser UI. `/openapi.json` and `/openapi.yaml` are the source-of-truth contract artifacts.
 
-## MVP HTTP endpoints
-
-- `GET /healthz`
-- `GET /readyz`
-- `GET /api/v1/me`
-- `GET /api/v1/agents`
-- `GET /api/v1/agents/{id}`
-- `GET /api/v1/agents/{id}/diagnostics`
-- `GET /api/v1/policies`
-- `GET /api/v1/policies/{id}`
-- `POST /api/v1/deployments`
-- `GET /api/v1/deployments`
-- `GET /api/v1/deployments/{id}`
-- `POST /api/v1/logs/search`
-- `GET /api/v1/logs/histogram`
-- `GET /api/v1/logs/severity`
-- `GET /api/v1/logs/top-hosts`
-- `GET /api/v1/logs/top-services`
-- `GET /api/v1/stream/logs`
-
-## MVP gRPC methods
-
-Service: `dorohedoro.edge.v1.AgentIngressService`
-
-- `Enroll`
-- `FetchPolicy`
-- `SendHeartbeat`
-- `SendDiagnostics`
-- `IngestLogs`
-
-## MVP NATS bridge subjects
-
-Required matrix subjects:
-
-- `agents.enroll.request`
-- `agents.policy.fetch`
-- `agents.heartbeat`
-- `agents.diagnostics`
-- `logs.ingest.raw`
-- `ui.stream.logs`
-- `query.logs.search`
-- `query.logs.histogram`
-- `query.logs.severity`
-- `query.logs.top_hosts`
-- `query.logs.top_services`
-- `deployments.jobs.create`
-- `deployments.jobs.get`
-- `deployments.jobs.list`
-
-Additional HTTP read-model subjects still required to serve MVP list/get routes:
-
-- `agents.list`
-- `agents.get`
-- `agents.diagnostics.get`
-- `policies.list`
-- `policies.get`
-
-## Transport behavior
-
-- HTTP returns a single JSON error envelope with `request_id`.
-- gRPC maps bridge failures to `InvalidArgument`, `Unavailable`, or `Internal` status codes.
-- `/readyz` is green only when the NATS bridge is connected.
-- `/api/v1/stream/logs` serves SSE and supports optional `host`, `service`, and `severity` filters.
-- `/docs` and `/openapi.json` are served by the same edge-api process and do not require extra services.
-
-## Local run
+## Run locally
 
 ```bash
-<<<<<<< HEAD:defay1x9/README.md
-cd /workspace/DoroheDoro/defay1x9
-=======
 cd edge_api
->>>>>>> origin/main:edge_api/README.md
 go build ./...
 docker compose config
 docker compose up --build nats edge-api
@@ -152,49 +66,22 @@ docker compose up --build nats edge-api
 
 ## Smoke test
 
-1. Start NATS and edge-api.
-2. Start Rust responders for the request/reply subjects listed above if you want non-stub list/search payloads.
-3. In another shell run:
+Start NATS and edge-api first, then in another shell:
 
 ```bash
-<<<<<<< HEAD:defay1x9/README.md
-cd /workspace/DoroheDoro/defay1x9
+cd edge_api
 EDGE_API_GRPC_ADDR=localhost:9090 go run ./cmd/fake-agent
+curl http://localhost:8080/
 curl http://localhost:8080/healthz
 curl http://localhost:8080/readyz
 curl http://localhost:8080/docs
 curl http://localhost:8080/openapi.json
 curl http://localhost:8080/api/v1/me
 curl -N 'http://localhost:8080/api/v1/stream/logs?severity=error'
-=======
-docker build -t edge-api ./edge_api
->>>>>>> origin/main:edge_api/README.md
 ```
 
-## TODO for Rust responders
+## Notes
 
-<<<<<<< HEAD:defay1x9/README.md
-- respond on request/reply subjects used by HTTP list/get/search endpoints;
-- own policy, inventory, deployment, and log-query business logic outside of Go;
-- publish UI log events to `ui.stream.logs` for SSE consumers;
-- replace stub auth/mTLS hooks with real verification when the Rust runtime contract is ready.
-=======
-Server deployment reads `edge_api/.env.server`.
-
-At minimum, verify these values for your VPS environment before deploy:
-
-- `NATS_URL`
-- `OPENSEARCH_URL`
-- `ENROLLMENT_TOKEN`
-- `OPENSEARCH_USERNAME` / `OPENSEARCH_PASSWORD` if your cluster is secured
-
-## HTTP routes
-
-- `/`
-- `/health` and `/healthz`
-- `/ready` and `/readyz`
-- `/docs`
-- `/openapi.json`
-
-Legacy swagger paths redirect to `/docs`.
->>>>>>> origin/main:edge_api/README.md
+- `/readyz` returns success only when the NATS bridge is ready.
+- Docs are served from embedded static assets; no swagger/godoc runtime generation is required.
+- Docker Compose entry point for local smoke testing remains `docker compose up --build nats edge-api`.
