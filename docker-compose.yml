@@ -6,55 +6,9 @@ services:
       - "4222:4222"
       - "8222:8222"
 
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: doro
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d doro"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-  opensearch:
-    image: opensearchproject/opensearch:2.19.1
-    environment:
-      discovery.type: "single-node"
-      DISABLE_SECURITY_PLUGIN: "true"
-      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
-    ports:
-      - "9200:9200"
-      - "9600:9600"
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    volumes:
-      - opensearch-data:/usr/share/opensearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9200 >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 20s
-
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.12
-    profiles: ["analytics"]
-    ports:
-      - "8123:8123"
-      - "9000:9000"
-
-  server:
+  edge-api:
     build:
-      context: ./defay1x9
+      context: ./edge_api
       dockerfile: Dockerfile
     environment:
       SERVICE_NAME: edge-api
@@ -71,25 +25,25 @@ services:
       STREAM_RETRY_INTERVAL: 5s
       HTTP_AUTH_STUB_ENABLED: "true"
       GRPC_MTLS_HOOK_ENABLED: "false"
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      SESSION_COOKIE_SECURE: "false"
     depends_on:
       - nats
     ports:
       - "8080:8080"
       - "9090:9090"
 
-  fake-agent:
+  frontend:
     build:
-      context: ./defay1x9
+      context: ./frontend
       dockerfile: Dockerfile
-    command: ["/usr/local/bin/fake-agent"]
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+        NEXT_PUBLIC_SITE_URL: http://localhost:3000
     environment:
-      EDGE_API_GRPC_ADDR: edge-api:9090
-      FAKE_AGENT_ENROLLMENT_TOKEN: dev-bootstrap-token
-      FAKE_AGENT_HOST: smoke-host
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
     depends_on:
       - edge-api
-    profiles: ["smoke"]
-
-volumes:
-  opensearch-data:
-  postgres-data:
+    ports:
+      - "3000:3000"

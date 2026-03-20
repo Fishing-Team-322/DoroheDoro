@@ -34,10 +34,13 @@ func NewRouter(deps RouterDeps) http.Handler {
 	r.Use(middleware.MaxBodyBytes(deps.Config.Limits.HTTPBodyBytes))
 	r.Use(middleware.RateLimitHooks(deps.Config.Limits.RateLimitRPS, deps.Config.Limits.RateLimitBurst))
 	r.Use(middleware.Timeout(deps.Config.Timeouts.HTTP))
+	compatAuth := newCompatAuthHandler(deps.Config)
+	r.Use(compatAuth.corsMiddleware)
 	r.Use(middleware.AccessLog(deps.Logger))
 	r.Use(deps.Auth.HTTPMiddleware)
 
 	registerDocsRoutes(r)
+	compatAuth.Register(r)
 
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
