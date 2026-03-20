@@ -97,3 +97,11 @@ Available endpoints:
 - Root `docker-compose.server.yml` builds the API from `./edge_api`.
 - API is published only to VPS localhost on `127.0.0.1:18080:8080`.
 - `edge_api/.env.server` must be reviewed for real `NATS_URL` and `OPENSEARCH_URL` values before production deploy.
+
+## Agent runtime
+
+The repository now also contains a standalone Rust agent under `agent-rs/`.
+
+- Runtime doc: `docs/agent-runtime.md`
+- Service README: `agent-rs/README.md`
+- Deployment examples: `deployments/examples/` and `deployments/systemd/`

@@ -1,0 +1,22 @@
+edge_url: "http://localhost:8080"
+edge_grpc_addr: "localhost:9090"
+bootstrap_token: "dev-bootstrap-token"
+state_dir: "/var/lib/doro-agent"
+log_level: "info"
+
+transport:
+  mode: "mock"
+
+heartbeat:
+  interval_sec: 30
+
+batch:
+  max_events: 500
+  flush_interval_sec: 2
+
+sources:
+  - type: "file"
+    path: "/tmp/doro-test.log"
+    source: "local-test"
+    service: "unknown"
+    severity_hint: "info"
