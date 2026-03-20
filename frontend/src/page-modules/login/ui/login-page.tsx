@@ -109,8 +109,8 @@ export function LoginPage({ locale }: LoginPageProps) {
       <div className="flex min-h-screen items-center justify-center px-6 py-10">
         <div className="min-h-[420px] w-full max-w-[440px] rounded-[32px] bg-[var(--surface)] px-8 py-8 shadow-[0_20px_80px_rgba(0,0,0,0.45)] sm:px-10 sm:py-10">
           <div className="mb-6">
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-[var(--card-foreground)]">
-              Вход в дашборд
+            <h1 className="text-4xl pb-2 font-semibold tracking-tight text-[#f3f3f3]">
+             Авторизация
             </h1>
           </div>
 
@@ -215,6 +215,15 @@ export function LoginPage({ locale }: LoginPageProps) {
               </form>
             </div>
           )}
+
+          <div className="mt-18 text-center">
+            <p className="text-xs leading-5 text-[var(--muted-foreground)]/50">
+              Fishing Team
+            </p>
+            <p className="text-xs leading-5 text-[var(--muted-foreground)]/50">
+              Логовизор аéза
+            </p>
+          </div>
         </div>
       </div>
     </main>
