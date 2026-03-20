@@ -1,35 +1,37 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 
 use chrono::Utc;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
+use uuid::Uuid;
 
 use crate::{
-    config::BatchConfig,
+    batching::PendingBatch,
+    config::{BatchConfig, QueueConfig, SpoolConfig},
     proto::ingest,
-    runtime::RuntimeStatusHandle,
+    runtime::{state_writer::StateWriterHandle, RuntimeStatusHandle},
     sources::SourceEvent,
-    state::{FileOffsetUpdate, RuntimeStateRecord, SqliteStateStore},
-    transport::AgentTransport,
+    state::SourceOffsetMarker,
 };
 
 pub fn spawn_batcher(
     mut rx: mpsc::Receiver<SourceEvent>,
-    transport: Arc<dyn AgentTransport>,
-    store: SqliteStateStore,
+    send_tx: mpsc::Sender<PendingBatch>,
+    state_writer: StateWriterHandle,
     status: RuntimeStatusHandle,
     shutdown: CancellationToken,
     batch_config: BatchConfig,
+    queue_config: QueueConfig,
+    spool_config: SpoolConfig,
     agent_id: String,
     host: String,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut buffer = Vec::<SourceEvent>::new();
+        let mut buffered_bytes = 0_usize;
         let mut batch_started_at = None;
-        let mut next_retry_at = None;
-        let mut retry_delay = Duration::from_secs(1);
-        let mut ticker = tokio::time::interval(Duration::from_millis(200));
+        let mut ticker = tokio::time::interval(Duration::from_millis(100));
         let mut shutdown_requested = false;
 
         loop {
@@ -40,9 +42,11 @@ pub fn spawn_batcher(
                 maybe_event = rx.recv() => {
                     match maybe_event {
                         Some(event) => {
+                            status.record_event_queue_pop(event.approx_bytes);
                             if batch_started_at.is_none() {
                                 batch_started_at = Some(tokio::time::Instant::now());
                             }
+                            buffered_bytes = buffered_bytes.saturating_add(event.approx_bytes);
                             buffer.push(event);
                         }
                         None => {
@@ -62,80 +66,84 @@ pub fn spawn_batcher(
             }
 
             let flush_due = buffer.len() >= batch_config.max_events
+                || buffered_bytes >= batch_config.max_bytes
                 || batch_started_at
                     .map(|started| {
-                        started.elapsed() >= Duration::from_secs(batch_config.flush_interval_sec)
+                        started.elapsed() >= Duration::from_millis(batch_config.flush_interval_ms)
                     })
                     .unwrap_or(false);
-            let retry_due = next_retry_at
-                .map(|deadline| tokio::time::Instant::now() >= deadline)
-                .unwrap_or(false);
             let closing = shutdown_requested && rx.is_closed();
 
-            if !flush_due && !retry_due && !closing {
+            if !flush_due && !closing {
                 continue;
             }
 
-            let batch = ingest::LogBatch {
-                agent_id: agent_id.clone(),
-                host: host.clone(),
-                events: buffer.iter().map(|item| item.event.clone()).collect(),
-                sent_at_unix_ms: Utc::now().timestamp_millis(),
-            };
+            let pending_batch = build_pending_batch(&buffer, buffered_bytes, &agent_id, &host);
+            let mut batch_to_dispatch = Some(pending_batch);
 
-            match transport.send_batch(batch).await {
-                Ok(()) => {
-                    let updates = checkpoint_updates(&buffer);
-                    if let Err(error) = store.commit_file_offsets(&updates) {
-                        status.record_error(format!("offset commit failed: {error}"));
-                        error!(error = %error, "failed to persist committed offsets");
-                    } else {
-                        for update in &updates {
-                            status.record_source_commit(
-                                &update.path,
-                                update.file_key.clone(),
-                                update.offset,
-                            );
+            while let Some(batch) = batch_to_dispatch.take() {
+                match send_tx.try_send(batch) {
+                    Ok(()) => {
+                        status.record_send_queue_push(buffered_bytes);
+                        buffer.clear();
+                        buffered_bytes = 0;
+                        batch_started_at = None;
+                    }
+                    Err(mpsc::error::TrySendError::Full(batch)) => {
+                        status.record_send_queue_full();
+                        if should_spool_batch(&status, &queue_config, &spool_config, closing) {
+                            match state_writer
+                                .spool_batch(batch.clone(), batch_config.compress_threshold_bytes)
+                                .await
+                            {
+                                Ok(spool_stats) => {
+                                    status.update_spool_stats(spool_stats);
+                                    for offset in checkpoint_updates(&buffer) {
+                                        status.record_source_durable_read(
+                                            &offset.path,
+                                            offset.file_key.clone(),
+                                            offset.offset,
+                                        );
+                                    }
+                                    buffer.clear();
+                                    buffered_bytes = 0;
+                                    batch_started_at = None;
+                                }
+                                Err(error) => {
+                                    status.record_error(format!("spool write failed: {error}"));
+                                    warn!(error = %error, "failed to write fallback spool from batcher");
+                                    tokio::time::sleep(Duration::from_millis(200)).await;
+                                    batch_to_dispatch = Some(batch);
+                                }
+                            }
+                        } else {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                            batch_to_dispatch = Some(batch);
                         }
                     }
-
-                    let now = Utc::now().timestamp_millis();
-                    let runtime_state = match store.load_runtime_state() {
-                        Ok(mut state) => {
-                            state.last_successful_send_at_unix_ms = Some(now);
-                            state.updated_at_unix_ms = now;
-                            state
-                        }
-                        Err(error) => {
-                            warn!(error = %error, "failed to load runtime state before batch save");
-                            RuntimeStateRecord {
-                                applied_policy_revision: None,
-                                policy_body_json: None,
-                                last_successful_send_at_unix_ms: Some(now),
-                                last_known_edge_url: None,
-                                updated_at_unix_ms: now,
+                    Err(mpsc::error::TrySendError::Closed(batch)) => {
+                        if spool_config.enabled {
+                            match state_writer
+                                .spool_batch(batch.clone(), batch_config.compress_threshold_bytes)
+                                .await
+                            {
+                                Ok(spool_stats) => {
+                                    status.update_spool_stats(spool_stats);
+                                    for offset in checkpoint_updates(&buffer) {
+                                        status.record_source_durable_read(
+                                            &offset.path,
+                                            offset.file_key.clone(),
+                                            offset.offset,
+                                        );
+                                    }
+                                }
+                                Err(error) => {
+                                    status.record_error(format!("spool write failed: {error}"));
+                                    warn!(error = %error, "failed to spool batch after sender shutdown");
+                                }
                             }
                         }
-                    };
-
-                    if let Err(error) = store.save_runtime_state(&runtime_state) {
-                        status.record_error(format!("runtime state save failed: {error}"));
-                        error!(error = %error, "failed to save runtime state");
-                    }
-
-                    status.record_last_send(now);
-                    info!(accepted = buffer.len(), "sent log batch");
-                    buffer.clear();
-                    batch_started_at = None;
-                    next_retry_at = None;
-                    retry_delay = Duration::from_secs(1);
-                }
-                Err(error) => {
-                    status.record_error(format!("batch send failed: {error}"));
-                    warn!(error = %error, size = buffer.len(), "failed to send log batch");
-                    next_retry_at = Some(tokio::time::Instant::now() + retry_delay);
-                    retry_delay = retry_delay.mul_f32(2.0).min(Duration::from_secs(15));
-                    if closing {
+                        info!("batcher stopped after sender queue closed");
                         return;
                     }
                 }
@@ -144,12 +152,37 @@ pub fn spawn_batcher(
     })
 }
 
-fn checkpoint_updates(buffer: &[SourceEvent]) -> Vec<FileOffsetUpdate> {
-    let mut updates = BTreeMap::<String, FileOffsetUpdate>::new();
+fn build_pending_batch(
+    buffer: &[SourceEvent],
+    approx_bytes: usize,
+    agent_id: &str,
+    host: &str,
+) -> PendingBatch {
+    PendingBatch {
+        batch_id: Uuid::new_v4().to_string(),
+        batch: ingest::LogBatch {
+            agent_id: agent_id.to_string(),
+            host: host.to_string(),
+            events: buffer.iter().map(|item| item.event.clone()).collect(),
+            sent_at_unix_ms: Utc::now().timestamp_millis(),
+        },
+        approx_bytes,
+        source_offsets: checkpoint_updates(buffer),
+        created_at_unix_ms: Utc::now().timestamp_millis(),
+        attempt_count: 0,
+        from_spool: false,
+        spool_payload_path: None,
+        spool_codec: None,
+    }
+}
+
+fn checkpoint_updates(buffer: &[SourceEvent]) -> Vec<SourceOffsetMarker> {
+    let mut updates = BTreeMap::<String, SourceOffsetMarker>::new();
     for item in buffer {
         updates.insert(
             item.checkpoint.path.clone(),
-            FileOffsetUpdate {
+            SourceOffsetMarker {
+                source_id: item.checkpoint.source_id.clone(),
                 path: item.checkpoint.path.clone(),
                 file_key: item.checkpoint.file_key.clone(),
                 offset: item.checkpoint.offset,
@@ -159,130 +192,140 @@ fn checkpoint_updates(buffer: &[SourceEvent]) -> Vec<FileOffsetUpdate> {
     updates.into_values().collect()
 }
 
+fn should_spool_batch(
+    status: &RuntimeStatusHandle,
+    queue_config: &QueueConfig,
+    spool_config: &SpoolConfig,
+    closing: bool,
+) -> bool {
+    if !spool_config.enabled {
+        return false;
+    }
+
+    closing
+        || status.is_degraded_mode()
+        || status.current_send_queue_len() >= queue_config.send_capacity
+        || status.current_send_queue_bytes() >= queue_config.send_bytes_soft_limit
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{
-        path::PathBuf,
-        sync::{Arc, Mutex},
-        time::Duration,
-    };
+    use std::{path::PathBuf, time::Duration};
 
-    use async_trait::async_trait;
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
     use crate::{
-        config::{BatchConfig, SourceConfig},
-        proto::{agent, ingest},
-        runtime::RuntimeStatusHandle,
+        batching::PendingBatch,
+        config::{BatchConfig, QueueConfig, SourceConfig, SpoolConfig, StartAt},
+        runtime::{
+            state_writer::{spawn_state_writer, StateWriterHandle},
+            RuntimeStatusHandle,
+        },
         sources::{SourceCheckpoint, SourceEvent},
         state::SqliteStateStore,
-        transport::{
-            AgentTransport, EnrollRequest, EnrollResponse, FetchPolicyRequest, PolicySnapshot,
-        },
     };
 
     use super::spawn_batcher;
 
-    #[derive(Default)]
-    struct CountingTransport {
-        sent_batches: Mutex<Vec<usize>>,
+    fn test_status() -> RuntimeStatusHandle {
+        RuntimeStatusHandle::new(
+            "agent-1".to_string(),
+            "demo-host".to_string(),
+            "0.1.0".to_string(),
+            "mock".to_string(),
+            true,
+            &[SourceConfig {
+                kind: "file".to_string(),
+                source_id: Some("file:/tmp/demo.log".to_string()),
+                path: PathBuf::from("/tmp/demo.log"),
+                start_at: StartAt::End,
+                source: "demo".to_string(),
+                service: "svc".to_string(),
+                severity_hint: "info".to_string(),
+            }],
+            &[],
+            None,
+        )
     }
 
-    #[async_trait]
-    impl AgentTransport for CountingTransport {
-        async fn enroll(&self, _request: EnrollRequest) -> crate::error::AppResult<EnrollResponse> {
-            unreachable!()
-        }
-
-        async fn fetch_policy(
-            &self,
-            _request: FetchPolicyRequest,
-        ) -> crate::error::AppResult<PolicySnapshot> {
-            unreachable!()
-        }
-
-        async fn send_heartbeat(
-            &self,
-            _payload: agent::HeartbeatPayload,
-        ) -> crate::error::AppResult<()> {
-            unreachable!()
-        }
-
-        async fn send_batch(&self, batch: ingest::LogBatch) -> crate::error::AppResult<()> {
-            self.sent_batches.lock().unwrap().push(batch.events.len());
-            Ok(())
-        }
-
-        async fn send_diagnostics(
-            &self,
-            _payload: agent::DiagnosticsPayload,
-        ) -> crate::error::AppResult<()> {
-            unreachable!()
-        }
+    fn spawn_test_writer(
+        store: SqliteStateStore,
+    ) -> (
+        StateWriterHandle,
+        tokio::task::JoinHandle<crate::error::AppResult<()>>,
+    ) {
+        spawn_state_writer(
+            store,
+            std::env::temp_dir().join("doro-agent-test-spool"),
+            64 * 1024 * 1024,
+        )
     }
 
     #[tokio::test]
     async fn flushes_by_event_count() {
         let dir = tempfile::TempDir::new().unwrap();
         let store = SqliteStateStore::new(dir.path()).unwrap();
-        let status = RuntimeStatusHandle::new(
-            "demo-host".to_string(),
-            "0.1.0".to_string(),
-            &[SourceConfig {
-                kind: "file".to_string(),
-                path: PathBuf::from("/tmp/demo.log"),
-                source: "demo".to_string(),
-                service: "svc".to_string(),
-                severity_hint: "info".to_string(),
-            }],
-            &[],
-        );
-        let transport = Arc::new(CountingTransport::default());
-        let (tx, rx) = mpsc::channel(8);
+        let (state_writer, state_handle) = spawn_test_writer(store);
+        let status = test_status();
+        let (source_tx, source_rx) = mpsc::channel(8);
+        let (send_tx, mut send_rx) = mpsc::channel::<PendingBatch>(8);
         let shutdown = CancellationToken::new();
 
         let handle = spawn_batcher(
-            rx,
-            transport.clone(),
-            store,
+            source_rx,
+            send_tx,
+            state_writer,
             status,
             shutdown.clone(),
             BatchConfig {
                 max_events: 2,
-                flush_interval_sec: 60,
+                max_bytes: 1024,
+                flush_interval_ms: 60_000,
+                compress_threshold_bytes: 16 * 1024,
             },
+            QueueConfig::default(),
+            SpoolConfig::default(),
             "agent-1".to_string(),
             "demo-host".to_string(),
         );
 
         for offset in [1_u64, 2_u64] {
-            tx.send(SourceEvent {
-                checkpoint: SourceCheckpoint {
-                    path: "/tmp/demo.log".to_string(),
-                    file_key: Some("1:2".to_string()),
-                    offset,
-                },
-                event: ingest::LogEvent {
-                    timestamp_unix_ms: 1,
-                    message: "hello".to_string(),
-                    source: "demo".to_string(),
-                    source_type: "file".to_string(),
-                    service: "svc".to_string(),
-                    severity: "info".to_string(),
-                    labels: Default::default(),
-                    raw: "hello".to_string(),
-                },
-            })
-            .await
-            .unwrap();
+            source_tx
+                .send(SourceEvent {
+                    checkpoint: SourceCheckpoint {
+                        source_id: "file:/tmp/demo.log".to_string(),
+                        path: "/tmp/demo.log".to_string(),
+                        file_key: Some("1:2".to_string()),
+                        offset,
+                    },
+                    approx_bytes: 64,
+                    event: crate::proto::ingest::LogEvent {
+                        timestamp_unix_ms: 1,
+                        message: "hello".to_string(),
+                        source: "demo".to_string(),
+                        source_type: "file".to_string(),
+                        service: "svc".to_string(),
+                        severity: "info".to_string(),
+                        labels: Default::default(),
+                        raw: "hello".to_string(),
+                    },
+                })
+                .await
+                .unwrap();
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        shutdown.cancel();
-        drop(tx);
-        handle.await.unwrap();
+        let pending = tokio::time::timeout(Duration::from_secs(2), send_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
 
-        assert_eq!(transport.sent_batches.lock().unwrap().as_slice(), &[2]);
+        shutdown.cancel();
+        drop(source_tx);
+        handle.await.unwrap();
+        drop(send_rx);
+        drop(state_handle);
+
+        assert_eq!(pending.event_count(), 2);
     }
 }

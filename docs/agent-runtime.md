@@ -1,15 +1,38 @@
 # Agent Runtime
 
-This document describes the standalone Rust agent runtime added under `agent-rs/`.
+This document describes the current standalone Rust agent under `agent-rs/`.
 
-## What the agent does
+## Runtime model
 
-- loads bootstrap config from YAML
-- optionally overrides scalar settings from env
-- persists identity and offsets in `state_dir/state.db`
-- tails one or more configured files
-- batches new lines into shared ingest events
-- sends heartbeat and diagnostics snapshots through the transport layer
+The agent uses a lightweight concurrent pipeline:
+
+```text
+[file readers]
+    -> [bounded event queue]
+    -> [single batcher]
+    -> [bounded send queue]
+    -> [single sender]
+    -> [ack processing]
+    -> [single SQLite state writer]
+
++ heartbeat worker
++ diagnostics worker
++ degraded-mode controller
++ fallback spool only on pressure or send failures
+```
+
+Normal hot path is memory-first:
+
+- readers tail files and publish events into the bounded in-memory queue
+- batcher flushes by count, approximate bytes, or timer
+- sender waits for transport `ack`
+- state writer advances `acked_offset` only after successful send
+
+Fallback spool is not the default path:
+
+- batches are written to spool only during degradation, queue pressure, or shutdown with unsent data
+- spool payloads are stored as files under `spool.dir`
+- SQLite keeps spool metadata and per-source `read_offset` / `acked_offset`
 
 ## Config shape
 
@@ -28,17 +51,89 @@ transport:
 heartbeat:
   interval_sec: 30
 
+diagnostics:
+  interval_sec: 30
+
 batch:
   max_events: 500
-  flush_interval_sec: 2
+  max_bytes: 524288
+  flush_interval_ms: 2000
+  compress_threshold_bytes: 16384
+
+queues:
+  event_capacity: 4096
+  send_capacity: 32
+  event_bytes_soft_limit: 8388608
+  send_bytes_soft_limit: 16777216
+
+degraded:
+  failure_threshold: 3
+  server_unavailable_sec: 30
+  queue_pressure_pct: 80
+  queue_recover_pct: 40
+  unacked_lag_bytes: 16777216
+  shutdown_spool_grace_sec: 5
+
+spool:
+  enabled: true
+  dir: "/var/lib/doro-agent/spool"
+  max_disk_bytes: 268435456
 
 sources:
   - type: "file"
+    source_id: "file:/var/log/syslog"
     path: "/var/log/syslog"
+    start_at: "end"
     source: "syslog"
     service: "host"
     severity_hint: "info"
 ```
+
+Important defaults:
+
+- `sources[].start_at` defaults to `end`
+- `sources[].source_id` defaults to `file:<path>`
+- `diagnostics.interval_sec` defaults to `heartbeat.interval_sec`
+- `spool.dir` defaults to `<state_dir>/spool`
+
+## Local state
+
+SQLite lives at `state_dir/state.db`.
+
+Important tables:
+
+- `agent_identity`
+- `agent_runtime_state`
+- `file_offsets`
+- `spool_batches`
+
+`file_offsets` now stores two durable offsets:
+
+- `read_offset`: highest locally durable position, including data already durably spooled
+- `acked_offset`: highest position confirmed by the server
+
+Restart behavior:
+
+- if there is no spool backlog, readers resume from `acked_offset`
+- if there is durable spooled data, readers resume from `read_offset`
+- the agent does not write every batch to disk by default
+
+## File source behavior
+
+Current file-source runtime supports:
+
+- `start_at: beginning|end`
+- missing-file recovery
+- copytruncate handling
+- inode rotation detection
+- reopen after rotation
+
+Current non-goals for this phase:
+
+- journald
+- multiline
+- glob expansion
+- local debug HTTP API
 
 ## Local run
 
@@ -48,11 +143,28 @@ cargo test
 cargo run -- --config ./config/agent.example.yaml
 ```
 
-For a local smoke test, switch `transport.mode` to `mock`, point a source at `/tmp/doro-test.log`, append lines, and confirm that:
+For a healthy local run:
 
-- batches are reported in logs
-- `state.db` is created under `state_dir`
-- restarting the agent does not replay already committed lines
+- use `transport.mode=mock`
+- point a source at `/tmp/doro-test.log`
+- append lines and watch logs
+- inspect `state.db` to confirm `acked_offset` advances
+
+To validate degraded mode and spool:
+
+1. switch to `transport.mode=edge`
+2. point `edge_grpc_addr` at an unavailable endpoint
+3. append lines to the test file
+4. confirm diagnostics report `degraded_mode=true`
+5. confirm `spool_batches` gets rows and `acked_offset` stops advancing until recovery
+
+Useful commands:
+
+```bash
+sqlite3 /var/lib/doro-agent/state.db '.tables'
+sqlite3 /var/lib/doro-agent/state.db 'select path, read_offset, acked_offset from file_offsets;'
+sqlite3 /var/lib/doro-agent/state.db 'select batch_id, attempt_count, next_retry_at_unix_ms from spool_batches;'
+```
 
 ## Remote Linux run
 
@@ -71,6 +183,7 @@ Expected paths:
 - `/etc/doro-agent/config.yaml`
 - `/etc/doro-agent/agent.env`
 - `/var/lib/doro-agent/`
+- `/var/log/doro-agent/`
 
 3. Create the service account and state directory.
 
@@ -93,17 +206,18 @@ sudo systemctl enable --now doro-agent
 ```bash
 sudo systemctl status doro-agent
 sudo journalctl -u doro-agent -f
-sqlite3 /var/lib/doro-agent/state.db '.tables'
-sqlite3 /var/lib/doro-agent/state.db 'select * from file_offsets;'
+sqlite3 /var/lib/doro-agent/state.db 'select path, read_offset, acked_offset from file_offsets;'
+sqlite3 /var/lib/doro-agent/state.db 'select batch_id, approx_bytes from spool_batches;'
 ```
 
 ## Current transport note
 
-The MVP supports two transport modes:
+The agent still supports two transport modes:
 
 - `mock` for local validation
 - `edge` for the current Go `edge_api` ingress
 
-Known limitation:
+Known limitation for this phase:
 
-- the repo still has a contract alignment gap between the Go edge JSON gRPC bridge and the shared protobuf transport model consumed by `server-rs`; that alignment remains a follow-up for the server/contracts owner
+- `batch.compress_threshold_bytes` is used only for local spool payload files
+- wire-level batch compression and transport-visible `batch_id` remain follow-up work because this task intentionally did not modify `edge_api/**` or `contracts/**`

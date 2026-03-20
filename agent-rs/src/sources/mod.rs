@@ -8,6 +8,7 @@ pub use line_codec::decode_line;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceCheckpoint {
+    pub source_id: String,
     pub path: String,
     pub file_key: Option<String>,
     pub offset: u64,
@@ -16,5 +17,6 @@ pub struct SourceCheckpoint {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceEvent {
     pub checkpoint: SourceCheckpoint,
+    pub approx_bytes: usize,
     pub event: ingest::LogEvent,
 }
