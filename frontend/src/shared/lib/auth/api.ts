@@ -1,6 +1,6 @@
 import { createApiClient } from "@/src/shared/lib/api";
 import { ApiError } from "@/src/shared/lib/api/client";
-import { clearCsrfToken, getCsrfToken, setCsrfToken } from "./csrf";
+import { clearCsrfToken, fetchCsrfToken, getCsrfToken, setCsrfToken } from "./csrf";
 import { emitUnauthorized } from "./events";
 import type {
   LoginInput,
@@ -18,6 +18,16 @@ const authApiClient = createApiClient({
   },
 });
 
+
+async function ensureCsrfToken(): Promise<string> {
+  const existingToken = getCsrfToken();
+  if (existingToken) {
+    return existingToken;
+  }
+
+  return fetchCsrfToken(process.env.NEXT_PUBLIC_API_BASE_URL);
+}
+
 export function isUnauthorizedError(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -27,6 +37,7 @@ export function isUnauthorizedError(error: unknown): boolean {
 }
 
 export async function login(input: LoginInput): Promise<SessionPayload> {
+  await ensureCsrfToken();
   const response = await authApiClient.post<SessionPayload>("/auth/login", {
     identifier: input.identifier,
     email: input.identifier,
