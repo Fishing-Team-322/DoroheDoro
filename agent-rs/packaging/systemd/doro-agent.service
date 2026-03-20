@@ -1,0 +1,23 @@
+[Unit]
+Description=DoroheDoro Rust Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=doro-agent
+Group=doro-agent
+EnvironmentFile=-/etc/doro-agent/agent.env
+ExecStart=/usr/local/bin/doro-agent --config /etc/doro-agent/config.yaml
+Restart=always
+RestartSec=5
+WorkingDirectory=/var/lib/doro-agent
+StateDirectory=doro-agent
+RuntimeDirectory=doro-agent
+LogsDirectory=doro-agent
+UMask=0077
+NoNewPrivileges=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -9,7 +9,7 @@ import type {
 } from "./types";
 
 const authApiClient = createApiClient({
-  baseUrl: process.env.NEXT_PUBLIC_API_BASE_URL,
+  baseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/edge",
   credentials: "include",
   getCsrfToken,
   onUnauthorized: () => {
@@ -25,7 +25,7 @@ async function ensureCsrfToken(): Promise<string> {
     return existingToken;
   }
 
-  return fetchCsrfToken(process.env.NEXT_PUBLIC_API_BASE_URL);
+  return fetchCsrfToken(process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/edge");
 }
 
 export function isUnauthorizedError(error: unknown): boolean {

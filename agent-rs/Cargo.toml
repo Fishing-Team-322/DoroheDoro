@@ -1,0 +1,33 @@
+[package]
+name = "doro-agent"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+build = "build.rs"
+
+[dependencies]
+async-trait = "0.1.88"
+bytes = "1.10.1"
+chrono = { version = "0.4.40", features = ["clock", "serde"] }
+clap = { version = "4.5.37", features = ["derive", "env"] }
+flate2 = "1.1.0"
+hostname = "0.4.0"
+prost = "0.13.5"
+reqwest = { version = "0.12.15", default-features = false, features = ["http2", "json", "rustls-tls"] }
+rusqlite = { version = "0.34.0", features = ["bundled"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+serde_yaml = "0.9.34"
+thiserror = "1.0.69"
+tokio = { version = "1.44.2", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = "0.7.15"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
+uuid = { version = "1.16.0", features = ["serde", "v4"] }
+
+[build-dependencies]
+prost-build = "0.13.5"
+protoc-bin-vendored = "3.1.0"
+
+[dev-dependencies]
+tempfile = "3.20.0"
