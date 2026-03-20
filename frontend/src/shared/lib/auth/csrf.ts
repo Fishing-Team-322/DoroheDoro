@@ -40,3 +40,24 @@ export function clearCsrfToken(): void {
 }
 
 export { CSRF_COOKIE_NAME };
+
+export async function fetchCsrfToken(baseUrl?: string): Promise<string> {
+  const response = await fetch(`${baseUrl ?? ""}/auth/csrf`, {
+    credentials: "include",
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to initialize CSRF token (${response.status})`);
+  }
+
+  const payload = (await response.json()) as { csrfToken?: string };
+  const token = payload.csrfToken?.trim();
+
+  if (!token) {
+    throw new Error("Edge API did not return a CSRF token");
+  }
+
+  setCsrfToken(token);
+  return token;
+}
