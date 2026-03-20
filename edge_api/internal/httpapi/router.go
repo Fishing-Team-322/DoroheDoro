@@ -44,7 +44,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"service":       "defay1x9-api",
+			"service":       "edge-api",
 			"status":        "ok",
 			"docs":          "/docs",
 			"openapi":       "/openapi.json",

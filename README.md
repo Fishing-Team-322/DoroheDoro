@@ -1,22 +1,22 @@
-# VPS server deploy for defay1x9 API
+# VPS server deploy for Edge API
 
 ## Files changed for server deploy
 
 - `docker-compose.server.yml`
-- `defay1x9/Dockerfile`
-- `defay1x9/.env.server`
-- `defay1x9/README.md`
-- `defay1x9/cmd/**`
-- `defay1x9/internal/**`
-- `defay1x9/docs/**`
-- `defay1x9/go.mod`
-- `defay1x9/go.sum`
+- `edge_api/Dockerfile`
+- `edge_api/.env.server`
+- `edge_api/README.md`
+- `edge_api/cmd/**`
+- `edge_api/internal/**`
+- `edge_api/docs/**`
+- `edge_api/go.mod`
+- `edge_api/go.sum`
 
 ## Repository layout
 
 ```text
 repo-root/
-├── defay1x9/
+├── edge_api/
 │   ├── api/
 │   ├── assets/
 │   ├── cmd/
@@ -76,7 +76,7 @@ curl -I https://fishingteam.su/openapi.json
 Server routes are exposed as:
 
 - `GET /docs` — Swagger UI
-- `GET /openapi.json` — generated OpenAPI JSON already committed in `defay1x9/docs/`
+- `GET /openapi.json` — generated OpenAPI JSON already committed in `edge_api/docs/`
 
 Compatibility aliases kept:
 
@@ -94,6 +94,6 @@ Available endpoints:
 
 ## Notes
 
-- Root `docker-compose.server.yml` builds the API from `./defay1x9`.
+- Root `docker-compose.server.yml` builds the API from `./edge_api`.
 - API is published only to VPS localhost on `127.0.0.1:18080:8080`.
-- `defay1x9/.env.server` must be reviewed for real `NATS_URL` and `OPENSEARCH_URL` values before production deploy.
+- `edge_api/.env.server` must be reviewed for real `NATS_URL` and `OPENSEARCH_URL` values before production deploy.

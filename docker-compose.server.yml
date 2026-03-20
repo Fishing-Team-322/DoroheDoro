@@ -1,10 +1,10 @@
 services:
-  defay1x9-api:
+  edge-api:
     build:
-      context: ./defay1x9
+      context: ./edge_api
       dockerfile: Dockerfile
     env_file:
-      - ./defay1x9/.env.server
+      - ./edge_api/.env.server
     ports:
       - "127.0.0.1:18080:8080"
     restart: unless-stopped

@@ -1,23 +1,23 @@
-# defay1x9 Go API
+# Edge API
 
-Go API moved into `defay1x9/` so the repository root can host shared infrastructure files while deployment still runs from the root-level `docker-compose.server.yml`.
+Go API lives in `edge_api/` so the repository root can host shared infrastructure files while deployment still runs from the root-level `docker-compose.server.yml`.
 
 ## Build
 
 ```bash
-cd defay1x9
+cd edge_api
 go build ./...
 ```
 
 ## Docker image
 
 ```bash
-docker build -t defay1x9-api ./defay1x9
+docker build -t edge-api ./edge_api
 ```
 
 ## Environment
 
-Server deployment reads `defay1x9/.env.server`.
+Server deployment reads `edge_api/.env.server`.
 
 At minimum, verify these values for your VPS environment before deploy:
 
