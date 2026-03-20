@@ -21,13 +21,7 @@ export function LoginPage({ locale }: LoginPageProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const { status, login } = useAuth() as {
-    status: "loading" | "authenticated" | "unauthenticated";
-    login?: (payload: {
-      identifier: string;
-      password: string;
-    }) => Promise<void>;
-  };
+  const { status, login } = useAuth();
 
   const [step, setStep] = useState<Step>("identifier");
   const [identifier, setIdentifier] = useState("");
