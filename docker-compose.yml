@@ -4,10 +4,11 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+        NEXT_PUBLIC_API_BASE_URL: /api/edge
         NEXT_PUBLIC_SITE_URL: http://localhost:3000
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      NEXT_PUBLIC_API_BASE_URL: /api/edge
+      EDGE_API_INTERNAL_URL: http://edge-api:8080
       NEXT_PUBLIC_SITE_URL: http://localhost:3000
     depends_on:
       - edge-api
