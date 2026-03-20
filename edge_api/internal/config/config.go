@@ -79,12 +79,22 @@ type LimitsConfig struct {
 }
 
 type AuthConfig struct {
-	HTTPStubEnabled     bool
-	MTLSHookEnabled     bool
-	SessionCookieName   string
-	CSRFCookieName      string
-	SessionCookieSecure bool
-	SessionTTL          time.Duration
+	HTTPStubEnabled   bool
+	MTLSHookEnabled   bool
+	SessionCookieName string
+	CSRFCookieName    string
+	CookieSecure      bool
+	SessionTTL        time.Duration
+	DevUser           DevAuthUser
+}
+
+type DevAuthUser struct {
+	Login       string
+	Email       string
+	Password    string
+	UserID      string
+	Role        string
+	DisplayName string
 }
 
 type StreamConfig struct {
@@ -93,6 +103,8 @@ type StreamConfig struct {
 }
 
 func Load() (Config, error) {
+	devLogin := env("DEV_TEST_LOGIN", "admin")
+	devEmail := env("DEV_TEST_EMAIL", "admin@example.com")
 	cfg := Config{
 		ServiceName: env("SERVICE_NAME", "edge-api"),
 		LogLevel:    env("LOG_LEVEL", "info"),
@@ -148,12 +160,20 @@ func Load() (Config, error) {
 			AgentLogBatchSize: envInt("AGENT_LOG_BATCH_SIZE", 1000),
 		},
 		Auth: AuthConfig{
-			HTTPStubEnabled:     envBool("HTTP_AUTH_STUB_ENABLED", true),
-			MTLSHookEnabled:     envBool("GRPC_MTLS_HOOK_ENABLED", false),
-			SessionCookieName:   env("SESSION_COOKIE_NAME", "session_token"),
-			CSRFCookieName:      env("CSRF_COOKIE_NAME", "csrf_token"),
-			SessionCookieSecure: envBool("SESSION_COOKIE_SECURE", false),
-			SessionTTL:          parseDuration(env("SESSION_TTL", "12h"), 12*time.Hour),
+			HTTPStubEnabled:   envBool("HTTP_AUTH_STUB_ENABLED", true),
+			MTLSHookEnabled:   envBool("GRPC_MTLS_HOOK_ENABLED", false),
+			SessionCookieName: env("SESSION_COOKIE_NAME", "session_token"),
+			CSRFCookieName:    env("CSRF_COOKIE_NAME", "csrf_token"),
+			CookieSecure:      envBoolWithFallback(false, "COOKIE_SECURE", "SESSION_COOKIE_SECURE"),
+			SessionTTL:        parseDuration(env("SESSION_TTL", "12h"), 12*time.Hour),
+			DevUser: DevAuthUser{
+				Login:       devLogin,
+				Email:       devEmail,
+				Password:    env("DEV_TEST_PASSWORD", "admin123"),
+				UserID:      env("DEV_TEST_USER_ID", "dev-user-1"),
+				Role:        env("DEV_TEST_ROLE", "admin"),
+				DisplayName: env("DEV_TEST_DISPLAY_NAME", humanizeIdentifier(devLogin)),
+			},
 		},
 		Stream: StreamConfig{
 			HeartbeatInterval: parseDuration(env("STREAM_HEARTBEAT_INTERVAL", "25s"), 25*time.Second),
@@ -168,6 +188,18 @@ func Load() (Config, error) {
 	}
 	if cfg.Limits.AgentLogBatchSize <= 0 {
 		cfg.Limits.AgentLogBatchSize = 1000
+	}
+	if cfg.Auth.SessionTTL <= 0 {
+		cfg.Auth.SessionTTL = 12 * time.Hour
+	}
+	if strings.TrimSpace(cfg.Auth.DevUser.Login) == "" {
+		cfg.Auth.DevUser.Login = "admin"
+	}
+	if strings.TrimSpace(cfg.Auth.DevUser.Email) == "" {
+		cfg.Auth.DevUser.Email = cfg.Auth.DevUser.Login + "@example.com"
+	}
+	if strings.TrimSpace(cfg.Auth.DevUser.DisplayName) == "" {
+		cfg.Auth.DevUser.DisplayName = humanizeIdentifier(cfg.Auth.DevUser.Login)
 	}
 	return cfg, nil
 }
@@ -189,6 +221,20 @@ func envBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
+}
+
+func envBoolWithFallback(fallback bool, keys ...string) bool {
+	for _, key := range keys {
+		v := os.Getenv(key)
+		if v == "" {
+			continue
+		}
+		parsed, err := strconv.ParseBool(v)
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func envInt(key string, fallback int) int {
@@ -240,4 +286,18 @@ func envCSV(key string, fallback []string) []string {
 		return fallback
 	}
 	return result
+}
+
+func humanizeIdentifier(value string) string {
+	parts := strings.Fields(strings.NewReplacer(".", " ", "-", " ", "_", " ").Replace(strings.TrimSpace(value)))
+	if len(parts) == 0 {
+		return "Demo User"
+	}
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
 }
