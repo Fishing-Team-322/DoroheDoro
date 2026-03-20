@@ -1,10 +1,19 @@
 services:
-  nats:
-    image: nats:2.11-alpine
-    command: ["-m", "8222"]
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api/edge
+        NEXT_PUBLIC_SITE_URL: http://localhost:3000
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: /api/edge
+      EDGE_API_INTERNAL_URL: http://edge-api:8080
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+    depends_on:
+      - edge-api
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "3000:3000"
 
   edge-api:
     build:
@@ -12,7 +21,7 @@ services:
       dockerfile: Dockerfile
     environment:
       SERVICE_NAME: edge-api
-      LOG_LEVEL: info
+      LOG_LEVEL: debug
       HTTP_LISTEN_ADDR: :8080
       GRPC_LISTEN_ADDR: :9090
       NATS_URL: nats://nats:4222
@@ -24,26 +33,24 @@ services:
       STREAM_HEARTBEAT_INTERVAL: 25s
       STREAM_RETRY_INTERVAL: 5s
       HTTP_AUTH_STUB_ENABLED: "true"
+      DEV_TEST_LOGIN: admin
+      DEV_TEST_EMAIL: admin@example.com
+      DEV_TEST_PASSWORD: admin123
+      DEV_TEST_USER_ID: dev-user-1
+      DEV_TEST_ROLE: admin
+      COOKIE_SECURE: "false"
+      SESSION_TTL: 24h
       GRPC_MTLS_HOOK_ENABLED: "false"
       CORS_ALLOWED_ORIGINS: http://localhost:3000
-      SESSION_COOKIE_SECURE: "false"
     depends_on:
       - nats
     ports:
       - "8080:8080"
       - "9090:9090"
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
-        NEXT_PUBLIC_SITE_URL: http://localhost:3000
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
-      NEXT_PUBLIC_SITE_URL: http://localhost:3000
-    depends_on:
-      - edge-api
+  nats:
+    image: nats:2.11-alpine
+    command: ["-m", "8222"]
     ports:
-      - "3000:3000"
+      - "4222:4222"
+      - "8222:8222"
