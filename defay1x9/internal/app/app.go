@@ -2,46 +2,37 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
-	_ "github.com/example/dorohedoro/docs"
 	"net"
 	"net/http"
-	"sync"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 
-	"github.com/example/dorohedoro/internal/bus"
+	edgev1 "github.com/example/dorohedoro/contracts/proto"
+	"github.com/example/dorohedoro/internal/auth"
 	"github.com/example/dorohedoro/internal/config"
-	"github.com/example/dorohedoro/internal/diagnostics"
-	"github.com/example/dorohedoro/internal/enrollment"
 	"github.com/example/dorohedoro/internal/grpcapi"
 	"github.com/example/dorohedoro/internal/httpapi"
-	chindexer "github.com/example/dorohedoro/internal/indexer/clickhouse"
-	osindexer "github.com/example/dorohedoro/internal/indexer/opensearch"
-	"github.com/example/dorohedoro/internal/ingest"
-	"github.com/example/dorohedoro/internal/normalize"
-	"github.com/example/dorohedoro/internal/policy"
-	"github.com/example/dorohedoro/internal/query"
+	"github.com/example/dorohedoro/internal/middleware"
+	"github.com/example/dorohedoro/internal/natsbridge"
+	"github.com/example/dorohedoro/internal/observability"
 	"github.com/example/dorohedoro/internal/stream"
-	"github.com/example/dorohedoro/internal/telemetry"
-	logsv1 "github.com/example/dorohedoro/pkg/proto"
 )
 
 type App struct {
-	cfg         config.Config
-	logger      *zap.Logger
-	httpServer  *http.Server
-	grpcServer  *grpc.Server
-	bus         *bus.JetStream
-	osIndexer   *osindexer.Indexer
-	chIndexer   *chindexer.Indexer
-	closeOnce   sync.Once
-	diagnostics *diagnostics.Store
-	enrollment  *enrollment.Store
-	policy      *policy.Store
+	cfg        config.Config
+	logger     *zap.Logger
+	bridge     *natsbridge.Bridge
+	httpServer *http.Server
+	grpcServer *grpc.Server
 }
 
 func New(ctx context.Context) (*App, error) {
@@ -49,78 +40,34 @@ func New(ctx context.Context) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	logger, err := telemetry.NewLogger(cfg.LogLevel)
+	logger, err := observability.NewLogger(cfg.LogLevel)
 	if err != nil {
 		return nil, err
 	}
-	jsBus, err := retryValue(ctx, func() (*bus.JetStream, error) { return bus.New(ctx, cfg.NATS, logger) })
+	bridge, err := natsbridge.New(cfg.NATS, logger)
 	if err != nil {
-		return nil, fmt.Errorf("init nats: %w", err)
+		return nil, err
 	}
-	indexer, err := retryValue(ctx, func() (*osindexer.Indexer, error) { return osindexer.New(cfg.OpenSearch, logger) })
-	if err != nil {
-		jsBus.Close()
-		return nil, fmt.Errorf("init opensearch: %w", err)
+	authHooks := auth.Hooks{}
+	streamGateway := stream.NewGateway(bridge, cfg.Stream)
+	httpHandler := httpapi.NewRouter(httpapi.RouterDeps{Config: cfg, Bridge: bridge, Stream: streamGateway, Logger: logger, Auth: authHooks, ReadyFn: bridge.Ready})
+	httpServer := &http.Server{Addr: cfg.HTTP.ListenAddr, Handler: httpHandler, ReadHeaderTimeout: 5 * time.Second}
+	grpcOptions := []grpc.ServerOption{
+		grpc.ForceServerCodec(edgev1.JSONCodec{}),
+		grpc.MaxRecvMsgSize(cfg.GRPC.MaxRecvBytes),
+		grpc.MaxSendMsgSize(cfg.GRPC.MaxSendBytes),
+		grpc.KeepaliveParams(keepalive.ServerParameters{Time: cfg.GRPC.Keepalive}),
+		middleware.UnaryServerInterceptors(logger, cfg.Timeouts.GRPC, authHooks.GRPCUnaryInterceptor),
 	}
-	var ch *chindexer.Indexer
-	if cfg.ClickHouse.Enabled {
-		ch, err = retryValue(ctx, func() (*chindexer.Indexer, error) { return chindexer.New(ctx, cfg.ClickHouse, logger) })
-		if err != nil {
-			_ = indexer.Close(context.Background())
-			jsBus.Close()
-			return nil, fmt.Errorf("init clickhouse: %w", err)
-		}
+	if creds, err := maybeTransportCredentials(cfg); err != nil {
+		bridge.Close()
+		return nil, err
+	} else if creds != nil {
+		grpcOptions = append(grpcOptions, grpc.Creds(creds))
 	}
-
-	streamHub := stream.NewHub(cfg.Stream.BufferSize)
-	normalizer := normalize.New()
-	diagnosticsStore := diagnostics.NewStore()
-	defaultPolicy := policy.Policy{
-		Revision:   cfg.Policy.DefaultRevision,
-		Sources:    []string{"/var/log/*.log", "journald"},
-		Labels:     map[string]string{"env": "dev", "plane": "data"},
-		BatchSize:  cfg.Policy.DefaultBatchSize,
-		BatchWait:  cfg.Policy.DefaultBatchWait.String(),
-		SourceType: cfg.Policy.DefaultSourceType,
-		UpdatedAt:  time.Now().UTC(),
-	}
-	policyStore := policy.NewStore(defaultPolicy)
-	enrollmentStore := enrollment.NewStore(cfg.Enrollment.DevBootstrapToken)
-	ingestService := ingest.NewService(normalizer, jsBus, streamHub, logger, diagnosticsStore, enrollmentStore, policyStore, cfg.Ingest.AllowUnknownAgents)
-	grpcSvc := grpcapi.New(ingestService)
-	searcher := query.NewSearcher(indexer.BaseURL(), indexer.IndexPrefix(), cfg.OpenSearch.Username, cfg.OpenSearch.Password, cfg.OpenSearch.ContextWindow, cfg.OpenSearch.ContextBefore, cfg.OpenSearch.ContextAfter)
-	app := &App{cfg: cfg, logger: logger, bus: jsBus, osIndexer: indexer, chIndexer: ch, diagnostics: diagnosticsStore, enrollment: enrollmentStore, policy: policyStore}
-
-	grpcServer := grpc.NewServer(grpc.ForceServerCodec(logsv1.JSONCodec{}))
-	logsv1.RegisterIngestionServiceServer(grpcServer, grpcSvc)
-	app.grpcServer = grpcServer
-	app.httpServer = &http.Server{
-		Addr: cfg.HTTP.ListenAddr,
-		Handler: httpapi.NewRouter(httpapi.RouterDeps{
-			Searcher:         searcher,
-			Analytics:        ch,
-			Hub:              streamHub,
-			Logger:           logger,
-			Ready:            func(ctx context.Context) bool { return searcher.Ping(ctx) },
-			Enrollment:       enrollmentStore,
-			Policy:           policyStore,
-			Diagnostics:      diagnosticsStore,
-			GRPCListenAddr:   cfg.GRPC.ListenAddr,
-			EnrollmentConfig: cfg.Enrollment,
-		}),
-	}
-
-	if _, err := jsBus.SubscribeDurable(ctx, cfg.NATS.IndexerConsumer, func(msg *nats.Msg) { indexer.HandleNATS(context.Background(), msg) }); err != nil {
-		app.Close()
-		return nil, fmt.Errorf("subscribe opensearch consumer: %w", err)
-	}
-	if ch != nil {
-		if _, err := jsBus.SubscribeDurable(ctx, cfg.NATS.AnalyticsConsumer, func(msg *nats.Msg) { ch.HandleNATS(context.Background(), msg) }); err != nil {
-			app.Close()
-			return nil, fmt.Errorf("subscribe analytics consumer: %w", err)
-		}
-	}
-	return app, nil
+	grpcServer := grpc.NewServer(grpcOptions...)
+	edgev1.RegisterAgentIngressServiceServer(grpcServer, grpcapi.New(cfg, bridge, logger))
+	return &App{cfg: cfg, logger: logger, bridge: bridge, httpServer: httpServer, grpcServer: grpcServer}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
@@ -130,24 +77,22 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	httpLn, err := net.Listen("tcp", a.cfg.HTTP.ListenAddr)
 	if err != nil {
-		grpcLn.Close()
+		_ = grpcLn.Close()
 		return fmt.Errorf("listen http: %w", err)
 	}
-
 	errCh := make(chan error, 2)
 	go func() {
 		a.logger.Info("starting grpc server", zap.String("addr", a.cfg.GRPC.ListenAddr))
-		if err := a.grpcServer.Serve(grpcLn); err != nil && err != grpc.ErrServerStopped {
+		if err := a.grpcServer.Serve(grpcLn); err != nil {
 			errCh <- err
 		}
 	}()
 	go func() {
 		a.logger.Info("starting http server", zap.String("addr", a.cfg.HTTP.ListenAddr))
-		if err := a.httpServer.Serve(httpLn); err != nil && err != http.ErrServerClosed {
+		if err := serveHTTP(a.httpServer, httpLn, a.cfg); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}
 	}()
-
 	select {
 	case <-ctx.Done():
 		return a.Shutdown(context.Background())
@@ -158,50 +103,41 @@ func (a *App) Run(ctx context.Context) error {
 }
 
 func (a *App) Shutdown(ctx context.Context) error {
-	shutdownCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if a.grpcServer != nil {
-		a.grpcServer.GracefulStop()
+	shutdownErr := a.httpServer.Shutdown(ctx)
+	a.grpcServer.GracefulStop()
+	a.bridge.Close()
+	if a.logger != nil {
+		_ = a.logger.Sync()
 	}
-	if a.httpServer != nil {
-		_ = a.httpServer.Shutdown(shutdownCtx)
-	}
-	a.Close()
-	return nil
+	return shutdownErr
 }
 
-func (a *App) Close() {
-	a.closeOnce.Do(func() {
-		if a.chIndexer != nil {
-			_ = a.chIndexer.Close(context.Background())
-		}
-		if a.osIndexer != nil {
-			_ = a.osIndexer.Close(context.Background())
-		}
-		if a.bus != nil {
-			a.bus.Close()
-		}
-		if a.logger != nil {
-			_ = a.logger.Sync()
-		}
-	})
+func Main() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	app, err := New(ctx)
+	if err != nil {
+		return err
+	}
+	return app.Run(ctx)
 }
 
-func retryValue[T any](ctx context.Context, fn func() (T, error)) (T, error) {
-	var zero T
-	var out T
-	var lastErr error
-	for attempts := 0; attempts < 15; attempts++ {
-		value, err := fn()
-		if err == nil {
-			return value, nil
-		}
-		lastErr = err
-		select {
-		case <-ctx.Done():
-			return zero, ctx.Err()
-		case <-time.After(time.Duration(attempts+1) * time.Second):
-		}
+func maybeTransportCredentials(cfg config.Config) (credentials.TransportCredentials, error) {
+	if cfg.GRPC.TLSCert == "" || cfg.GRPC.TLSKey == "" {
+		return nil, nil
 	}
-	return out, lastErr
+	certificate, err := tls.LoadX509KeyPair(cfg.GRPC.TLSCert, cfg.GRPC.TLSKey)
+	if err != nil {
+		return nil, fmt.Errorf("load grpc tls cert: %w", err)
+	}
+	return credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}), nil
+}
+
+func serveHTTP(server *http.Server, ln net.Listener, cfg config.Config) error {
+	if cfg.HTTP.TLSCert != "" && cfg.HTTP.TLSKey != "" {
+		return server.ServeTLS(ln, cfg.HTTP.TLSCert, cfg.HTTP.TLSKey)
+	}
+	return server.Serve(ln)
 }

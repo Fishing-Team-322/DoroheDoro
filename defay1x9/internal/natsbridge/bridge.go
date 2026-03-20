@@ -1,0 +1,106 @@
+package natsbridge
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/nats-io/nats.go"
+	"go.uber.org/zap"
+
+	"github.com/example/dorohedoro/internal/config"
+)
+
+type Bridge struct {
+	conn   *nats.Conn
+	cfg    config.NATSConfig
+	logger *zap.Logger
+}
+
+func New(cfg config.NATSConfig, logger *zap.Logger) (*Bridge, error) {
+	conn, err := nats.Connect(cfg.URL, nats.Name("edge-api"), nats.ReconnectWait(time.Second))
+	if err != nil {
+		return nil, fmt.Errorf("connect nats: %w", err)
+	}
+	return &Bridge{conn: conn, cfg: cfg, logger: logger}, nil
+}
+
+func (b *Bridge) Close() {
+	if b.conn != nil {
+		_ = b.conn.Drain()
+		b.conn.Close()
+	}
+}
+
+func (b *Bridge) Ready() bool {
+	return b != nil && b.conn != nil && b.conn.Status() == nats.CONNECTED
+}
+
+func (b *Bridge) Request(ctx context.Context, subject string, payload any, out any) error {
+	data, err := marshalPayload(payload)
+	if err != nil {
+		return err
+	}
+	msg := &nats.Msg{Subject: subject, Data: data, Header: nats.Header{}}
+	msg.Header.Set("X-Request-ID", RequestIDFromContext(ctx))
+	reply, err := b.conn.RequestMsgWithContext(ctx, msg)
+	if err != nil {
+		return fmt.Errorf("nats request %s: %w", subject, err)
+	}
+	if out == nil || len(reply.Data) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(reply.Data, out); err != nil {
+		return fmt.Errorf("decode %s response: %w", subject, err)
+	}
+	return nil
+}
+
+func (b *Bridge) Publish(ctx context.Context, subject string, payload any) error {
+	data, err := marshalPayload(payload)
+	if err != nil {
+		return err
+	}
+	msg := &nats.Msg{Subject: subject, Data: data, Header: nats.Header{}}
+	msg.Header.Set("X-Request-ID", RequestIDFromContext(ctx))
+	if err := b.conn.PublishMsg(msg); err != nil {
+		return fmt.Errorf("nats publish %s: %w", subject, err)
+	}
+	return nil
+}
+
+func (b *Bridge) Subscribe(subject string, ch chan *nats.Msg) (*nats.Subscription, error) {
+	return b.conn.ChanSubscribe(subject, ch)
+}
+
+func marshalPayload(payload any) ([]byte, error) {
+	if payload == nil {
+		return []byte(`{}`), nil
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal nats payload: %w", err)
+	}
+	return data, nil
+}
+
+type requestIDKey string
+
+const requestIDKeyValue requestIDKey = "nats-request-id"
+
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKeyValue, strings.TrimSpace(requestID))
+}
+
+func RequestIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return uuid.NewString()
+	}
+	if requestID, ok := ctx.Value(requestIDKeyValue).(string); ok && strings.TrimSpace(requestID) != "" {
+		return requestID
+	}
+	return uuid.NewString()
+}
