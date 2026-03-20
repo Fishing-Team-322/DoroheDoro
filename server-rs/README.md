@@ -9,6 +9,13 @@ The first runtime component is `enrollment-plane`, which owns:
 - heartbeat persistence
 - diagnostics persistence
 
+The second runtime component is `control-plane`, which manages:
+
+- policy metadata lifecycle (create/update/list/revisions)
+- inventory (hosts + host groups)
+- credentials metadata registry
+- internal NATS request/reply contracts for the control-plane domains
+
 Shared protobuf contracts live under `/contracts/proto`.
 
 ## Layout
@@ -21,6 +28,7 @@ server-rs/
 ├── migrations/
 └── crates/
     ├── common/
+    ├── control-plane/
     └── enrollment-plane/
 ```
 
@@ -39,10 +47,12 @@ cd server-rs
 sqlx migrate run --source migrations
 ```
 
-3. Run the service:
+3. Run the services:
 
 ```bash
 cargo run -p enrollment-plane
+# in a separate terminal
+cargo run -p control-plane
 ```
 
 4. Smoke-test through integration tests:
@@ -60,6 +70,27 @@ cargo test -p enrollment-plane --test smoke -- --ignored --nocapture
 - `agents.heartbeat`
 - `agents.diagnostics`
 
+`control-plane` listens to:
+
+- `control.policies.list`
+- `control.policies.get`
+- `control.policies.create`
+- `control.policies.update`
+- `control.policies.revisions`
+- `control.hosts.list`
+- `control.hosts.get`
+- `control.hosts.create`
+- `control.hosts.update`
+- `control.host-groups.list`
+- `control.host-groups.get`
+- `control.host-groups.create`
+- `control.host-groups.update`
+- `control.host-groups.add-member`
+- `control.host-groups.remove-member`
+- `control.credentials.list`
+- `control.credentials.get`
+- `control.credentials.create`
+
 ## Health endpoints
 
 - `GET /healthz`
@@ -73,6 +104,8 @@ Implemented:
 - PostgreSQL-backed enrollment state
 - NATS request/reply and publish handlers
 - dev bootstrap seeding for policy and bootstrap token
+- control-plane Postgres repositories for policy/inventory/credentials
+- control-plane NATS handlers + health endpoints
 
 Not implemented yet:
 

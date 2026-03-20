@@ -1,0 +1,30 @@
+[package]
+name = "control-plane"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-nats.workspace = true
+axum.workspace = true
+chrono.workspace = true
+common = { path = "../common" }
+dotenvy.workspace = true
+futures.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+reqwest.workspace = true
+serial_test.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tower.workspace = true
