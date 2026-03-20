@@ -2,6 +2,7 @@ package grpcapi
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"go.uber.org/zap"
@@ -32,7 +33,10 @@ func (s *Server) Enroll(ctx context.Context, req *edgev1.EnrollRequest) (*edgev1
 	}
 	var resp edgev1.EnrollResponse
 	if err := s.bridge.Request(ctx, s.cfg.NATS.Subjects.AgentsEnrollRequest, req, &resp); err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
+		return nil, mapBridgeError(err)
+	}
+	if resp.RequestId == "" {
+		resp.RequestId = middleware.GetRequestID(ctx)
 	}
 	return &resp, nil
 }
@@ -43,7 +47,10 @@ func (s *Server) FetchPolicy(ctx context.Context, req *edgev1.FetchPolicyRequest
 	}
 	var resp edgev1.FetchPolicyResponse
 	if err := s.bridge.Request(ctx, s.cfg.NATS.Subjects.AgentsPolicyFetch, req, &resp); err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
+		return nil, mapBridgeError(err)
+	}
+	if resp.RequestId == "" {
+		resp.RequestId = middleware.GetRequestID(ctx)
 	}
 	return &resp, nil
 }
@@ -53,7 +60,7 @@ func (s *Server) SendHeartbeat(ctx context.Context, req *edgev1.HeartbeatRequest
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 	if err := s.bridge.Publish(ctx, s.cfg.NATS.Subjects.AgentsHeartbeat, req); err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
+		return nil, mapBridgeError(err)
 	}
 	return &edgev1.Ack{Accepted: true, RequestId: middleware.GetRequestID(ctx), Message: "published"}, nil
 }
@@ -63,7 +70,7 @@ func (s *Server) SendDiagnostics(ctx context.Context, req *edgev1.DiagnosticsReq
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 	if err := s.bridge.Publish(ctx, s.cfg.NATS.Subjects.AgentsDiagnostics, req); err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
+		return nil, mapBridgeError(err)
 	}
 	return &edgev1.Ack{Accepted: true, RequestId: middleware.GetRequestID(ctx), Message: "published"}, nil
 }
@@ -79,7 +86,25 @@ func (s *Server) IngestLogs(ctx context.Context, req *edgev1.IngestLogsRequest) 
 		return nil, status.Error(codes.InvalidArgument, "batch size limit exceeded")
 	}
 	if err := s.bridge.Publish(ctx, s.cfg.NATS.Subjects.LogsIngestRaw, req); err != nil {
-		return nil, status.Error(codes.Unavailable, err.Error())
+		return nil, mapBridgeError(err)
 	}
 	return &edgev1.IngestLogsResponse{Accepted: true, AcceptedCount: int32(len(req.GetEvents())), RequestId: middleware.GetRequestID(ctx)}, nil
+}
+
+func mapBridgeError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return status.Error(codes.Unavailable, "upstream request timeout")
+	}
+	var bridgeErr *natsbridge.BridgeError
+	if errors.As(err, &bridgeErr) {
+		switch bridgeErr.Kind {
+		case natsbridge.ErrorKindTimeout:
+			return status.Error(codes.Unavailable, "upstream request timeout")
+		case natsbridge.ErrorKindBadResponse:
+			return status.Error(codes.Internal, "invalid upstream response")
+		default:
+			return status.Error(codes.Unavailable, "edge bridge unavailable")
+		}
+	}
+	return status.Error(codes.Internal, "internal server error")
 }

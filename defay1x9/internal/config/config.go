@@ -43,29 +43,25 @@ type NATSConfig struct {
 }
 
 type Subjects struct {
-	AgentsEnrollRequest  string
-	AgentsEnrollResponse string
-	AgentsPolicyFetch    string
-	AgentsPolicyResponse string
-	AgentsHeartbeat      string
-	AgentsDiagnostics    string
-	LogsIngestRaw        string
-	DeploymentsCreate    string
-	DeploymentsStatus    string
-	DeploymentsList      string
-	LogsSearch           string
-	LogsHistogram        string
-	LogsSeverity         string
-	LogsTopHosts         string
-	LogsTopServices      string
-	AlertsList           string
-	AlertsGet            string
-	AgentsList           string
-	AgentsGet            string
-	AgentDiagnosticsGet  string
-	PoliciesList         string
-	PoliciesGet          string
-	UIStreamLogs         string
+	AgentsEnrollRequest string
+	AgentsPolicyFetch   string
+	AgentsHeartbeat     string
+	AgentsDiagnostics   string
+	LogsIngestRaw       string
+	DeploymentsCreate   string
+	DeploymentsGet      string
+	DeploymentsList     string
+	LogsSearch          string
+	LogsHistogram       string
+	LogsSeverity        string
+	LogsTopHosts        string
+	LogsTopServices     string
+	AgentsList          string
+	AgentsGet           string
+	AgentDiagnosticsGet string
+	PoliciesList        string
+	PoliciesGet         string
+	UIStreamLogs        string
 }
 
 type TimeoutConfig struct {
@@ -87,6 +83,7 @@ type AuthConfig struct {
 
 type StreamConfig struct {
 	HeartbeatInterval time.Duration
+	RetryInterval     time.Duration
 }
 
 func Load() (Config, error) {
@@ -112,29 +109,25 @@ func Load() (Config, error) {
 			URL:            env("NATS_URL", "nats://localhost:4222"),
 			RequestTimeout: parseDuration(env("NATS_REQUEST_TIMEOUT", "3s"), 3*time.Second),
 			Subjects: Subjects{
-				AgentsEnrollRequest:  env("SUBJECT_AGENTS_ENROLL_REQUEST", "agents.enroll.request"),
-				AgentsEnrollResponse: env("SUBJECT_AGENTS_ENROLL_RESPONSE", "agents.enroll.response"),
-				AgentsPolicyFetch:    env("SUBJECT_AGENTS_POLICY_FETCH", "agents.policy.fetch"),
-				AgentsPolicyResponse: env("SUBJECT_AGENTS_POLICY_RESPONSE", "agents.policy.response"),
-				AgentsHeartbeat:      env("SUBJECT_AGENTS_HEARTBEAT", "agents.heartbeat"),
-				AgentsDiagnostics:    env("SUBJECT_AGENTS_DIAGNOSTICS", "agents.diagnostics"),
-				LogsIngestRaw:        env("SUBJECT_LOGS_INGEST_RAW", "logs.ingest.raw"),
-				DeploymentsCreate:    env("SUBJECT_DEPLOYMENTS_CREATE", "deployments.jobs.create"),
-				DeploymentsStatus:    env("SUBJECT_DEPLOYMENTS_STATUS", "deployments.jobs.status"),
-				DeploymentsList:      env("SUBJECT_DEPLOYMENTS_LIST", "deployments.jobs.list"),
-				LogsSearch:           env("SUBJECT_QUERY_LOGS_SEARCH", "query.logs.search"),
-				LogsHistogram:        env("SUBJECT_QUERY_LOGS_HISTOGRAM", "query.logs.histogram"),
-				LogsSeverity:         env("SUBJECT_QUERY_LOGS_SEVERITY", "query.logs.severity"),
-				LogsTopHosts:         env("SUBJECT_QUERY_LOGS_TOP_HOSTS", "query.logs.top_hosts"),
-				LogsTopServices:      env("SUBJECT_QUERY_LOGS_TOP_SERVICES", "query.logs.top_services"),
-				AlertsList:           env("SUBJECT_ALERTS_LIST", "alerts.list"),
-				AlertsGet:            env("SUBJECT_ALERTS_GET", "alerts.get"),
-				AgentsList:           env("SUBJECT_AGENTS_LIST", "agents.list"),
-				AgentsGet:            env("SUBJECT_AGENTS_GET", "agents.get"),
-				AgentDiagnosticsGet:  env("SUBJECT_AGENTS_DIAGNOSTICS_GET", "agents.diagnostics.get"),
-				PoliciesList:         env("SUBJECT_POLICIES_LIST", "policies.list"),
-				PoliciesGet:          env("SUBJECT_POLICIES_GET", "policies.get"),
-				UIStreamLogs:         env("SUBJECT_UI_STREAM_LOGS", "ui.stream.logs"),
+				AgentsEnrollRequest: env("SUBJECT_AGENTS_ENROLL_REQUEST", "agents.enroll.request"),
+				AgentsPolicyFetch:   env("SUBJECT_AGENTS_POLICY_FETCH", "agents.policy.fetch"),
+				AgentsHeartbeat:     env("SUBJECT_AGENTS_HEARTBEAT", "agents.heartbeat"),
+				AgentsDiagnostics:   env("SUBJECT_AGENTS_DIAGNOSTICS", "agents.diagnostics"),
+				LogsIngestRaw:       env("SUBJECT_LOGS_INGEST_RAW", "logs.ingest.raw"),
+				DeploymentsCreate:   env("SUBJECT_DEPLOYMENTS_CREATE", "deployments.jobs.create"),
+				DeploymentsGet:      env("SUBJECT_DEPLOYMENTS_GET", "deployments.jobs.get"),
+				DeploymentsList:     env("SUBJECT_DEPLOYMENTS_LIST", "deployments.jobs.list"),
+				LogsSearch:          env("SUBJECT_QUERY_LOGS_SEARCH", "query.logs.search"),
+				LogsHistogram:       env("SUBJECT_QUERY_LOGS_HISTOGRAM", "query.logs.histogram"),
+				LogsSeverity:        env("SUBJECT_QUERY_LOGS_SEVERITY", "query.logs.severity"),
+				LogsTopHosts:        env("SUBJECT_QUERY_LOGS_TOP_HOSTS", "query.logs.top_hosts"),
+				LogsTopServices:     env("SUBJECT_QUERY_LOGS_TOP_SERVICES", "query.logs.top_services"),
+				AgentsList:          env("SUBJECT_AGENTS_LIST", "agents.list"),
+				AgentsGet:           env("SUBJECT_AGENTS_GET", "agents.get"),
+				AgentDiagnosticsGet: env("SUBJECT_AGENTS_DIAGNOSTICS_GET", "agents.diagnostics.get"),
+				PoliciesList:        env("SUBJECT_POLICIES_LIST", "policies.list"),
+				PoliciesGet:         env("SUBJECT_POLICIES_GET", "policies.get"),
+				UIStreamLogs:        env("SUBJECT_UI_STREAM_LOGS", "ui.stream.logs"),
 			},
 		},
 		Timeouts: TimeoutConfig{
@@ -151,7 +144,10 @@ func Load() (Config, error) {
 			HTTPStubEnabled: envBool("HTTP_AUTH_STUB_ENABLED", true),
 			MTLSHookEnabled: envBool("GRPC_MTLS_HOOK_ENABLED", false),
 		},
-		Stream: StreamConfig{HeartbeatInterval: parseDuration(env("STREAM_HEARTBEAT_INTERVAL", "25s"), 25*time.Second)},
+		Stream: StreamConfig{
+			HeartbeatInterval: parseDuration(env("STREAM_HEARTBEAT_INTERVAL", "25s"), 25*time.Second),
+			RetryInterval:     parseDuration(env("STREAM_RETRY_INTERVAL", "5s"), 5*time.Second),
+		},
 	}
 	if cfg.HTTP.ListenAddr == "" || cfg.GRPC.ListenAddr == "" || cfg.NATS.URL == "" {
 		return Config{}, fmt.Errorf("HTTP_LISTEN_ADDR, GRPC_LISTEN_ADDR and NATS_URL are required")

@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -52,8 +53,15 @@ func RequestID(next http.Handler) http.Handler {
 }
 
 func Timeout(timeout time.Duration) func(http.Handler) http.Handler {
+	if timeout <= 0 {
+		return func(next http.Handler) http.Handler { return next }
+	}
 	return func(next http.Handler) http.Handler {
-		return http.TimeoutHandler(next, timeout, `{"error":{"code":"deadline_exceeded","message":"request timeout"}}`)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), timeout)
+			defer cancel()
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
 	}
 }
 
@@ -134,7 +142,7 @@ func AccessLog(logger *zap.Logger) func(http.Handler) http.Handler {
 				zap.Duration("latency", time.Since(started)),
 				zap.String("remote_addr", clientIP(r)),
 				zap.String("agent_id", maskedValue(r.Header.Get("X-Agent-ID"))),
-				zap.String("subject", maskedValue(r.Header.Get("X-NATS-Subject"))),
+				zap.String("subject", maskedValue(w.Header().Get("X-NATS-Subject"))),
 			)
 		})
 	}
@@ -148,6 +156,26 @@ func WriteJSON(w http.ResponseWriter, status int, payload any) {
 
 func WriteError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
 	WriteJSON(w, status, model.ErrorEnvelope{Error: model.ErrorBody{Code: code, Message: message, RequestID: GetRequestID(r.Context())}})
+}
+
+func WriteTransportError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+		WriteError(w, r, http.StatusGatewayTimeout, "deadline_exceeded", "request timeout")
+		return
+	}
+	var bridgeErr *natsbridge.BridgeError
+	if errors.As(err, &bridgeErr) {
+		switch bridgeErr.Kind {
+		case natsbridge.ErrorKindTimeout:
+			WriteError(w, r, http.StatusGatewayTimeout, "deadline_exceeded", "upstream request timeout")
+		case natsbridge.ErrorKindBadResponse:
+			WriteError(w, r, http.StatusBadGateway, "internal", "invalid upstream response")
+		default:
+			WriteError(w, r, http.StatusServiceUnavailable, "unavailable", "edge bridge unavailable")
+		}
+		return
+	}
+	WriteError(w, r, http.StatusInternalServerError, "internal", "internal server error")
 }
 
 func GetRequestID(ctx context.Context) string {
