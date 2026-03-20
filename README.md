@@ -1,12 +1,12 @@
 # DoroheDoro local integration stack
 
-This repository currently runs a minimal local integration of the **WEB** and **SERVER** boundary needed for frontend work:
+This repository runs a minimal local integration of the **WEB** and **SERVER** boundary needed for frontend smoke testing:
 
 - `frontend/` — Next.js application exposed on `http://localhost:3000`
 - `edge_api/` — Go Edge API exposed on `http://localhost:8080`
 - `nats` — internal transport for the current Edge API MVP on `nats://localhost:4222`
 
-The root `docker-compose.yml` is set up to start exactly these three services together so the frontend can talk to the current Edge API over HTTP while the Edge API still keeps its existing `/api/v1/*`, `/healthz`, `/readyz`, `/docs`, and `/openapi.json` routes.
+The root `docker-compose.yml` starts exactly these three services together so the frontend can authenticate against a **DEV/STUB auth layer** in the Edge API and then continue calling the existing Edge API ingress routes.
 
 ## Run locally
 
@@ -14,81 +14,127 @@ The root `docker-compose.yml` is set up to start exactly these three services to
 docker compose up --build
 ```
 
-## What starts
-
-- `frontend` — Next.js production-like container (`next build` + `next start`)
-- `edge-api` — Go Edge API container built from `./edge_api`
-- `nats` — NATS server for the current Edge API MVP bridge
-
 ## URLs
 
 - Frontend: `http://localhost:3000`
 - Edge API docs: `http://localhost:8080/docs`
 - Edge API OpenAPI: `http://localhost:8080/openapi.json`
 - Edge API health: `http://localhost:8080/healthz`
+- Edge API readiness: `http://localhost:8080/readyz`
 
-## Frontend ↔ Edge API auth compatibility
+## DEV auth stub env
 
-A minimal compatibility layer was added to `edge_api` so the frontend can use its existing auth client contract without rewriting the app.
+The local compose file enables a frontend-compatible dev auth stub in `edge-api`.
 
-### Supported frontend-compatible routes
+### Default env values
 
-- `GET /auth/csrf`
-- `POST /auth/login`
-- `POST /auth/logout`
-- `GET /auth/me`
-- `PATCH /profile`
+- `HTTP_AUTH_STUB_ENABLED=true`
+- `DEV_TEST_LOGIN=admin`
+- `DEV_TEST_EMAIL=admin@example.com`
+- `DEV_TEST_PASSWORD=admin123`
+- `DEV_TEST_USER_ID=dev-user-1`
+- `DEV_TEST_ROLE=admin`
+- `COOKIE_SECURE=false`
+- `SESSION_TTL=24h`
+- `SESSION_COOKIE_NAME=session_token`
+- `CSRF_COOKIE_NAME=csrf_token`
 
-### Current behavior
+### What they do
 
-This auth flow is intentionally a **stub/mock compatibility layer** for local integration:
+- `HTTP_AUTH_STUB_ENABLED=true` turns on the in-memory dev session/auth stub.
+- `DEV_TEST_LOGIN` and `DEV_TEST_EMAIL` are accepted as login identifiers.
+- `DEV_TEST_PASSWORD` is the only valid password in DEV/STUB mode.
+- `DEV_TEST_USER_ID` and `DEV_TEST_ROLE` shape the returned frontend session payload.
+- `COOKIE_SECURE=false` keeps cookies working over plain `http://localhost`.
+- `SESSION_TTL=24h` controls both session lifetime and default CSRF cookie lifetime.
 
-- `GET /auth/csrf` issues a readable `csrf_token` cookie and returns `{ "csrfToken": "..." }`
-- `POST /auth/login` accepts the existing frontend payload fields:
-  - `identifier`
-  - `email`
-  - `login`
-  - `password`
-- Successful login creates an in-memory session, sets an HttpOnly session cookie, rotates CSRF, and returns a frontend-compatible session payload
-- `GET /auth/me` returns the current session payload when the session cookie is present
-- `PATCH /profile` requires both the session cookie and `X-CSRF-Token`, then updates the stubbed display name in the in-memory session
-- `POST /auth/logout` clears both session and CSRF cookies
+### Override credentials
 
-### Cookie / CSRF behavior
-
-- CSRF cookie name: `csrf_token`
-- Frontend sends `X-CSRF-Token`
-- Frontend requests use `credentials: "include"`
-- Session cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`
-- `SESSION_COOKIE_SECURE=false` is used by default in local Docker so cookies work over plain HTTP on localhost
-- CORS is enabled for `http://localhost:3000` so the browser can call `http://localhost:8080` with credentials
-
-## Quick auth flow check
-
-1. Open `http://localhost:3000`
-2. Go to the login page
-3. Sign in with any non-empty identifier and password
-4. Confirm the app can load the protected dashboard
-5. Open the profile page and save a new display name
-6. Confirm the page keeps showing the updated user payload from `GET /auth/me`
-
-## Manual API checks
-
-### Health and docs
+You can override any of these before starting compose, for example:
 
 ```bash
-curl -i http://localhost:8080/healthz
-curl -i http://localhost:8080/docs
-curl -i http://localhost:8080/openapi.json
+export DEV_TEST_LOGIN=demo
+export DEV_TEST_EMAIL=demo@example.com
+export DEV_TEST_PASSWORD=demo123
+export DEV_TEST_USER_ID=dev-user-42
+export DEV_TEST_ROLE=viewer
+export SESSION_TTL=8h
+docker compose up --build
 ```
 
-### Auth compatibility flow
+## Frontend-compatible auth routes
+
+The Edge API keeps the existing MVP routes and adds a local compatibility layer for the frontend contract:
+
+- `GET /auth/csrf`
+  - issues a readable `csrf_token` cookie
+  - returns `{ "csrfToken": "<token>" }`
+- `POST /auth/login`
+  - accepts `identifier`, `email`, `login`, `password`
+  - validates against the DEV env credentials
+  - creates an in-memory session cookie and rotates CSRF
+- `POST /auth/logout`
+  - requires session + CSRF
+  - clears session and CSRF cookies
+- `GET /auth/me`
+  - returns the current session payload when the session cookie is valid
+- `PATCH /profile`
+  - requires session + CSRF
+  - updates in-memory profile fields for the current dev session
+
+If `HTTP_AUTH_STUB_ENABLED=false`, these DEV auth handlers stay mounted but return a clear `501 not_implemented` response that tells you to enable the stub or provide a real auth integration.
+
+## Cookie and CSRF behavior
+
+- Session cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`
+- Session cookie `Secure` is controlled by `COOKIE_SECURE`
+- CSRF cookie name defaults to `csrf_token`
+- Frontend reads `csrf_token` and sends `X-CSRF-Token`
+- Mutating routes (`POST`, `PUT`, `PATCH`, `DELETE`) validate:
+  - active session
+  - CSRF cookie
+  - `X-CSRF-Token` header
+  - cookie/header match
+
+## Existing MVP routes kept intact
+
+The DEV auth stub is additive. These Edge API MVP routes remain available:
+
+- `GET /healthz`
+- `GET /readyz`
+- `GET /api/v1/me`
+- current `/api/v1/*` request/reply routes
+- NATS bridge
+- SSE stream via `/api/v1/stream/logs`
+
+## Default login for local smoke test
+
+Use either of these identifiers with the default password:
+
+- login: `admin`
+- email: `admin@example.com`
+- password: `admin123`
+
+## Quick login flow check
+
+1. Start the stack with `docker compose up --build`.
+2. Open `http://localhost:3000`.
+3. Sign in with:
+   - login: `admin`
+   - password: `admin123`
+4. Confirm the frontend becomes authenticated.
+5. Open the profile page and save a new display name.
+6. Confirm the frontend successfully calls:
+   - `GET /auth/me`
+   - `PATCH /profile`
+7. Confirm health endpoints still respond:
+   - `GET http://localhost:8080/healthz`
+   - `GET http://localhost:8080/readyz`
+
+## Manual API check
 
 ```bash
-# 1) Fetch CSRF token and cookie
 curl -i -c /tmp/doro.cookies http://localhost:8080/auth/csrf
-
-# 2) Read the csrf_token value from the cookie jar and login
 CSRF_TOKEN=$(awk '$6 == "csrf_token" { print $7 }' /tmp/doro.cookies | tail -n1)
 
 curl -i \
@@ -96,15 +142,17 @@ curl -i \
   -c /tmp/doro.cookies \
   -H "Content-Type: application/json" \
   -H "X-CSRF-Token: ${CSRF_TOKEN}" \
-  -d '{"identifier":"demo@example.com","password":"demo"}' \
+  -d '{"identifier":"admin","password":"admin123"}' \
   http://localhost:8080/auth/login
 
-# 3) Read the current session
 curl -i -b /tmp/doro.cookies http://localhost:8080/auth/me
+
+curl -i \
+  -X PATCH \
+  -b /tmp/doro.cookies \
+  -c /tmp/doro.cookies \
+  -H "Content-Type: application/json" \
+  -H "X-CSRF-Token: ${CSRF_TOKEN}" \
+  -d '{"displayName":"Admin Smoke"}' \
+  http://localhost:8080/profile
 ```
-
-## Notes
-
-- The auth compatibility layer is intentionally local-dev oriented and currently stores sessions in memory inside the Go Edge API process.
-- Existing Edge API MVP routes remain available under `/api/v1/*`.
-- `docker-compose.server.yml` is still available for the separate server-only deployment flow.
