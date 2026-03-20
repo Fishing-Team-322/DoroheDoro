@@ -1,223 +1,1279 @@
 openapi: 3.0.3
 info:
-  title: DoroheDoro Edge API MVP
-  version: 0.1.0
+  title: DoroheDoro Edge API
+  version: 0.2.0
+  description: "Thin HTTP edge-api ingress for DoroheDoro. The service keeps HTTP routing, gRPC ingress, and NATS bridging in Go while domain responders stay behind request/reply subjects. This OpenAPI contract documents the HTTP surface exposed by the current MVP edge-api."
 servers:
-  - url: http://localhost:8080
+  - url: /
+    description: Current host
+  - url: "http://localhost:8080"
+    description: Local development
+tags:
+  - name: health
+    description: Liveness and readiness probes.
+  - name: auth
+    description: Stub auth context exposed to the HTTP client.
+  - name: agents
+    description: Agent inventory and diagnostics read models bridged over NATS.
+  - name: policies
+    description: Policy catalog endpoints bridged over NATS.
+  - name: deployments
+    description: Deployment job submission and read-model endpoints.
+  - name: logs
+    description: Search and aggregation endpoints for logs.
+  - name: stream
+    description: Server-sent event stream endpoints.
 paths:
   /healthz:
     get:
+      tags:
+        - health
+      operationId: getHealthz
       summary: Liveness probe
+      description: Returns `ok` when the HTTP process is alive.
       responses:
-        '200':
-          description: Process is alive
+        200:
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+              example:
+                status: ok
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
   /readyz:
     get:
+      tags:
+        - health
+      operationId: getReadyz
       summary: Readiness probe
+      description: Returns `ready` only when the NATS bridge is connected and able to serve request/reply traffic.
       responses:
-        '200':
-          description: NATS bridge ready
-        '503':
-          description: NATS bridge unavailable
+        200:
+          description: Bridge is ready.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: "#/components/schemas/StatusResponse"
+              example:
+                status: ready
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+        503:
+          description: Bridge is not ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: unavailable
+                  message: nats bridge is not ready
+                  request_id: req-123
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
   /api/v1/me:
     get:
-      summary: Stub current user context
+      tags:
+        - auth
+      operationId: getMe
+      summary: Get current auth context
+      description: Exposes the current stub auth context inferred from HTTP headers.
       responses:
-        '200':
-          description: Auth stub payload
-  /api/v1/agents:
-    get:
-      summary: List agents
-      responses:
-        '200':
-          description: Bridged response from NATS
-  /api/v1/agents/{id}:
-    get:
-      summary: Get agent
-      parameters:
-        - $ref: '#/components/parameters/Id'
-      responses:
-        '200':
-          description: Bridged response from NATS
-        '400':
-          description: Invalid id
+        200:
+          description: Current auth context.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: "#/components/schemas/MeResponse"
+              example:
+                user:
+                  subject: web-user
+                  role: stub
+                auth:
+                  mode: stub
+                  rbac: todo
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+  /api/v1/agents:
+    get:
+      tags:
+        - agents
+      operationId: listAgents
+      summary: List agents
+      description: Bridges an agent inventory list request to the `agents.list` NATS subject.
+      responses:
+        200:
+          description: Agent list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentsListResponse"
+              example:
+                items:
+                  - id: agent-01
+                    host: edge-host-01
+                    status: online
+                    policy_id: policy-linux-baseline
+                    last_seen_at: "2026-03-20T12:00:00Z"
+                    labels:
+                      env: prod
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
+  /api/v1/agents/{id}:
+    get:
+      tags:
+        - agents
+      operationId: getAgent
+      summary: Get agent by id
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        200:
+          description: Agent record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentResponse"
+              example:
+                item:
+                  id: agent-01
+                  host: edge-host-01
+                  status: online
+                  policy_id: policy-linux-baseline
+                  last_seen_at: "2026-03-20T12:00:00Z"
+                  labels:
+                    env: prod
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        400:
+          description: Missing or invalid agent id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: invalid_argument
+                  message: agent id is required
+                  request_id: req-123
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/agents/{id}/diagnostics:
     get:
+      tags:
+        - agents
+      operationId: getAgentDiagnostics
       summary: Get agent diagnostics
       parameters:
-        - $ref: '#/components/parameters/Id'
+        - $ref: "#/components/parameters/Id"
       responses:
-        '200':
-          description: Bridged response from NATS
+        200:
+          description: Latest diagnostics snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentDiagnosticsResponse"
+              example:
+                item:
+                  agent_id: agent-01
+                  status: healthy
+                  collected_at: "2026-03-20T12:00:00Z"
+                  checks:
+                    - name: cpu
+                      status: ok
+                      message: within threshold
+                  payload:
+                    cpu: 12
+                    mem: 34
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        400:
+          description: Missing or invalid agent id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: invalid_argument
+                  message: agent id is required
+                  request_id: req-123
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/policies:
     get:
+      tags:
+        - policies
+      operationId: listPolicies
       summary: List policies
+      description: Bridges a policy catalog list request to the `policies.list` NATS subject.
       responses:
-        '200':
-          description: Bridged response from NATS
+        200:
+          description: Policy list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PoliciesListResponse"
+              example:
+                items:
+                  - id: policy-linux-baseline
+                    name: Linux baseline
+                    revision: 2026.03.20
+                    description: Baseline hardening policy for Linux nodes.
+                    targets:
+                      - linux
+                      - amd64
+                    params:
+                      enforce: "true"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/policies/{id}:
     get:
-      summary: Get policy
+      tags:
+        - policies
+      operationId: getPolicy
+      summary: Get policy by id
       parameters:
-        - $ref: '#/components/parameters/Id'
+        - $ref: "#/components/parameters/Id"
       responses:
-        '200':
-          description: Bridged response from NATS
+        200:
+          description: Policy record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyResponse"
+              example:
+                item:
+                  id: policy-linux-baseline
+                  name: Linux baseline
+                  revision: 2026.03.20
+                  description: Baseline hardening policy for Linux nodes.
+                  targets:
+                    - linux
+                    - amd64
+                  params:
+                    enforce: "true"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        400:
+          description: Missing or invalid policy id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: invalid_argument
+                  message: policy id is required
+                  request_id: req-123
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/deployments:
     get:
+      tags:
+        - deployments
+      operationId: listDeployments
       summary: List deployments
       responses:
-        '200':
-          description: Bridged response from NATS
+        200:
+          description: Deployment jobs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentsListResponse"
+              example:
+                items:
+                  - id: dep-01
+                    policy_id: policy-linux-baseline
+                    status: accepted
+                    created_at: "2026-03-20T12:00:00Z"
+                    agent_ids:
+                      - agent-01
+                      - agent-02
+                    params:
+                      rollout: canary
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
     post:
+      tags:
+        - deployments
+      operationId: createDeployment
       summary: Create deployment
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeploymentCreateRequest'
+              $ref: "#/components/schemas/DeploymentCreateRequest"
+            example:
+              policy_id: policy-linux-baseline
+              agent_ids:
+                - agent-01
+                - agent-02
+              params:
+                rollout: canary
       responses:
-        '202':
-          description: Accepted response from deployment plane
-        '400':
-          description: Invalid payload
+        202:
+          description: Deployment request accepted.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: "#/components/schemas/DeploymentAcceptedResponse"
+              example:
+                accepted: true
+                item:
+                  id: dep-01
+                  policy_id: policy-linux-baseline
+                  status: accepted
+                  created_at: "2026-03-20T12:00:00Z"
+                  agent_ids:
+                    - agent-01
+                    - agent-02
+                  params:
+                    rollout: canary
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        400:
+          description: Invalid deployment payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: invalid_argument
+                  message: policy_id is required
+                  request_id: req-123
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/deployments/{id}:
     get:
-      summary: Get deployment
+      tags:
+        - deployments
+      operationId: getDeployment
+      summary: Get deployment by id
       parameters:
-        - $ref: '#/components/parameters/Id'
+        - $ref: "#/components/parameters/Id"
       responses:
-        '200':
-          description: Bridged response from NATS
+        200:
+          description: Deployment record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentResponse"
+              example:
+                item:
+                  id: dep-01
+                  policy_id: policy-linux-baseline
+                  status: accepted
+                  created_at: "2026-03-20T12:00:00Z"
+                  agent_ids:
+                    - agent-01
+                    - agent-02
+                  params:
+                    rollout: canary
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        400:
+          description: Missing or invalid deployment id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: invalid_argument
+                  message: deployment id is required
+                  request_id: req-123
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/logs/search:
     post:
+      tags:
+        - logs
+      operationId: searchLogs
       summary: Search logs
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LogSearchRequest'
+              $ref: "#/components/schemas/LogSearchRequest"
+            example:
+              query: timeout OR error
+              from: "2026-03-20T11:00:00Z"
+              to: "2026-03-20T12:00:00Z"
+              host: edge-host-01
+              service: nginx
+              severity: warn
+              limit: 100
+              filters:
+                env: prod
       responses:
-        '200':
-          description: Search result from query plane
+        200:
+          description: Search results.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogSearchResponse"
+              example:
+                items:
+                  - timestamp: "2026-03-20T11:59:30Z"
+                    agent_id: agent-01
+                    host: edge-host-01
+                    service: nginx
+                    severity: warn
+                    message: upstream timeout
+                    labels:
+                      env: prod
+                next_cursor: "logs:cursor:2"
+                total: 1
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        400:
+          description: Invalid logs search payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              example:
+                error:
+                  code: invalid_argument
+                  message: invalid JSON body
+                  request_id: req-123
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/logs/histogram:
     get:
-      summary: Logs histogram
+      tags:
+        - logs
+      operationId: getLogsHistogram
+      summary: Get logs histogram
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Host"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Severity"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Query"
+        - $ref: "#/components/parameters/Interval"
       responses:
-        '200':
-          description: Histogram result from query plane
+        200:
+          description: Histogram buckets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistogramResponse"
+              example:
+                items:
+                  - ts: "2026-03-20T11:55:00Z"
+                    count: 17
+                  - ts: "2026-03-20T12:00:00Z"
+                    count: 25
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/logs/severity:
     get:
-      summary: Severity aggregation
+      tags:
+        - logs
+      operationId: getLogsSeverity
+      summary: Get severity aggregation
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Host"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Severity"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Query"
+        - $ref: "#/components/parameters/TopN"
       responses:
-        '200':
-          description: Severity result from query plane
+        200:
+          description: Severity aggregation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeverityResponse"
+              example:
+                items:
+                  - name: error
+                    count: 3
+                  - name: warn
+                    count: 12
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/logs/top-hosts:
     get:
-      summary: Top hosts aggregation
+      tags:
+        - logs
+      operationId: getLogsTopHosts
+      summary: Get top hosts
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Host"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Severity"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Query"
+        - $ref: "#/components/parameters/TopN"
       responses:
-        '200':
-          description: Top hosts result from query plane
+        200:
+          description: Top host aggregation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopHostsResponse"
+              example:
+                items:
+                  - name: edge-host-01
+                    count: 18
+                  - name: edge-host-02
+                    count: 6
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/logs/top-services:
     get:
-      summary: Top services aggregation
+      tags:
+        - logs
+      operationId: getLogsTopServices
+      summary: Get top services
+      parameters:
+        - $ref: "#/components/parameters/From"
+        - $ref: "#/components/parameters/To"
+        - $ref: "#/components/parameters/Host"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Severity"
+        - $ref: "#/components/parameters/AgentId"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Query"
+        - $ref: "#/components/parameters/TopN"
       responses:
-        '200':
-          description: Top services result from query plane
+        200:
+          description: Top service aggregation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TopServicesResponse"
+              example:
+                items:
+                  - name: nginx
+                    count: 18
+                  - name: sshd
+                    count: 6
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+            X-NATS-Subject:
+              $ref: "#/components/headers/NATSSubject"
+        503:
+          $ref: "#/components/responses/Unavailable"
+        504:
+          $ref: "#/components/responses/GatewayTimeout"
   /api/v1/stream/logs:
     get:
-      summary: Live log stream via SSE
+      tags:
+        - stream
+      operationId: streamLogs
+      summary: Stream logs over SSE
+      description: Subscribes the client to server-sent events backed by the `ui.stream.logs` NATS subject.
       parameters:
-        - in: query
-          name: host
-          schema:
-            type: string
-        - in: query
-          name: service
-          schema:
-            type: string
-        - in: query
-          name: severity
-          schema:
-            type: string
+        - $ref: "#/components/parameters/Host"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Severity"
       responses:
-        '200':
-          description: SSE stream
+        200:
+          description: SSE stream established.
           content:
             text/event-stream:
               schema:
                 type: string
+                example: "event: log\ndata: {\"type\":\"log\",\"subject\":\"ui.stream.logs\",\"payload\":{\"timestamp\":\"2026-03-20T11:59:30Z\",\"service\":\"nginx\",\"severity\":\"warn\",\"message\":\"upstream timeout\"}}\n\n"
+          headers:
+            X-Request-ID:
+              $ref: "#/components/headers/RequestId"
+        503:
+          $ref: "#/components/responses/Unavailable"
 components:
   parameters:
     Id:
       in: path
       name: id
       required: true
+      description: Resource identifier.
+      schema:
+        type: string
+    From:
+      in: query
+      name: from
+      schema:
+        type: string
+        format: date-time
+      description: Inclusive RFC3339 timestamp lower bound.
+    To:
+      in: query
+      name: to
+      schema:
+        type: string
+        format: date-time
+      description: Exclusive RFC3339 timestamp upper bound.
+    Host:
+      in: query
+      name: host
+      schema:
+        type: string
+      description: Filter by host name.
+    Service:
+      in: query
+      name: service
+      schema:
+        type: string
+      description: Filter by service name.
+    Severity:
+      in: query
+      name: severity
+      schema:
+        type: string
+      description: Filter by severity level.
+    AgentId:
+      in: query
+      name: agent_id
+      schema:
+        type: string
+      description: Filter by agent identifier.
+    Limit:
+      in: query
+      name: limit
+      schema:
+        type: integer
+      description: Result page size or aggregation limit.
+    Cursor:
+      in: query
+      name: cursor
+      schema:
+        type: string
+      description: Opaque pagination cursor.
+    Interval:
+      in: query
+      name: interval
+      schema:
+        type: string
+      description: "Histogram bucket size such as 1m, 5m, or 1h."
+    TopN:
+      in: query
+      name: top
+      schema:
+        type: integer
+      description: Maximum number of buckets to return.
+    Query:
+      in: query
+      name: query
+      schema:
+        type: string
+      description: Free-text search expression.
+  headers:
+    RequestId:
+      description: Correlation identifier attached by the edge-api.
+      schema:
+        type: string
+    NATSSubject:
+      description: NATS subject used for the bridged upstream request.
       schema:
         type: string
   schemas:
+    StatusResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          example: ok
     ErrorEnvelope:
       type: object
+      required:
+        - error
       properties:
         error:
           type: object
+          required:
+            - code
+            - message
           properties:
             code:
               type: string
+              example: invalid_argument
             message:
               type: string
+              example: policy_id is required
             request_id:
               type: string
-    DeploymentCreateRequest:
+              example: req-123
+    AuthContext:
       type: object
-      required: [policy_id]
+      required:
+        - subject
+        - role
       properties:
+        subject:
+          type: string
+          example: web-user
+        role:
+          type: string
+          example: stub
+        agent_id:
+          type: string
+          example: agent-01
+    AuthMeta:
+      type: object
+      required:
+        - mode
+        - rbac
+      properties:
+        mode:
+          type: string
+          example: stub
+        rbac:
+          type: string
+          example: todo
+    MeResponse:
+      type: object
+      required:
+        - user
+        - auth
+      properties:
+        user:
+          $ref: "#/components/schemas/AuthContext"
+        auth:
+          $ref: "#/components/schemas/AuthMeta"
+    Agent:
+      type: object
+      required:
+        - id
+        - host
+        - status
+      properties:
+        id:
+          type: string
+          example: agent-01
+        host:
+          type: string
+          example: edge-host-01
+        status:
+          type: string
+          example: online
         policy_id:
           type: string
-        agent_ids:
+          example: policy-linux-baseline
+        last_seen_at:
+          type: string
+          format: date-time
+          example: "2026-03-20T12:00:00Z"
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            env: prod
+            region: us-east-1
+    AgentsListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        next_cursor:
+          type: string
+          example: "agents:cursor:2"
+    AgentResponse:
+      type: object
+      required:
+        - item
+      properties:
+        item:
+          $ref: "#/components/schemas/Agent"
+    DiagnosticCheck:
+      type: object
+      required:
+        - name
+        - status
+      properties:
+        name:
+          type: string
+          example: cpu
+        status:
+          type: string
+          example: ok
+        message:
+          type: string
+          example: within threshold
+    AgentDiagnostics:
+      type: object
+      required:
+        - agent_id
+        - status
+        - checks
+      properties:
+        agent_id:
+          type: string
+          example: agent-01
+        status:
+          type: string
+          example: healthy
+        collected_at:
+          type: string
+          format: date-time
+          example: "2026-03-20T12:00:00Z"
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiagnosticCheck"
+        payload:
+          type: object
+          additionalProperties: true
+          example:
+            cpu: 12
+            mem: 34
+    AgentDiagnosticsResponse:
+      type: object
+      required:
+        - item
+      properties:
+        item:
+          $ref: "#/components/schemas/AgentDiagnostics"
+    Policy:
+      type: object
+      required:
+        - id
+        - name
+        - revision
+      properties:
+        id:
+          type: string
+          example: policy-linux-baseline
+        name:
+          type: string
+          example: Linux baseline
+        revision:
+          type: string
+          example: 2026.03.20
+        description:
+          type: string
+          example: Baseline hardening policy for Linux nodes.
+        targets:
           type: array
           items:
             type: string
+          example:
+            - linux
+            - amd64
         params:
           type: object
           additionalProperties:
             type: string
+          example:
+            enforce: "true"
+    PoliciesListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Policy"
+    PolicyResponse:
+      type: object
+      required:
+        - item
+      properties:
+        item:
+          $ref: "#/components/schemas/Policy"
+    DeploymentCreateRequest:
+      type: object
+      required:
+        - policy_id
+      properties:
+        policy_id:
+          type: string
+          example: policy-linux-baseline
+        agent_ids:
+          type: array
+          items:
+            type: string
+          example:
+            - agent-01
+            - agent-02
+        params:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            rollout: canary
+    Deployment:
+      type: object
+      required:
+        - id
+        - policy_id
+        - status
+      properties:
+        id:
+          type: string
+          example: dep-01
+        policy_id:
+          type: string
+          example: policy-linux-baseline
+        status:
+          type: string
+          example: accepted
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-03-20T12:00:00Z"
+        agent_ids:
+          type: array
+          items:
+            type: string
+          example:
+            - agent-01
+            - agent-02
+        params:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            rollout: canary
+    DeploymentResponse:
+      type: object
+      required:
+        - item
+      properties:
+        item:
+          $ref: "#/components/schemas/Deployment"
+    DeploymentAcceptedResponse:
+      type: object
+      required:
+        - accepted
+        - item
+      properties:
+        accepted:
+          type: boolean
+          example: true
+        item:
+          $ref: "#/components/schemas/Deployment"
+    DeploymentsListResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Deployment"
+        next_cursor:
+          type: string
+          example: "deployments:cursor:2"
     LogSearchRequest:
       type: object
       properties:
         query:
           type: string
+          example: timeout OR error
         from:
           type: string
+          format: date-time
+          example: "2026-03-20T11:00:00Z"
         to:
           type: string
+          format: date-time
+          example: "2026-03-20T12:00:00Z"
         agent_id:
           type: string
+          example: agent-01
         host:
           type: string
+          example: edge-host-01
         service:
           type: string
+          example: nginx
         severity:
           type: string
+          example: warn
         limit:
           type: integer
+          example: 100
         cursor:
           type: string
+          example: "logs:cursor:2"
         filters:
           type: object
           additionalProperties:
             type: string
+          example:
+            env: prod
+    LogEntry:
+      type: object
+      required:
+        - timestamp
+        - message
+        - severity
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-03-20T11:59:30Z"
+        agent_id:
+          type: string
+          example: agent-01
+        host:
+          type: string
+          example: edge-host-01
+        service:
+          type: string
+          example: nginx
+        severity:
+          type: string
+          example: warn
+        message:
+          type: string
+          example: upstream timeout
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            env: prod
+    LogSearchResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEntry"
+        next_cursor:
+          type: string
+          example: "logs:cursor:2"
+        total:
+          type: integer
+          example: 1
+    HistogramBucket:
+      type: object
+      required:
+        - ts
+        - count
+      properties:
+        ts:
+          type: string
+          format: date-time
+          example: "2026-03-20T11:59:00Z"
+        count:
+          type: integer
+          example: 42
+    HistogramResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistogramBucket"
+    NamedCount:
+      type: object
+      required:
+        - name
+        - count
+      properties:
+        name:
+          type: string
+          example: warn
+        count:
+          type: integer
+          example: 12
+    SeverityResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamedCount"
+    TopHostsResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamedCount"
+    TopServicesResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamedCount"
+    StreamLogEvent:
+      type: object
+      required:
+        - type
+        - payload
+      properties:
+        type:
+          type: string
+          example: log
+        subject:
+          type: string
+          example: ui.stream.logs
+        payload:
+          $ref: "#/components/schemas/LogEntry"
+  responses:
+    BadRequest:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+    Unavailable:
+      description: Upstream bridge is unavailable.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+    GatewayTimeout:
+      description: Upstream request timed out.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"
+    InternalError:
+      description: Internal server error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+      headers:
+        X-Request-ID:
+          $ref: "#/components/headers/RequestId"

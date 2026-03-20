@@ -28,6 +28,9 @@ The Go service was simplified to keep ownership out of the ingress layer:
   /contracts
     /proto
   /docs
+    openapi.json
+    openapi.yaml
+    /ui
   /internal
     /app
     /auth
@@ -44,6 +47,24 @@ The Go service was simplified to keep ownership out of the ingress layer:
   README.md
   endpoints-matrix.md
 ```
+
+## OpenAPI / Swagger docs
+
+After startup the embedded docs are available locally and in deployed environments without any CDN:
+
+- `GET /docs`
+- `GET /docs/index.html`
+- `GET /openapi.json`
+- `GET /openapi.yaml`
+
+Local URLs:
+
+- http://localhost:8080/docs
+- http://localhost:8080/docs/index.html
+- http://localhost:8080/openapi.json
+- http://localhost:8080/openapi.yaml
+
+The `/docs` page is a self-hosted browser UI for the same OpenAPI contract served by `/openapi.json` and `/openapi.yaml`.
 
 ## MVP HTTP endpoints
 
@@ -108,6 +129,7 @@ Additional HTTP read-model subjects still required to serve MVP list/get routes:
 - gRPC maps bridge failures to `InvalidArgument`, `Unavailable`, or `Internal` status codes.
 - `/readyz` is green only when the NATS bridge is connected.
 - `/api/v1/stream/logs` serves SSE and supports optional `host`, `service`, and `severity` filters.
+- `/docs` and `/openapi.json` are served by the same edge-api process and do not require extra services.
 
 ## Local run
 
@@ -121,7 +143,7 @@ docker compose up --build nats edge-api
 ## Smoke test
 
 1. Start NATS and edge-api.
-2. Start Rust responders for the request/reply subjects listed above.
+2. Start Rust responders for the request/reply subjects listed above if you want non-stub list/search payloads.
 3. In another shell run:
 
 ```bash
@@ -129,6 +151,8 @@ cd /workspace/DoroheDoro/defay1x9
 EDGE_API_GRPC_ADDR=localhost:9090 go run ./cmd/fake-agent
 curl http://localhost:8080/healthz
 curl http://localhost:8080/readyz
+curl http://localhost:8080/docs
+curl http://localhost:8080/openapi.json
 curl http://localhost:8080/api/v1/me
 curl -N 'http://localhost:8080/api/v1/stream/logs?severity=error'
 ```
