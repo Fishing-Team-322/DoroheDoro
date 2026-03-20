@@ -2,11 +2,11 @@
 
 This repository runs a minimal local integration of the **WEB** and **SERVER** boundary needed for frontend smoke testing:
 
-- `frontend/` — Next.js application exposed on `http://localhost:3000`
+- `frontend/` — Next.js WEB application exposed on `http://localhost:3000`
 - `edge_api/` — Go Edge API exposed on `http://localhost:8080`
 - `nats` — internal transport for the current Edge API MVP on `nats://localhost:4222`
 
-The root `docker-compose.yml` starts exactly these three services together so the frontend can authenticate against a **DEV/STUB auth layer** in the Edge API and then continue calling the existing Edge API ingress routes.
+The root `docker-compose.yml` starts exactly these three services together so the WEB frontend can authenticate against a **DEV/STUB auth layer** in the Edge API and then continue calling the existing Edge API ingress routes. Requests now go browser -> WEB (`/api/edge/*`) -> Edge API, so login works even when the browser is opened from another machine and `localhost:8080` is not the correct public API address.
 
 ## Run locally
 
@@ -28,6 +28,11 @@ The local compose file enables a frontend-compatible dev auth stub in `edge-api`
 
 ### Default env values
 
+Frontend proxy env:
+- `NEXT_PUBLIC_API_BASE_URL=/api/edge`
+- `EDGE_API_INTERNAL_URL=http://edge-api:8080`
+
+Edge API auth env:
 - `HTTP_AUTH_STUB_ENABLED=true`
 - `DEV_TEST_LOGIN=admin`
 - `DEV_TEST_EMAIL=admin@example.com`
@@ -83,6 +88,10 @@ The Edge API keeps the existing MVP routes and adds a local compatibility layer 
   - updates in-memory profile fields for the current dev session
 
 If `HTTP_AUTH_STUB_ENABLED=false`, these DEV auth handlers stay mounted but return a clear `501 not_implemented` response that tells you to enable the stub or provide a real auth integration.
+
+## WEB -> SERVER proxy
+
+The WEB container proxies every request from `/api/edge/*` to `EDGE_API_INTERNAL_URL`. This keeps browser calls same-origin with the WEB host while still routing traffic to the Go Edge API inside compose. Because auth cookies are now issued through the WEB origin, the dev login flow works without a separate browser-visible `http://localhost:8080` dependency.
 
 ## Cookie and CSRF behavior
 
