@@ -1,0 +1,45 @@
+services:
+  nats:
+    image: nats:2.11-alpine
+    command: ["-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+
+  edge-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SERVICE_NAME: edge-api
+      LOG_LEVEL: info
+      HTTP_LISTEN_ADDR: :8080
+      GRPC_LISTEN_ADDR: :9090
+      NATS_URL: nats://nats:4222
+      NATS_REQUEST_TIMEOUT: 3s
+      HTTP_REQUEST_TIMEOUT: 15s
+      GRPC_REQUEST_TIMEOUT: 15s
+      HTTP_MAX_BODY_BYTES: 1048576
+      AGENT_LOG_BATCH_SIZE: 1000
+      STREAM_HEARTBEAT_INTERVAL: 25s
+      STREAM_RETRY_INTERVAL: 5s
+      HTTP_AUTH_STUB_ENABLED: "true"
+      GRPC_MTLS_HOOK_ENABLED: "false"
+    depends_on:
+      - nats
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+
+  fake-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["/usr/local/bin/fake-agent"]
+    environment:
+      EDGE_API_GRPC_ADDR: edge-api:9090
+      FAKE_AGENT_ENROLLMENT_TOKEN: dev-bootstrap-token
+      FAKE_AGENT_HOST: smoke-host
+    depends_on:
+      - edge-api
+    profiles: ["smoke"]
