@@ -19,6 +19,7 @@ type compatUser struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
 	Login       string `json:"login"`
+	Role        string `json:"role,omitempty"`
 	DisplayName string `json:"displayName"`
 	UpdatedAt   string `json:"updatedAt,omitempty"`
 }
@@ -88,6 +89,10 @@ func (h *compatAuthHandler) registerOptions(r chi.Router, pattern string) {
 }
 
 func (h *compatAuthHandler) handleCSRF(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureStubEnabled(w) {
+		return
+	}
+
 	csrfToken := randomToken(32)
 	if session, ok := h.sessionFromRequest(r); ok {
 		session.CSRFToken = csrfToken
@@ -99,7 +104,10 @@ func (h *compatAuthHandler) handleCSRF(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *compatAuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if err := h.validateCSRF(r); err != nil {
+	if !h.ensureStubEnabled(w) {
+		return
+	}
+	if err := h.validateCSRF(r, true); err != nil {
 		writeCompatError(w, http.StatusForbidden, "forbidden", err.Error())
 		return
 	}
@@ -110,19 +118,21 @@ func (h *compatAuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	identifier := firstNonEmpty(req.Identifier, req.Email, req.Login)
-	identifier = strings.TrimSpace(identifier)
+	identifier := strings.TrimSpace(firstNonEmpty(req.Identifier, req.Email, req.Login))
 	password := strings.TrimSpace(req.Password)
 	if identifier == "" || password == "" {
 		writeCompatError(w, http.StatusBadRequest, "invalid_argument", "identifier and password are required")
 		return
 	}
+	if !h.credentialsMatch(identifier, password) {
+		writeCompatError(w, http.StatusUnauthorized, "unauthorized", "invalid login or password")
+		return
+	}
 
-	user := buildCompatUser(identifier, h.now())
 	csrfToken := randomToken(32)
 	session := compatSession{
 		Token:     randomToken(32),
-		User:      user,
+		User:      h.devUserPayload(),
 		CSRFToken: csrfToken,
 		ExpiresAt: h.now().Add(h.cfg.SessionTTL),
 	}
@@ -133,8 +143,14 @@ func (h *compatAuthHandler) handleLogin(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *compatAuthHandler) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if err := h.validateCSRF(r); err != nil {
+	if !h.ensureStubEnabled(w) {
+		return
+	}
+	if err := h.validateCSRF(r, true); err != nil {
 		writeCompatError(w, http.StatusForbidden, "forbidden", err.Error())
+		return
+	}
+	if _, ok := h.requireSession(w, r); !ok {
 		return
 	}
 
@@ -148,29 +164,23 @@ func (h *compatAuthHandler) handleLogout(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *compatAuthHandler) handleCurrentSession(w http.ResponseWriter, r *http.Request) {
-	session, ok := h.sessionFromRequest(r)
-	if !ok {
-		writeCompatError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+	if !h.ensureStubEnabled(w) {
 		return
 	}
-
-	if session.ExpiresAt.Before(h.now()) {
-		h.store.delete(session.Token)
-		h.clearSessionCookie(w)
-		writeCompatError(w, http.StatusUnauthorized, "unauthorized", "session expired")
-		return
+	if session, ok := h.requireSession(w, r); ok {
+		middleware.WriteJSON(w, http.StatusOK, session.payload())
 	}
-
-	middleware.WriteJSON(w, http.StatusOK, session.payload())
 }
 
 func (h *compatAuthHandler) handleProfileUpdate(w http.ResponseWriter, r *http.Request) {
-	session, ok := h.sessionFromRequest(r)
-	if !ok {
-		writeCompatError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+	if !h.ensureStubEnabled(w) {
 		return
 	}
-	if err := h.validateCSRF(r); err != nil {
+	session, ok := h.requireSession(w, r)
+	if !ok {
+		return
+	}
+	if err := h.validateCSRF(r, true); err != nil {
 		writeCompatError(w, http.StatusForbidden, "forbidden", err.Error())
 		return
 	}
@@ -212,7 +222,56 @@ func (h *compatAuthHandler) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (h *compatAuthHandler) validateCSRF(r *http.Request) error {
+func (h *compatAuthHandler) ensureStubEnabled(w http.ResponseWriter) bool {
+	if h.cfg.HTTPStubEnabled {
+		return true
+	}
+	writeCompatError(w, http.StatusNotImplemented, "not_implemented", "dev auth stub is disabled; configure an external auth provider or enable HTTP_AUTH_STUB_ENABLED=true")
+	return false
+}
+
+func (h *compatAuthHandler) credentialsMatch(identifier, password string) bool {
+	if password != strings.TrimSpace(h.cfg.DevUser.Password) {
+		return false
+	}
+	identifier = strings.ToLower(strings.TrimSpace(identifier))
+	return identifier == strings.ToLower(strings.TrimSpace(h.cfg.DevUser.Login)) ||
+		identifier == strings.ToLower(strings.TrimSpace(h.cfg.DevUser.Email))
+}
+
+func (h *compatAuthHandler) devUserPayload() compatUser {
+	return compatUser{
+		ID:          strings.TrimSpace(h.cfg.DevUser.UserID),
+		Email:       strings.TrimSpace(h.cfg.DevUser.Email),
+		Login:       strings.TrimSpace(h.cfg.DevUser.Login),
+		Role:        strings.TrimSpace(h.cfg.DevUser.Role),
+		DisplayName: strings.TrimSpace(h.cfg.DevUser.DisplayName),
+		UpdatedAt:   h.now().UTC().Format(time.RFC3339),
+	}
+}
+
+func (h *compatAuthHandler) requireSession(w http.ResponseWriter, r *http.Request) (compatSession, bool) {
+	session, ok := h.sessionFromRequest(r)
+	if !ok {
+		writeCompatError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+		return compatSession{}, false
+	}
+	if session.ExpiresAt.Before(h.now()) {
+		h.store.delete(session.Token)
+		h.clearSessionCookie(w)
+		h.clearCSRFCookie(w)
+		writeCompatError(w, http.StatusUnauthorized, "unauthorized", "session expired")
+		return compatSession{}, false
+	}
+	return session, true
+}
+
+func (h *compatAuthHandler) validateCSRF(r *http.Request, requireSession bool) error {
+	if requireSession {
+		if _, ok := h.sessionFromRequest(r); !ok {
+			return errCSRFInvalid("missing session")
+		}
+	}
 	cookie, err := r.Cookie(h.cfg.CSRFCookieName)
 	if err != nil || strings.TrimSpace(cookie.Value) == "" {
 		return errCSRFInvalid("missing csrf cookie")
@@ -247,15 +306,19 @@ func (h *compatAuthHandler) isAllowedOrigin(origin string) bool {
 }
 
 func (h *compatAuthHandler) setSessionCookie(w http.ResponseWriter, session compatSession) {
+	maxAge := int(time.Until(session.ExpiresAt).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     h.cfg.SessionCookieName,
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   h.cfg.SessionCookieSecure,
+		Secure:   h.cfg.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  session.ExpiresAt,
-		MaxAge:   int(time.Until(session.ExpiresAt).Seconds()),
+		MaxAge:   maxAge,
 	})
 }
 
@@ -265,7 +328,7 @@ func (h *compatAuthHandler) clearSessionCookie(w http.ResponseWriter) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   h.cfg.SessionCookieSecure,
+		Secure:   h.cfg.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
@@ -278,7 +341,7 @@ func (h *compatAuthHandler) setCSRFCookie(w http.ResponseWriter, token string) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: false,
-		Secure:   h.cfg.SessionCookieSecure,
+		Secure:   h.cfg.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(h.cfg.SessionTTL.Seconds()),
 		Expires:  h.now().Add(h.cfg.SessionTTL),
@@ -291,7 +354,7 @@ func (h *compatAuthHandler) clearCSRFCookie(w http.ResponseWriter) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: false,
-		Secure:   h.cfg.SessionCookieSecure,
+		Secure:   h.cfg.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
@@ -330,63 +393,6 @@ func (s compatSession) payload() compatSessionPayload {
 		CSRFToken: s.CSRFToken,
 		ExpiresAt: s.ExpiresAt.UTC().Format(time.RFC3339),
 	}
-}
-
-func buildCompatUser(identifier string, now time.Time) compatUser {
-	identifier = strings.TrimSpace(identifier)
-	login := identifier
-	email := identifier
-	if strings.Contains(identifier, "@") {
-		login = strings.SplitN(identifier, "@", 2)[0]
-	} else {
-		email = identifier + "@example.test"
-	}
-	login = sanitizeIdentifier(login)
-	displayName := humanizeIdentifier(login)
-	if displayName == "" {
-		displayName = "Demo User"
-	}
-	return compatUser{
-		ID:          "user_" + login,
-		Email:       email,
-		Login:       login,
-		DisplayName: displayName,
-		UpdatedAt:   now.UTC().Format(time.RFC3339),
-	}
-}
-
-func sanitizeIdentifier(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.ReplaceAll(value, " ", "-")
-	var b strings.Builder
-	for _, ch := range value {
-		switch {
-		case ch >= 'a' && ch <= 'z':
-			b.WriteRune(ch)
-		case ch >= '0' && ch <= '9':
-			b.WriteRune(ch)
-		case ch == '-', ch == '_', ch == '.':
-			b.WriteRune(ch)
-		}
-	}
-	if b.Len() == 0 {
-		return "demo-user"
-	}
-	return b.String()
-}
-
-func humanizeIdentifier(value string) string {
-	parts := strings.Fields(strings.NewReplacer(".", " ", "-", " ", "_", " ").Replace(strings.TrimSpace(value)))
-	if len(parts) == 0 {
-		return ""
-	}
-	for i, part := range parts {
-		if part == "" {
-			continue
-		}
-		parts[i] = strings.ToUpper(part[:1]) + part[1:]
-	}
-	return strings.Join(parts, " ")
 }
 
 func makeOriginSet(origins []string) map[string]struct{} {
