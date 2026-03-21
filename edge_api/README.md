@@ -42,8 +42,14 @@ The active live bridge is aligned with `server-rs` enrollment-plane on:
 - `agents.policy.fetch`
 - `agents.heartbeat`
 - `agents.diagnostics`
+- `agents.registry.list`
+- `agents.registry.get`
+- `agents.diagnostics.get`
+- `control.policies.list`
+- `control.policies.get`
+- `control.policies.revisions`
 
-The wider control/deployment/query/alert subject registry is already centralized in [`internal/natsbridge/subjects`](C:/C++WWW/DoroheDoro/edge_api/internal/natsbridge/subjects/subjects.go), but routes without a live `server-rs` implementation return a deliberate `501 not_implemented` instead of fake business logic in Go.
+The wider control/deployment/query/alert subject registry is already centralized in [`internal/natsbridge/subjects`](C:/C++WWW/DoroheDoro/edge_api/internal/natsbridge/subjects/subjects.go). Routes without a live `server-rs` implementation return a deliberate `501 not_implemented` with `X-Boundary-State: awaiting-runtime` and the mapped `X-NATS-Subject`, instead of fake business logic in Go.
 
 ## HTTP surface
 
@@ -61,11 +67,30 @@ WEB boundary routes:
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/agents`
+- `GET /api/v1/agents/{id}`
+- `GET /api/v1/agents/{id}/diagnostics`
 - `GET /api/v1/agents/{id}/policy`
+- `GET /api/v1/policies`
+- `GET /api/v1/policies/{id}`
+- `GET /api/v1/policies/{id}/revisions`
 - `GET /api/v1/stream/logs`
 - `GET /api/v1/stream/deployments`
 - `GET /api/v1/stream/alerts`
 - `GET /api/v1/stream/agents`
+
+Currently live against real Rust runtime:
+
+- agents list/detail/diagnostics
+- policy list/detail/revisions
+- current agent policy
+- enrollment / heartbeat / diagnostics / ingest over gRPC
+
+Still controlled `501 not_implemented` until the corresponding Rust plane exists:
+
+- hosts / host-groups / credentials
+- deployments
+- query / dashboards / alerts / audit
 
 Compatibility routes kept for the current frontend:
 
@@ -132,6 +157,8 @@ This starts:
 - `postgres`
 - `enrollment-plane`
 
+This is the primary local workflow. The standalone [`edge_api/docker-compose.yml`](C:/C++WWW/DoroheDoro/edge_api/docker-compose.yml) is now only an isolated edge-only debug stack.
+
 `docker compose` now generates short-lived dev certificates automatically and starts `edge-api` with agent mTLS enabled by default.
 
 Explicit insecure mode still exists through `AGENT_ALLOW_INSECURE_DEV_MODE=true`, but it is now opt-in and intended only for isolated transport debugging.
@@ -170,4 +197,6 @@ The default test set now covers:
 - config validation for agent TLS/insecure mode
 - centralized subject mapping
 - protobuf NATS envelope encoding/decoding
+- JSON-wrapped NATS replies for read-side bridge flows
+- boundary metadata on controlled `not_implemented` routes
 - frontend auth compatibility flow

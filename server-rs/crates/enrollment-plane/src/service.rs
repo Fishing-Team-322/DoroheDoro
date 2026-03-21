@@ -12,7 +12,9 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::repository::EnrollmentRepository;
+use crate::repository::{
+    AgentDiagnosticsRecord, AgentRecord, EnrollmentRepository, PolicyRecord, PolicyRevisionRecord,
+};
 
 #[derive(Clone)]
 pub struct EnrollmentService {
@@ -168,6 +170,66 @@ impl EnrollmentService {
 
         Ok(())
     }
+
+    pub async fn list_agents(&self) -> AppResult<Vec<AgentRecord>> {
+        self.repo
+            .list_agents()
+            .await
+            .map_err(|error| AppError::internal(format!("list agents: {error}")))
+    }
+
+    pub async fn get_agent(&self, agent_id: &str) -> AppResult<AgentRecord> {
+        let agent_id = agent_id.trim();
+        if agent_id.is_empty() {
+            return Err(AppError::invalid_argument("agent_id is required"));
+        }
+
+        self.repo
+            .get_agent(agent_id)
+            .await
+            .map_err(|error| AppError::internal(format!("get agent: {error}")))?
+            .ok_or_else(|| AppError::not_found("agent not found"))
+    }
+
+    pub async fn latest_diagnostics(&self, agent_id: &str) -> AppResult<AgentDiagnosticsRecord> {
+        let agent_id = agent_id.trim();
+        if agent_id.is_empty() {
+            return Err(AppError::invalid_argument("agent_id is required"));
+        }
+
+        self.repo
+            .latest_diagnostics(agent_id)
+            .await
+            .map_err(|error| AppError::internal(format!("get latest diagnostics: {error}")))?
+            .ok_or_else(|| AppError::not_found("diagnostics not found"))
+    }
+
+    pub async fn list_policies(&self) -> AppResult<Vec<PolicyRecord>> {
+        self.repo
+            .list_policies()
+            .await
+            .map_err(|error| AppError::internal(format!("list policies: {error}")))
+    }
+
+    pub async fn get_policy(&self, policy_id: &str) -> AppResult<PolicyRecord> {
+        let policy_id = parse_uuid(policy_id, "policy_id")?;
+        self.repo
+            .get_policy(policy_id)
+            .await
+            .map_err(|error| AppError::internal(format!("get policy: {error}")))?
+            .ok_or_else(|| AppError::not_found("policy not found"))
+    }
+
+    pub async fn list_policy_revisions(
+        &self,
+        policy_id: &str,
+    ) -> AppResult<Vec<PolicyRevisionRecord>> {
+        let policy_id = parse_uuid(policy_id, "policy_id")?;
+        self.repo
+            .list_policy_revisions(policy_id)
+            .await
+            .map_err(|error| AppError::internal(format!("list policy revisions: {error}")))
+    }
 }
 
 fn normalize_hostname(hostname: &str) -> String {
@@ -217,9 +279,19 @@ fn hash_token(token: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
+fn parse_uuid(value: &str, field: &str) -> AppResult<Uuid> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(AppError::invalid_argument(format!("{field} is required")));
+    }
+    Uuid::parse_str(value).map_err(|error| {
+        AppError::invalid_argument(format!("{field} must be a valid UUID: {error}"))
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::hash_token;
+    use super::{hash_token, parse_uuid};
 
     #[test]
     fn hashes_bootstrap_token() {
@@ -227,5 +299,11 @@ mod tests {
             hash_token("dev-bootstrap-token"),
             "7c3c6cefa0df4881d3702d011bbbcfbee7a297b87b58bb0a5c4f8f17366b62a6"
         );
+    }
+
+    #[test]
+    fn rejects_invalid_policy_uuid() {
+        let error = parse_uuid("nope", "policy_id").unwrap_err();
+        assert_eq!(error.code().as_str(), "invalid_argument");
     }
 }

@@ -32,20 +32,16 @@ server-rs/
 docker compose up -d postgres nats
 ```
 
-2. Apply migrations:
+2. Run the service:
 
 ```bash
 cd server-rs
-sqlx migrate run --source migrations
-```
-
-3. Run the service:
-
-```bash
 cargo run -p enrollment-plane
 ```
 
-4. Smoke-test through integration tests:
+Migrations are applied automatically on startup.
+
+3. Smoke-test through integration tests:
 
 ```bash
 cargo test -p enrollment-plane --test smoke -- --ignored --nocapture
@@ -59,6 +55,12 @@ cargo test -p enrollment-plane --test smoke -- --ignored --nocapture
 - `agents.policy.fetch`
 - `agents.heartbeat`
 - `agents.diagnostics`
+- `agents.registry.list`
+- `agents.registry.get`
+- `agents.diagnostics.get`
+- `control.policies.list`
+- `control.policies.get`
+- `control.policies.revisions`
 
 ## Health endpoints
 
@@ -73,6 +75,7 @@ Implemented:
 - PostgreSQL-backed enrollment state
 - NATS request/reply and publish handlers
 - dev bootstrap seeding for policy and bootstrap token
+- read-only agents and policies bridge used by `edge_api`
 
 Not implemented yet:
 
@@ -81,4 +84,4 @@ Not implemented yet:
 - `deployment-plane`
 - `ingestion-plane`
 - `query-alert-plane`
-- Go `edge_api` bridge to the new subjects
+- `control-plane`

@@ -2,6 +2,7 @@ package stream
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -35,8 +36,8 @@ func NewGateway(bridge *natsbridge.Bridge, cfg config.StreamConfig) *Gateway {
 }
 
 func (g *Gateway) Serve(w http.ResponseWriter, r *http.Request, req StreamRequest) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	controller := http.NewResponseController(w)
+	if err := controller.Flush(); err != nil && errors.Is(err, http.ErrNotSupported) {
 		middleware.WriteError(w, r, http.StatusInternalServerError, "internal", "streaming is not supported")
 		return
 	}
@@ -61,7 +62,7 @@ func (g *Gateway) Serve(w http.ResponseWriter, r *http.Request, req StreamReques
 	eventID := 0
 	fmt.Fprintf(w, "retry: %d\n", g.cfg.RetryInterval.Milliseconds())
 	fmt.Fprintf(w, "event: ready\nid: %d\ndata: {\"request_id\":%q,\"subject\":%q,\"event\":%q}\n\n", eventID, middleware.GetRequestID(r.Context()), req.Subject, req.Event)
-	flusher.Flush()
+	_ = controller.Flush()
 
 	heartbeat := time.NewTicker(g.cfg.HeartbeatInterval)
 	defer heartbeat.Stop()
@@ -72,7 +73,7 @@ func (g *Gateway) Serve(w http.ResponseWriter, r *http.Request, req StreamReques
 			return
 		case <-heartbeat.C:
 			fmt.Fprintf(w, ": heartbeat %s\n\n", time.Now().UTC().Format(time.RFC3339))
-			flusher.Flush()
+			_ = controller.Flush()
 		case msg := <-ch:
 			if msg == nil {
 				return
@@ -82,7 +83,7 @@ func (g *Gateway) Serve(w http.ResponseWriter, r *http.Request, req StreamReques
 			}
 			eventID++
 			fmt.Fprintf(w, "event: %s\nid: %d\ndata: %s\n\n", req.Event, eventID, msg.Data)
-			flusher.Flush()
+			_ = controller.Flush()
 		}
 	}
 }

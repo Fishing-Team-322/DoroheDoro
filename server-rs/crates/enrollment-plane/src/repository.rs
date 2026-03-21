@@ -1,4 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
@@ -330,9 +331,135 @@ impl EnrollmentRepository {
 
         Ok(true)
     }
+
+    pub async fn list_agents(&self) -> Result<Vec<AgentRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AgentRecord>(
+            "SELECT
+                agent_id,
+                hostname,
+                status,
+                version,
+                metadata_json,
+                first_seen_at,
+                last_seen_at
+             FROM agents
+             ORDER BY last_seen_at DESC, agent_id ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn get_agent(&self, agent_id: &str) -> Result<Option<AgentRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AgentRecord>(
+            "SELECT
+                agent_id,
+                hostname,
+                status,
+                version,
+                metadata_json,
+                first_seen_at,
+                last_seen_at
+             FROM agents
+             WHERE agent_id = $1
+             LIMIT 1",
+        )
+        .bind(agent_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn latest_diagnostics(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<AgentDiagnosticsRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AgentDiagnosticsRecord>(
+            "SELECT
+                agent_id,
+                payload_json,
+                created_at
+             FROM agent_diagnostics
+             WHERE agent_id = $1
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )
+        .bind(agent_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn list_policies(&self) -> Result<Vec<PolicyRecord>, sqlx::Error> {
+        sqlx::query_as::<_, PolicyRecord>(
+            "SELECT
+                p.id AS policy_id,
+                p.name,
+                p.description,
+                p.is_active,
+                p.created_at,
+                p.updated_at,
+                pr.revision AS latest_revision,
+                pr.body_json AS latest_body_json
+             FROM policies p
+             LEFT JOIN LATERAL (
+                SELECT revision, body_json
+                FROM policy_revisions
+                WHERE policy_id = p.id
+                ORDER BY created_at DESC
+                LIMIT 1
+             ) pr ON TRUE
+             ORDER BY p.updated_at DESC, p.name ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn get_policy(&self, policy_id: Uuid) -> Result<Option<PolicyRecord>, sqlx::Error> {
+        sqlx::query_as::<_, PolicyRecord>(
+            "SELECT
+                p.id AS policy_id,
+                p.name,
+                p.description,
+                p.is_active,
+                p.created_at,
+                p.updated_at,
+                pr.revision AS latest_revision,
+                pr.body_json AS latest_body_json
+             FROM policies p
+             LEFT JOIN LATERAL (
+                SELECT revision, body_json
+                FROM policy_revisions
+                WHERE policy_id = p.id
+                ORDER BY created_at DESC
+                LIMIT 1
+             ) pr ON TRUE
+             WHERE p.id = $1
+             LIMIT 1",
+        )
+        .bind(policy_id)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn list_policy_revisions(
+        &self,
+        policy_id: Uuid,
+    ) -> Result<Vec<PolicyRevisionRecord>, sqlx::Error> {
+        sqlx::query_as::<_, PolicyRevisionRecord>(
+            "SELECT
+                id AS policy_revision_id,
+                revision,
+                body_json,
+                created_at
+             FROM policy_revisions
+             WHERE policy_id = $1
+             ORDER BY created_at DESC, revision DESC",
+        )
+        .bind(policy_id)
+        .fetch_all(&self.pool)
+        .await
+    }
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Serialize, FromRow)]
 pub struct AgentRecord {
     pub agent_id: String,
     pub hostname: String,
@@ -343,10 +470,37 @@ pub struct AgentRecord {
     pub last_seen_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct AgentDiagnosticsRecord {
+    pub agent_id: String,
+    pub payload_json: Value,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, FromRow)]
 pub struct PolicySnapshot {
     pub policy_id: Uuid,
     pub policy_revision_id: Uuid,
     pub policy_revision: String,
     pub policy_body_json: Value,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct PolicyRecord {
+    pub policy_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub latest_revision: Option<String>,
+    pub latest_body_json: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, FromRow)]
+pub struct PolicyRevisionRecord {
+    pub policy_revision_id: Uuid,
+    pub revision: String,
+    pub body_json: Value,
+    pub created_at: DateTime<Utc>,
 }
