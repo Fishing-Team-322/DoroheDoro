@@ -120,6 +120,9 @@ WEB boundary routes:
 - `GET /api/v1/stream/deployments`
 - `GET /api/v1/stream/alerts`
 - `GET /api/v1/stream/agents`
+- `GET /api/v1/stream/clusters`
+- `GET /api/v1/stream/tickets`
+- `GET /api/v1/stream/anomalies`
 
 Currently live against real Rust runtime:
 
@@ -137,6 +140,24 @@ Currently live against real Rust runtime:
 Still controlled `501 not_implemented` until the corresponding Rust plane exists:
 
 - query / dashboards / alerts / audit
+- future cluster / roles / permissions / integrations / tickets / anomalies domains
+
+Reserved boundary groups for upcoming product layers:
+
+- `GET|POST /api/v1/clusters`
+- `GET|PATCH /api/v1/clusters/{id}`
+- `GET|POST /api/v1/roles`
+- `GET|PATCH /api/v1/roles/{id}`
+- `GET|POST /api/v1/permissions`
+- `GET|PATCH /api/v1/permissions/{id}`
+- `GET|POST /api/v1/integrations`
+- `GET|PATCH /api/v1/integrations/{id}`
+- `GET|POST /api/v1/tickets`
+- `GET|PATCH /api/v1/tickets/{id}`
+- `GET|POST /api/v1/anomalies`
+- `GET|PATCH /api/v1/anomalies/{id}`
+
+These routes exist only to reserve stable boundary structure. They deliberately return controlled `501 not_implemented` with `X-Boundary-State: awaiting-runtime` until the matching Rust runtime domains land.
 
 Compatibility routes kept for the current frontend:
 
@@ -236,6 +257,13 @@ docker exec dorohedoro-edge-api-1 /bin/sh -lc \
 ```
 
 If you need a separate host-side cert set for manual experiments, generate one explicitly with `go run ./cmd/dev-certs` and point a standalone `edge-api` run at that directory.
+
+Repository-level PKI helpers for reproducible dev/test cert issuance also live in:
+
+- [`../scripts/pki/dev-ca.sh`](../scripts/pki/dev-ca.sh)
+- [`../scripts/pki/issue-edge-cert.sh`](../scripts/pki/issue-edge-cert.sh)
+- [`../scripts/pki/issue-agent-cert.sh`](../scripts/pki/issue-agent-cert.sh)
+- [`../docs/dev-pki.md`](../docs/dev-pki.md)
 
 ## Tests
 

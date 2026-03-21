@@ -1,0 +1,23 @@
+[Unit]
+Description=DoroheDoro Rust Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ doro_agent_user }}
+Group={{ doro_agent_group }}
+EnvironmentFile=-{{ doro_agent_env_path }}
+ExecStart={{ doro_agent_runtime_binary_path }} --config {{ doro_agent_config_path }}
+Restart=always
+RestartSec=5
+WorkingDirectory={{ doro_agent_state_dir }}
+StateDirectory={{ doro_agent_service_name }}
+RuntimeDirectory={{ doro_agent_service_name }}
+LogsDirectory={{ doro_agent_service_name }}
+UMask=0077
+NoNewPrivileges=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -47,6 +47,24 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	if registry.ControlCredentialsCreate != "control.credentials.create" {
 		t.Fatalf("unexpected credentials create subject: %s", registry.ControlCredentialsCreate)
 	}
+	if registry.ControlClustersList != "control.clusters.list" {
+		t.Fatalf("unexpected clusters list subject: %s", registry.ControlClustersList)
+	}
+	if registry.ControlRolesList != "control.roles.list" {
+		t.Fatalf("unexpected roles list subject: %s", registry.ControlRolesList)
+	}
+	if registry.ControlPermissionsList != "control.permissions.list" {
+		t.Fatalf("unexpected permissions list subject: %s", registry.ControlPermissionsList)
+	}
+	if registry.IntegrationsList != "integrations.list" {
+		t.Fatalf("unexpected integrations list subject: %s", registry.IntegrationsList)
+	}
+	if registry.TicketsList != "tickets.list" {
+		t.Fatalf("unexpected tickets list subject: %s", registry.TicketsList)
+	}
+	if registry.AnomaliesList != "anomalies.list" {
+		t.Fatalf("unexpected anomalies list subject: %s", registry.AnomaliesList)
+	}
 	if registry.DeploymentsJobsCreate != "deployments.jobs.create" {
 		t.Fatalf("unexpected deployments create subject: %s", registry.DeploymentsJobsCreate)
 	}
@@ -64,5 +82,14 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	}
 	if registry.DeploymentsPlanCreate != "deployments.plan.create" {
 		t.Fatalf("unexpected deployments plan subject: %s", registry.DeploymentsPlanCreate)
+	}
+	if registry.StreamClusters != "ui.stream.clusters" {
+		t.Fatalf("unexpected clusters stream subject: %s", registry.StreamClusters)
+	}
+	if registry.StreamTickets != "ui.stream.tickets" {
+		t.Fatalf("unexpected tickets stream subject: %s", registry.StreamTickets)
+	}
+	if registry.StreamAnomalies != "ui.stream.anomalies" {
+		t.Fatalf("unexpected anomalies stream subject: %s", registry.StreamAnomalies)
 	}
 }

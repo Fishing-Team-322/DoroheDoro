@@ -8,6 +8,8 @@ Current honest end-to-end demo for the integrated slice that exists in this repo
 docker compose up --build
 ```
 
+For the stack overview and server-mode variant, see [`docs/demo-stack.md`](./demo-stack.md).
+
 Services that should come up healthy:
 
 - `frontend`
@@ -137,6 +139,8 @@ Expected:
 - `SendHeartbeat` succeeds
 - `SendDiagnostics` succeeds
 - `IngestLogs` succeeds
+
+If you need a standalone cert set outside compose, use the scripts documented in [`docs/dev-pki.md`](./dev-pki.md).
 
 ## 9. Inspect enrolled agents through the boundary
 
