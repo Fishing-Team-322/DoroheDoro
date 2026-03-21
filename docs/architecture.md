@@ -372,14 +372,18 @@ Persistent source-of-truth для management-доменов.
 ### Чем владеет
 - users
 - roles
+- scoped role bindings
 - inventory
 - host groups
+- clusters и членство хостов/агентов
 - credentials metadata
 - policies
 - policy revisions
 - agent registry
 - audit log
-- metadata alert definitions
+- integration catalog + cluster bindings
+- ticket/problem tracking + комментарии/таймлайны
+- anomaly rule и instance registry
 
 ### Что читает и пишет
 - PostgreSQL
@@ -1278,3 +1282,48 @@ Rust-компоненты должны использовать typed errors и 
 - transport contracts
 - выбор инфраструктуры
 - текущее состояние миграции
+## Runtime update 2026-03
+
+Canonical runtime ownership is now fixed like this:
+
+- `SERVER` remains one product service externally.
+- Go `edge_api` is only the public boundary layer.
+- Rust `server-rs` is the internal domain runtime.
+
+Inside `server-rs` the ownership split is:
+
+- `enrollment-plane`
+  - `agents.enroll.request`
+  - `agents.policy.fetch`
+  - `agents.heartbeat`
+  - `agents.diagnostics`
+  - `agents.list`
+  - `agents.get`
+  - `agents.diagnostics.get`
+  - `agents.policy.get`
+  - `agents.bootstrap-token.issue`
+- `control-plane`
+  - all `control.policies.*`
+  - all `control.hosts.*`
+  - all `control.host-groups.*`
+  - all `control.credentials.*`
+- `deployment-plane`
+  - `deployments.jobs.create|get|list|retry|cancel`
+  - `deployments.plan.create`
+  - publishes `deployments.jobs.status`
+  - publishes `deployments.jobs.step`
+
+Important current rule:
+
+- `enrollment-plane` no longer owns `control.policies.*`
+- `server-rs` no longer keeps `agents.registry.*` aliases
+- internal request/reply uses a shared `RuntimeReplyEnvelope`
+- `control-plane` keeps audit-ready fields and append-only policy revisions
+- `deployment-plane` uses attempt-level executor snapshots/results
+
+Reserved future subjects are already fixed in the shared registry:
+
+- `query.logs.search|get|context|histogram|severity|top_hosts|top_services|heatmap|top_patterns`
+- `query.dashboards.overview`
+- `alerts.list|get|rules.create|rules.update`
+- `audit.list`

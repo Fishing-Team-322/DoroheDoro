@@ -2,8 +2,8 @@ use async_nats::Client;
 use common::{
     nats_subjects::CONTROL_POLICIES_GET,
     proto::{
-        control::{self, ControlReplyEnvelope},
-        decode_message, encode_message,
+        control::{self},
+        decode_message, encode_message, runtime,
     },
     AppError, AppResult,
 };
@@ -64,7 +64,7 @@ where
         .request(subject.to_string(), encode_message(&request).into())
         .await
         .map_err(|error| AppError::internal(format!("request {subject}: {error}")))?;
-    let envelope: ControlReplyEnvelope = decode_message(message.payload.as_ref())?;
+    let envelope: runtime::RuntimeReplyEnvelope = decode_message(message.payload.as_ref())?;
     if envelope.status != "ok" {
         return Err(match envelope.code.as_str() {
             "invalid_argument" => AppError::invalid_argument(envelope.message.clone()),

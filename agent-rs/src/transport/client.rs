@@ -145,6 +145,9 @@ impl AgentTransport for EdgeGrpcTransport {
     }
 
     async fn send_heartbeat(&self, payload: agent::HeartbeatPayload) -> AppResult<()> {
+        // TODO: edge heartbeat request does not expose host_metadata yet. Keep building and
+        // testing the richer heartbeat payload on the agent side until the shared ingress
+        // contract is updated in a dedicated server/edge task.
         let _: edge::Ack = self
             .unary_json(
                 "/SendHeartbeat",

@@ -36,14 +36,41 @@ Those belong in `server-rs`.
 
 ## Current NATS alignment
 
-The active live bridge is aligned with `server-rs` enrollment-plane on:
+The active live bridge is aligned with `server-rs` on:
 
 - `agents.enroll.request`
 - `agents.policy.fetch`
 - `agents.heartbeat`
 - `agents.diagnostics`
+- `agents.registry.list`
+- `agents.registry.get`
+- `agents.diagnostics.get`
+- `control.policies.list`
+- `control.policies.get`
+- `control.policies.create`
+- `control.policies.update`
+- `control.policies.revisions`
+- `control.hosts.list`
+- `control.hosts.get`
+- `control.hosts.create`
+- `control.hosts.update`
+- `control.host-groups.list`
+- `control.host-groups.get`
+- `control.host-groups.create`
+- `control.host-groups.update`
+- `control.credentials.list`
+- `control.credentials.get`
+- `control.credentials.create`
+- `deployments.jobs.create`
+- `deployments.jobs.get`
+- `deployments.jobs.list`
+- `deployments.jobs.retry`
+- `deployments.jobs.cancel`
+- `deployments.jobs.status`
+- `deployments.jobs.step`
+- `deployments.plan.create`
 
-The wider control/deployment/query/alert subject registry is already centralized in [`internal/natsbridge/subjects`](C:/C++WWW/DoroheDoro/edge_api/internal/natsbridge/subjects/subjects.go), but routes without a live `server-rs` implementation return a deliberate `501 not_implemented` instead of fake business logic in Go.
+The wider control/deployment/query/alert subject registry is already centralized in [`internal/natsbridge/subjects`](./internal/natsbridge/subjects). Routes without a live `server-rs` implementation return a deliberate `501 not_implemented` with `X-Boundary-State: awaiting-runtime` and the mapped `X-NATS-Subject`, instead of fake business logic in Go.
 
 ## HTTP surface
 
@@ -61,11 +88,76 @@ WEB boundary routes:
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/agents`
+- `GET /api/v1/agents/{id}`
+- `GET /api/v1/agents/{id}/diagnostics`
 - `GET /api/v1/agents/{id}/policy`
+- `GET /api/v1/policies`
+- `GET /api/v1/policies/{id}`
+- `POST /api/v1/policies`
+- `PATCH /api/v1/policies/{id}`
+- `GET /api/v1/policies/{id}/revisions`
+- `GET /api/v1/hosts`
+- `POST /api/v1/hosts`
+- `GET /api/v1/hosts/{id}`
+- `PATCH /api/v1/hosts/{id}`
+- `GET /api/v1/host-groups`
+- `POST /api/v1/host-groups`
+- `GET /api/v1/host-groups/{id}`
+- `PATCH /api/v1/host-groups/{id}`
+- `GET /api/v1/credentials`
+- `POST /api/v1/credentials`
+- `GET /api/v1/credentials/{id}`
+- `POST /api/v1/deployments`
+- `GET /api/v1/deployments`
+- `GET /api/v1/deployments/{id}`
+- `GET /api/v1/deployments/{id}/steps`
+- `GET /api/v1/deployments/{id}/targets`
+- `POST /api/v1/deployments/{id}/retry`
+- `POST /api/v1/deployments/{id}/cancel`
+- `POST /api/v1/deployments/plan`
 - `GET /api/v1/stream/logs`
 - `GET /api/v1/stream/deployments`
 - `GET /api/v1/stream/alerts`
 - `GET /api/v1/stream/agents`
+- `GET /api/v1/stream/clusters`
+- `GET /api/v1/stream/tickets`
+- `GET /api/v1/stream/anomalies`
+
+Currently live against real Rust runtime:
+
+- agents list/detail/diagnostics
+- policy list/detail/create/update/revisions
+- hosts list/detail/create/update
+- host-groups list/detail/create/update
+- credentials metadata list/detail/create
+- deployment plan/create/list/get/retry/cancel
+- deployment steps/status/targets read-side
+- deployment status/step SSE stream
+- current agent policy
+- enrollment / heartbeat / diagnostics / ingest over gRPC
+
+Still controlled `501 not_implemented` until the corresponding Rust plane exists:
+
+- query / dashboards / alerts / audit
+- future cluster / roles / permissions / integrations / tickets / anomalies domains
+
+Reserved boundary groups for upcoming product layers:
+
+- `GET|POST /api/v1/clusters`
+- `GET|PATCH /api/v1/clusters/{id}`
+- `GET|POST /api/v1/roles`
+- `GET|PATCH /api/v1/roles/{id}`
+- `GET|POST /api/v1/permissions`
+- `GET|PATCH /api/v1/permissions/{id}`
+- `GET|POST /api/v1/integrations`
+- `GET|PATCH /api/v1/integrations/{id}`
+- `GET|POST /api/v1/tickets`
+- `GET|PATCH /api/v1/tickets/{id}`
+- `GET|POST /api/v1/anomalies`
+- `GET|PATCH /api/v1/anomalies/{id}`
+
+These routes exist only to reserve stable boundary structure. They deliberately return controlled `501 not_implemented` with `X-Boundary-State: awaiting-runtime` until the matching Rust runtime domains land.
 
 Compatibility routes kept for the current frontend:
 
@@ -131,6 +223,18 @@ This starts:
 - `nats`
 - `postgres`
 - `enrollment-plane`
+- `control-plane`
+- `deployment-plane`
+
+This is the primary local workflow. The standalone [`edge_api/docker-compose.yml`](./docker-compose.yml) is now only an isolated edge-only debug stack.
+
+Server/staging stack for `fishingteam.su`:
+
+```bash
+docker compose -f docker-compose.server.yml up -d --build
+```
+
+That stack binds only localhost-facing ports and is intended to sit behind Nginx. See [`docs/server-deploy.md`](../docs/server-deploy.md).
 
 `docker compose` now generates short-lived dev certificates automatically and starts `edge-api` with agent mTLS enabled by default.
 
@@ -154,6 +258,13 @@ docker exec dorohedoro-edge-api-1 /bin/sh -lc \
 
 If you need a separate host-side cert set for manual experiments, generate one explicitly with `go run ./cmd/dev-certs` and point a standalone `edge-api` run at that directory.
 
+Repository-level PKI helpers for reproducible dev/test cert issuance also live in:
+
+- [`../scripts/pki/dev-ca.sh`](../scripts/pki/dev-ca.sh)
+- [`../scripts/pki/issue-edge-cert.sh`](../scripts/pki/issue-edge-cert.sh)
+- [`../scripts/pki/issue-agent-cert.sh`](../scripts/pki/issue-agent-cert.sh)
+- [`../docs/dev-pki.md`](../docs/dev-pki.md)
+
 ## Tests
 
 Useful checks:
@@ -170,4 +281,6 @@ The default test set now covers:
 - config validation for agent TLS/insecure mode
 - centralized subject mapping
 - protobuf NATS envelope encoding/decoding
+- JSON-wrapped NATS replies for read-side bridge flows
+- boundary metadata on controlled `not_implemented` routes
 - frontend auth compatibility flow

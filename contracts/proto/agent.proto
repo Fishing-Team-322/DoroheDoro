@@ -3,14 +3,7 @@ syntax = "proto3";
 package dorohedoro.agent.v1;
 
 option go_package = "github.com/example/dorohedoro/contracts/agentproto;agentv1";
-
-message AgentReplyEnvelope {
-  string status = 1;
-  string code = 2;
-  string message = 3;
-  bytes payload = 4;
-  string correlation_id = 5;
-}
+import "runtime.proto";
 
 message EnrollRequest {
   string correlation_id = 1;
@@ -74,4 +67,68 @@ message IssueBootstrapTokenResponse {
   string policy_revision_id = 4;
   int64 expires_at_unix_ms = 5;
   int64 created_at_unix_ms = 6;
+}
+
+message AgentPolicyBinding {
+  string policy_id = 1;
+  string policy_revision_id = 2;
+  string policy_revision = 3;
+  string assigned_at = 4;
+  string policy_name = 5;
+  string policy_description = 6;
+}
+
+message AgentSummary {
+  string agent_id = 1;
+  string hostname = 2;
+  string version = 3;
+  string status = 4;
+  string last_seen_at = 5;
+  AgentPolicyBinding effective_policy = 6;
+}
+
+message AgentDetail {
+  string agent_id = 1;
+  string hostname = 2;
+  string version = 3;
+  string status = 4;
+  map<string, string> metadata = 5;
+  string first_seen_at = 6;
+  string last_seen_at = 7;
+  AgentPolicyBinding effective_policy = 8;
+}
+
+message ListAgentsRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+}
+
+message ListAgentsResponse {
+  repeated AgentSummary agents = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message GetAgentRequest {
+  string correlation_id = 1;
+  string agent_id = 2;
+}
+
+message GetAgentDiagnosticsRequest {
+  string correlation_id = 1;
+  string agent_id = 2;
+}
+
+message DiagnosticsSnapshot {
+  string agent_id = 1;
+  string payload_json = 2;
+  string created_at = 3;
+}
+
+message GetAgentPolicyRequest {
+  string correlation_id = 1;
+  string agent_id = 2;
+}
+
+message GetAgentPolicyResponse {
+  AgentPolicyBinding policy = 1;
 }

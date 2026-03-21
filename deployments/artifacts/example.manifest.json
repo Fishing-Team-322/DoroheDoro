@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "version": "0.2.0",
+  "generated_at": "2026-03-21T12:00:00Z",
+  "artifacts": [
+    {
+      "platform": "linux",
+      "arch": "amd64",
+      "package_type": "deb",
+      "distro_family": "debian",
+      "install_mode": "package",
+      "artifact_name": "doro-agent_0.2.0_linux_amd64.deb",
+      "artifact_path": "releases/0.2.0/doro-agent_0.2.0_linux_amd64.deb",
+      "checksum_file": "releases/0.2.0/doro-agent_0.2.0_linux_amd64.deb.sha256",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "packaging_preference": 10
+    },
+    {
+      "platform": "linux",
+      "arch": "amd64",
+      "package_type": "deb",
+      "distro_family": "astra-linux",
+      "install_mode": "package",
+      "artifact_name": "doro-agent_0.2.0_astra_linux_amd64.deb",
+      "artifact_path": "releases/0.2.0/doro-agent_0.2.0_astra_linux_amd64.deb",
+      "checksum_file": "releases/0.2.0/doro-agent_0.2.0_astra_linux_amd64.deb.sha256",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "packaging_preference": 20
+    },
+    {
+      "platform": "linux",
+      "arch": "amd64",
+      "package_type": "tar.gz",
+      "distro_family": "generic-glibc",
+      "install_mode": "tarball",
+      "artifact_name": "doro-agent_0.2.0_linux_amd64.tar.gz",
+      "artifact_path": "releases/0.2.0/doro-agent_0.2.0_linux_amd64.tar.gz",
+      "checksum_file": "releases/0.2.0/doro-agent_0.2.0_linux_amd64.tar.gz.sha256",
+      "bundle_root": "doro-agent_0.2.0_linux_amd64",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "packaging_preference": 100
+    }
+  ]
+}

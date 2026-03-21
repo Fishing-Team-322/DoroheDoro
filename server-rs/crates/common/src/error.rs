@@ -1,8 +1,6 @@
 use thiserror::Error;
 
-use crate::proto::{
-    agent::AgentReplyEnvelope, control::ControlReplyEnvelope, deployment::DeploymentReplyEnvelope,
-};
+use crate::proto::runtime::RuntimeReplyEnvelope;
 
 pub type AppResult<T> = Result<T, AppError>;
 
@@ -72,8 +70,8 @@ impl AppError {
         }
     }
 
-    pub fn to_envelope(&self, correlation_id: impl Into<String>) -> AgentReplyEnvelope {
-        AgentReplyEnvelope {
+    pub fn to_envelope(&self, correlation_id: impl Into<String>) -> RuntimeReplyEnvelope {
+        RuntimeReplyEnvelope {
             status: "error".to_string(),
             code: self.code().as_str().to_string(),
             message: self.message().to_string(),
@@ -82,27 +80,15 @@ impl AppError {
         }
     }
 
-    pub fn to_control_envelope(&self, correlation_id: impl Into<String>) -> ControlReplyEnvelope {
-        ControlReplyEnvelope {
-            status: "error".to_string(),
-            code: self.code().as_str().to_string(),
-            message: self.message().to_string(),
-            payload: Vec::new(),
-            correlation_id: correlation_id.into(),
-        }
+    pub fn to_control_envelope(&self, correlation_id: impl Into<String>) -> RuntimeReplyEnvelope {
+        self.to_envelope(correlation_id)
     }
 
     pub fn to_deployment_envelope(
         &self,
         correlation_id: impl Into<String>,
-    ) -> DeploymentReplyEnvelope {
-        DeploymentReplyEnvelope {
-            status: "error".to_string(),
-            code: self.code().as_str().to_string(),
-            message: self.message().to_string(),
-            payload: Vec::new(),
-            correlation_id: correlation_id.into(),
-        }
+    ) -> RuntimeReplyEnvelope {
+        self.to_envelope(correlation_id)
     }
 }
 

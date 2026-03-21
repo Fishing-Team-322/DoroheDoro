@@ -4,8 +4,8 @@ use async_nats::Client;
 use common::{
     nats_subjects::{CONTROL_HOSTS_GET, CONTROL_HOST_GROUPS_GET},
     proto::{
-        control::{self, ControlReplyEnvelope},
-        decode_message, encode_message,
+        control::{self},
+        decode_message, encode_message, runtime,
     },
     AppError, AppResult,
 };
@@ -104,14 +104,14 @@ where
         .request(subject.to_string(), encode_message(&request).into())
         .await
         .map_err(|error| AppError::internal(format!("request {subject}: {error}")))?;
-    let envelope: ControlReplyEnvelope = decode_message(message.payload.as_ref())?;
+    let envelope: runtime::RuntimeReplyEnvelope = decode_message(message.payload.as_ref())?;
     if envelope.status != "ok" {
         return Err(map_control_error(&envelope));
     }
     decode_message(&envelope.payload)
 }
 
-fn map_control_error(envelope: &ControlReplyEnvelope) -> AppError {
+fn map_control_error(envelope: &runtime::RuntimeReplyEnvelope) -> AppError {
     match envelope.code.as_str() {
         "invalid_argument" => AppError::invalid_argument(envelope.message.clone()),
         "not_found" => AppError::not_found(envelope.message.clone()),

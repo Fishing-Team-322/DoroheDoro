@@ -1,0 +1,13 @@
+.git
+.tmp
+*.exe
+docker-compose.yml
+.env
+.env.server
+stubs
+api
+assets
+gen
+proto
+third_party
+endpoints-matrix.md

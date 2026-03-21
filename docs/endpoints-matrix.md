@@ -76,6 +76,41 @@ These are the minimum HTTP expectations the Edge API must expose or continue exp
 | request/reply | `control.credentials.list` | Edge API | control-plane | Next | List credential metadata |
 | request/reply | `control.credentials.get` | Edge API, deployment-plane | control-plane | MVP | Resolve credential metadata for executor input |
 | request/reply | `control.credentials.create` | Edge API | control-plane | Next | Create credential metadata record |
+| request/reply | `control.clusters.list` | Edge API | control-plane | Next | Cluster inventory with paging/filtering |
+| request/reply | `control.clusters.get` | Edge API, deployment-plane | control-plane | Next | Cluster detail + membership |
+| request/reply | `control.clusters.create` | Edge API | control-plane | Next | Create cluster entity |
+| request/reply | `control.clusters.update` | Edge API | control-plane | Next | Update cluster metadata |
+| request/reply | `control.clusters.add-host` | Edge API | control-plane | Next | Attach host to cluster scope |
+| request/reply | `control.clusters.remove-host` | Edge API | control-plane | Next | Remove host from cluster scope |
+| request/reply | `control.roles.list` | Edge API | control-plane | Next | List custom roles |
+| request/reply | `control.roles.get` | Edge API | control-plane | Next | Role detail |
+| request/reply | `control.roles.create` | Edge API | control-plane | Next | Create role |
+| request/reply | `control.roles.update` | Edge API | control-plane | Next | Update role metadata |
+| request/reply | `control.roles.permissions.get` | Edge API | control-plane | Next | Fetch role permission set |
+| request/reply | `control.roles.permissions.set` | Edge API | control-plane | Next | Replace role permission set |
+| request/reply | `control.role-bindings.list` | Edge API | control-plane | Next | List bindings with scope filters |
+| request/reply | `control.role-bindings.create` | Edge API | control-plane | Next | Bind role to user + scope |
+| request/reply | `control.role-bindings.delete` | Edge API | control-plane | Next | Delete binding |
+| request/reply | `control.integrations.list` | Edge API | control-plane | Next | List notification integrations |
+| request/reply | `control.integrations.get` | Edge API | control-plane | Next | Integration detail + bindings |
+| request/reply | `control.integrations.create` | Edge API | control-plane | Next | Create integration record |
+| request/reply | `control.integrations.update` | Edge API | control-plane | Next | Update integration config |
+| request/reply | `control.integrations.bind` | Edge API | control-plane | Next | Bind integration to scope/event types |
+| request/reply | `control.integrations.unbind` | Edge API | control-plane | Next | Remove integration binding |
+| request/reply | `tickets.list` | Edge API | control-plane | Next | Cluster-scoped tickets overview |
+| request/reply | `tickets.get` | Edge API | control-plane | Next | Ticket detail + comments/events |
+| request/reply | `tickets.create` | Edge API | control-plane | Next | Manual ticket creation |
+| request/reply | `tickets.assign` | Edge API | control-plane | Next | Assign ticket to user |
+| request/reply | `tickets.unassign` | Edge API | control-plane | Next | Unassign ticket |
+| request/reply | `tickets.comment.add` | Edge API | control-plane | Next | Add ticket comment |
+| request/reply | `tickets.status.change` | Edge API | control-plane | Next | Move ticket across workflow states |
+| request/reply | `tickets.close` | Edge API | control-plane | Next | Close ticket with resolution |
+| request/reply | `anomalies.rules.list` | Edge API | control-plane | Next | List anomaly rules (threshold/baseline/novelty) |
+| request/reply | `anomalies.rules.get` | Edge API | control-plane | Next | Rule detail |
+| request/reply | `anomalies.rules.create` | Edge API | control-plane | Next | Create rule |
+| request/reply | `anomalies.rules.update` | Edge API | control-plane | Next | Update rule config/status |
+| request/reply | `anomalies.instances.list` | Edge API | control-plane | Next | List anomaly instances filtered by cluster/rule/status |
+| request/reply | `anomalies.instances.get` | Edge API | control-plane | Next | Instance detail for UI drill-down |
 
 ### Deployment-plane subjects
 
@@ -115,6 +150,12 @@ The Go `edge_api` must bridge the new runtime subjects before the deployment flo
 - `deployments.jobs.status`
 - `deployments.jobs.step`
 - `deployments.plan.create`
+- `control.clusters.*`
+- `control.roles.*` and `control.role-bindings.*`
+- `control.integrations.*`
+- `tickets.*`
+- `anomalies.rules.*`
+- `anomalies.instances.*`
 
 ## Error envelope rule
 

@@ -702,16 +702,59 @@ pub struct StepExecutionResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct TargetExecutionResult {
+pub struct ExecutionAuditContext {
+    pub actor_id: String,
+    pub actor_type: String,
+    pub request_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecutionTarget {
+    pub deployment_target_id: Uuid,
+    pub host: ResolvedHost,
+    pub bootstrap: BootstrapArtifact,
+    pub rendered_vars: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecutionSnapshot {
+    pub deployment_job_id: Uuid,
+    pub deployment_attempt_id: Uuid,
+    pub audit: ExecutionAuditContext,
+    pub job_type: DeploymentJobType,
+    pub requested_by: String,
+    pub policy: ResolvedPolicy,
+    pub credentials: ResolvedCredentialProfile,
+    pub flags: DeploymentFlags,
+    pub targets: Vec<ExecutionTarget>,
+    pub executor_kind: ExecutorKind,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecutionTargetResult {
+    pub deployment_target_id: Uuid,
     pub status: DeploymentTargetStatus,
     pub error_message: Option<String>,
     pub steps: Vec<StepExecutionResult>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ExecutorResult {
-    pub job_status: DeploymentJobStatus,
+pub struct ExecutionOutput {
+    pub exit_code: Option<i32>,
+    pub stdout_ref: Option<String>,
+    pub stdout_excerpt: Option<String>,
+    pub stderr_ref: Option<String>,
+    pub stderr_excerpt: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExecutionResult {
     pub current_phase: String,
+    pub targets: Vec<ExecutionTargetResult>,
+    pub steps: Vec<StepExecutionResult>,
+    pub output: ExecutionOutput,
 }
 
 #[derive(Debug, Clone)]

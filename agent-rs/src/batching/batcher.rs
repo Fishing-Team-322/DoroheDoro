@@ -220,7 +220,7 @@ mod tests {
         config::{BatchConfig, QueueConfig, SourceConfig, SpoolConfig, StartAt},
         runtime::{
             state_writer::{spawn_state_writer, StateWriterHandle},
-            RuntimeStatusHandle,
+            test_static_context, RuntimeStatusHandle,
         },
         sources::{SourceCheckpoint, SourceEvent},
         state::SqliteStateStore,
@@ -234,6 +234,7 @@ mod tests {
             "demo-host".to_string(),
             "0.1.0".to_string(),
             "mock".to_string(),
+            test_static_context(),
             true,
             &[SourceConfig {
                 kind: "file".to_string(),

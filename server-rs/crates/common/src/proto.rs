@@ -1,9 +1,18 @@
 use prost::Message;
+use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
 pub mod agent {
     include!(concat!(env!("OUT_DIR"), "/dorohedoro.agent.v1.rs"));
+}
+
+pub mod runtime {
+    pub mod v1 {
+        include!(concat!(env!("OUT_DIR"), "/dorohedoro.runtime.v1.rs"));
+    }
+
+    pub use v1::*;
 }
 
 pub mod ingest {
@@ -18,9 +27,7 @@ pub mod deployment {
     include!(concat!(env!("OUT_DIR"), "/dorohedoro.deployment.v1.rs"));
 }
 
-use self::{
-    agent::AgentReplyEnvelope, control::ControlReplyEnvelope, deployment::DeploymentReplyEnvelope,
-};
+use self::runtime::RuntimeReplyEnvelope;
 
 pub fn encode_message<T>(message: &T) -> Vec<u8>
 where
@@ -37,11 +44,11 @@ where
         .map_err(|error| AppError::invalid_argument(format!("decode protobuf payload: {error}")))
 }
 
-pub fn ok_envelope<T>(payload: &T, correlation_id: impl Into<String>) -> AgentReplyEnvelope
+pub fn ok_envelope<T>(payload: &T, correlation_id: impl Into<String>) -> RuntimeReplyEnvelope
 where
     T: Message,
 {
-    AgentReplyEnvelope {
+    RuntimeReplyEnvelope {
         status: "ok".to_string(),
         code: "ok".to_string(),
         message: String::new(),
@@ -50,44 +57,41 @@ where
     }
 }
 
-pub fn control_ok_envelope<T>(
+pub fn ok_json_envelope<T>(
     payload: &T,
     correlation_id: impl Into<String>,
-) -> ControlReplyEnvelope
+) -> AppResult<RuntimeReplyEnvelope>
 where
-    T: Message,
+    T: Serialize,
 {
-    ControlReplyEnvelope {
+    let payload = serde_json::to_vec(payload)
+        .map_err(|error| AppError::internal(format!("serialize json payload: {error}")))?;
+    Ok(RuntimeReplyEnvelope {
         status: "ok".to_string(),
         code: "ok".to_string(),
         message: String::new(),
-        payload: encode_message(payload),
+        payload,
         correlation_id: correlation_id.into(),
-    }
+    })
 }
 
-pub fn deployment_ok_envelope<T>(
-    payload: &T,
-    correlation_id: impl Into<String>,
-) -> DeploymentReplyEnvelope
-where
-    T: Message,
-{
-    DeploymentReplyEnvelope {
+pub fn empty_ok_envelope(correlation_id: impl Into<String>) -> RuntimeReplyEnvelope {
+    RuntimeReplyEnvelope {
         status: "ok".to_string(),
         code: "ok".to_string(),
         message: String::new(),
-        payload: encode_message(payload),
+        payload: Vec::new(),
         correlation_id: correlation_id.into(),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use serde::Serialize;
+
     use super::{
-        agent::FetchPolicyRequest, control::Host, control::ListHostsResponse, control_ok_envelope,
-        decode_message, deployment::ListDeploymentJobsResponse, deployment_ok_envelope,
-        encode_message, ok_envelope,
+        agent::FetchPolicyRequest, control::Host, control::ListHostsResponse, decode_message,
+        empty_ok_envelope, encode_message, ok_envelope, ok_json_envelope,
     };
 
     #[test]
@@ -118,8 +122,34 @@ mod tests {
         assert!(!envelope.payload.is_empty());
     }
 
+    #[derive(Serialize)]
+    struct JsonPayload {
+        status: &'static str,
+    }
+
     #[test]
-    fn wraps_control_ok_envelope() {
+    fn wraps_ok_json_envelope() {
+        let envelope = ok_json_envelope(&JsonPayload { status: "ok" }, "corr-json").unwrap();
+        assert_eq!(envelope.status, "ok");
+        assert_eq!(envelope.code, "ok");
+        assert_eq!(envelope.correlation_id, "corr-json");
+        assert_eq!(
+            String::from_utf8(envelope.payload).unwrap(),
+            "{\"status\":\"ok\"}"
+        );
+    }
+
+    #[test]
+    fn wraps_runtime_empty_ok_envelope() {
+        let envelope = empty_ok_envelope("corr-3");
+        assert_eq!(envelope.status, "ok");
+        assert_eq!(envelope.code, "ok");
+        assert_eq!(envelope.correlation_id, "corr-3");
+        assert!(envelope.payload.is_empty());
+    }
+
+    #[test]
+    fn wraps_runtime_ok_envelope() {
         let payload = ListHostsResponse {
             hosts: vec![Host {
                 host_id: "host-1".to_string(),
@@ -130,24 +160,13 @@ mod tests {
                 labels: Default::default(),
                 created_at: "2026-03-21T00:00:00Z".to_string(),
                 updated_at: "2026-03-21T00:00:00Z".to_string(),
+                created_by: "system".to_string(),
+                updated_by: "system".to_string(),
+                update_reason: String::new(),
             }],
+            paging: None,
         };
-        let envelope = control_ok_envelope(&payload, "corr-3");
-        assert_eq!(envelope.status, "ok");
-        assert_eq!(envelope.code, "ok");
-        assert_eq!(envelope.correlation_id, "corr-3");
-        assert!(!envelope.payload.is_empty());
-    }
-
-    #[test]
-    fn wraps_deployment_ok_envelope() {
-        let payload = ListDeploymentJobsResponse {
-            jobs: Vec::new(),
-            limit: 10,
-            offset: 0,
-            total: 0,
-        };
-        let envelope = deployment_ok_envelope(&payload, "corr-4");
+        let envelope = ok_envelope(&payload, "corr-4");
         assert_eq!(envelope.status, "ok");
         assert_eq!(envelope.code, "ok");
         assert_eq!(envelope.correlation_id, "corr-4");

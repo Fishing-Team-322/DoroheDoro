@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
 };
@@ -29,6 +30,12 @@ pub struct AgentConfig {
     pub spool: SpoolConfig,
     #[serde(default)]
     pub transport: TransportConfig,
+    #[serde(default)]
+    pub install: InstallConfig,
+    #[serde(default)]
+    pub platform: PlatformConfig,
+    #[serde(default)]
+    pub scope: ScopeConfig,
     #[serde(default)]
     pub sources: Vec<SourceConfig>,
 }
@@ -160,12 +167,84 @@ pub struct TransportConfig {
     pub mode: TransportMode,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct InstallConfig {
+    #[serde(default)]
+    pub mode: InstallMode,
+}
+
+impl Default for InstallConfig {
+    fn default() -> Self {
+        Self {
+            mode: InstallMode::Auto,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+pub struct PlatformConfig {
+    #[serde(default)]
+    pub allow_machine_id: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+pub struct ScopeConfig {
+    #[serde(default)]
+    pub configured_cluster_id: Option<String>,
+    #[serde(default)]
+    pub configured_cluster_tags: BTreeMap<String, String>,
+    #[serde(default)]
+    pub cluster_name: Option<String>,
+    #[serde(default)]
+    pub service_name: Option<String>,
+    #[serde(default)]
+    pub environment: Option<String>,
+    #[serde(default)]
+    pub host_labels: BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TransportMode {
     #[default]
     Edge,
     Mock,
+}
+
+impl TransportMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Edge => "edge",
+            Self::Mock => "mock",
+        }
+    }
+
+    pub fn is_edge(&self) -> bool {
+        matches!(self, Self::Edge)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum InstallMode {
+    #[default]
+    Auto,
+    Package,
+    Tarball,
+    Ansible,
+    Dev,
+}
+
+impl InstallMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Package => "package",
+            Self::Tarball => "tarball",
+            Self::Ansible => "ansible",
+            Self::Dev => "dev",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
@@ -301,6 +380,31 @@ impl AgentConfig {
                 self.transport.mode = TransportMode::Edge;
             }
         }
+        if let Some(value) = env::var_os("INSTALL_MODE") {
+            match value.to_string_lossy().to_ascii_lowercase().as_str() {
+                "auto" => self.install.mode = InstallMode::Auto,
+                "package" => self.install.mode = InstallMode::Package,
+                "tarball" => self.install.mode = InstallMode::Tarball,
+                "ansible" => self.install.mode = InstallMode::Ansible,
+                "dev" => self.install.mode = InstallMode::Dev,
+                _ => {}
+            }
+        }
+        if let Some(value) = env::var_os("ALLOW_MACHINE_ID") {
+            self.platform.allow_machine_id = parse_bool(&value, self.platform.allow_machine_id);
+        }
+        if let Some(value) = env::var_os("CLUSTER_ID") {
+            self.scope.configured_cluster_id = Some(value.to_string_lossy().into_owned());
+        }
+        if let Some(value) = env::var_os("CLUSTER_NAME") {
+            self.scope.cluster_name = Some(value.to_string_lossy().into_owned());
+        }
+        if let Some(value) = env::var_os("SERVICE_NAME") {
+            self.scope.service_name = Some(value.to_string_lossy().into_owned());
+        }
+        if let Some(value) = env::var_os("ENVIRONMENT") {
+            self.scope.environment = Some(value.to_string_lossy().into_owned());
+        }
     }
 
     fn normalize(&mut self) {
@@ -310,6 +414,10 @@ impl AgentConfig {
         if self.spool.dir.as_os_str().is_empty() {
             self.spool.dir = self.state_dir.join("spool");
         }
+        normalize_optional_string(&mut self.scope.configured_cluster_id);
+        normalize_optional_string(&mut self.scope.cluster_name);
+        normalize_optional_string(&mut self.scope.service_name);
+        normalize_optional_string(&mut self.scope.environment);
         for source in &mut self.sources {
             if source.source_id.is_none() {
                 source.source_id = Some(format!("file:{}", source.path.to_string_lossy()));
@@ -409,7 +517,31 @@ impl AgentConfig {
                 ));
             }
         }
+        for (key, value) in &self.scope.configured_cluster_tags {
+            if key.trim().is_empty() || value.trim().is_empty() {
+                return Err(AppError::invalid_config(
+                    "scope.configured_cluster_tags keys and values must be non-empty",
+                ));
+            }
+        }
+        for (key, value) in &self.scope.host_labels {
+            if key.trim().is_empty() || value.trim().is_empty() {
+                return Err(AppError::invalid_config(
+                    "scope.host_labels keys and values must be non-empty",
+                ));
+            }
+        }
         Ok(())
+    }
+}
+
+fn normalize_optional_string(value: &mut Option<String>) {
+    if value
+        .as_ref()
+        .map(|current| current.trim().is_empty())
+        .unwrap_or(false)
+    {
+        *value = None;
     }
 }
 
@@ -519,7 +651,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use super::{AgentConfig, StartAt, TransportMode};
+    use super::{AgentConfig, InstallMode, StartAt, TransportMode};
 
     static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -638,6 +770,12 @@ sources:
         env::set_var("QUEUE_SEND_CAPACITY", "16");
         env::set_var("SPOOL_ENABLED", "false");
         env::set_var("TRANSPORT_MODE", "mock");
+        env::set_var("INSTALL_MODE", "ansible");
+        env::set_var("ALLOW_MACHINE_ID", "true");
+        env::set_var("CLUSTER_ID", "cluster-a");
+        env::set_var("CLUSTER_NAME", "prod");
+        env::set_var("SERVICE_NAME", "api");
+        env::set_var("ENVIRONMENT", "production");
 
         let config = AgentConfig::load(&config_path).unwrap();
 
@@ -648,6 +786,12 @@ sources:
         env::remove_var("QUEUE_SEND_CAPACITY");
         env::remove_var("SPOOL_ENABLED");
         env::remove_var("TRANSPORT_MODE");
+        env::remove_var("INSTALL_MODE");
+        env::remove_var("ALLOW_MACHINE_ID");
+        env::remove_var("CLUSTER_ID");
+        env::remove_var("CLUSTER_NAME");
+        env::remove_var("SERVICE_NAME");
+        env::remove_var("ENVIRONMENT");
 
         assert_eq!(config.edge_url, "https://edge.example.local");
         assert_eq!(config.edge_grpc_addr, "edge.example.local:7443");
@@ -656,6 +800,15 @@ sources:
         assert_eq!(config.queues.send_capacity, 16);
         assert!(!config.spool.enabled);
         assert_eq!(config.transport.mode, TransportMode::Mock);
+        assert_eq!(config.install.mode, InstallMode::Ansible);
+        assert!(config.platform.allow_machine_id);
+        assert_eq!(
+            config.scope.configured_cluster_id.as_deref(),
+            Some("cluster-a")
+        );
+        assert_eq!(config.scope.cluster_name.as_deref(), Some("prod"));
+        assert_eq!(config.scope.service_name.as_deref(), Some("api"));
+        assert_eq!(config.scope.environment.as_deref(), Some("production"));
     }
 
     fn clear_test_env() {
@@ -686,6 +839,12 @@ sources:
             "SPOOL_DIR",
             "SPOOL_MAX_DISK_BYTES",
             "TRANSPORT_MODE",
+            "INSTALL_MODE",
+            "ALLOW_MACHINE_ID",
+            "CLUSTER_ID",
+            "CLUSTER_NAME",
+            "SERVICE_NAME",
+            "ENVIRONMENT",
         ] {
             env::remove_var(key);
         }

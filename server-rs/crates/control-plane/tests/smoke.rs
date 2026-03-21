@@ -7,25 +7,24 @@ use common::{
     nats_subjects::{
         CONTROL_CREDENTIALS_CREATE, CONTROL_CREDENTIALS_GET, CONTROL_CREDENTIALS_LIST,
         CONTROL_HOSTS_CREATE, CONTROL_HOSTS_LIST, CONTROL_HOSTS_UPDATE,
-        CONTROL_HOST_GROUPS_ADD_MEMBER, CONTROL_HOST_GROUPS_CREATE, 
-        CONTROL_HOST_GROUPS_LIST, CONTROL_HOST_GROUPS_REMOVE_MEMBER, CONTROL_HOST_GROUPS_UPDATE,
-        CONTROL_POLICIES_CREATE, CONTROL_POLICIES_LIST,
-        CONTROL_POLICIES_REVISIONS, CONTROL_POLICIES_UPDATE,
+        CONTROL_HOST_GROUPS_ADD_MEMBER, CONTROL_HOST_GROUPS_CREATE, CONTROL_HOST_GROUPS_LIST,
+        CONTROL_HOST_GROUPS_REMOVE_MEMBER, CONTROL_HOST_GROUPS_UPDATE, CONTROL_POLICIES_CREATE,
+        CONTROL_POLICIES_LIST, CONTROL_POLICIES_REVISIONS, CONTROL_POLICIES_UPDATE,
     },
     proto::{
         control::{
-            AddHostGroupMemberRequest, ControlReplyEnvelope, CreateCredentialsRequest,
-            CreateHostGroupRequest, CreateHostRequest, CreatePolicyRequest,
-            CredentialProfileMetadata, GetCredentialsRequest,
-            GetPolicyRevisionsRequest, GetPolicyRevisionsResponse, Host, HostGroup,
-            HostGroupMember, HostInput, ListCredentialsRequest, ListCredentialsResponse,
+            AddHostGroupMemberRequest, CreateCredentialsRequest, CreateHostGroupRequest,
+            CreateHostRequest, CreatePolicyRequest, CredentialProfileMetadata,
+            GetCredentialsRequest, GetPolicyRevisionsRequest, GetPolicyRevisionsResponse, Host,
+            HostGroup, HostGroupMember, HostInput, ListCredentialsRequest, ListCredentialsResponse,
             ListHostGroupsRequest, ListHostGroupsResponse, ListHostsRequest, ListHostsResponse,
             ListPoliciesRequest, ListPoliciesResponse, Policy, RemoveHostGroupMemberRequest,
             UpdateHostGroupRequest, UpdateHostRequest, UpdatePolicyRequest,
         },
         decode_message, encode_message,
+        runtime::{AuditContext, RuntimeReplyEnvelope},
     },
-    RuntimeConfig,
+    ControlPlaneConfig,
 };
 use control_plane::{
     http::{self, HttpState},
@@ -57,10 +56,10 @@ impl TestHarness {
     async fn start() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
 
-        let config = RuntimeConfig::from_env()?;
+        let config = ControlPlaneConfig::from_env()?;
         let pool = PgPoolOptions::new()
             .max_connections(5)
-            .connect(&config.postgres_dsn)
+            .connect(&config.shared.postgres_dsn)
             .await?;
         run_migrations(&pool).await?;
         truncate_tables(&pool).await?;
@@ -68,7 +67,7 @@ impl TestHarness {
         let repo = ControlRepository::new(pool.clone());
         let service = Arc::new(ControlService::new(repo));
 
-        let nats = async_nats::connect(&config.nats_url).await?;
+        let nats = async_nats::connect(&config.shared.nats_url).await?;
         let shutdown = CancellationToken::new();
         let subscriber_tasks =
             transport::spawn_handlers(nats.clone(), service, shutdown.clone()).await?;
@@ -156,7 +155,7 @@ impl TestHarness {
         &self,
         subject: &str,
         request: Req,
-    ) -> anyhow::Result<ControlReplyEnvelope>
+    ) -> anyhow::Result<RuntimeReplyEnvelope>
     where
         Req: Message,
     {
@@ -164,7 +163,7 @@ impl TestHarness {
             .nats
             .request(subject.to_string(), encode_message(&request).into())
             .await?;
-        let envelope: ControlReplyEnvelope = decode_message(message.payload.as_ref())?;
+        let envelope: RuntimeReplyEnvelope = decode_message(message.payload.as_ref())?;
         ensure!(
             envelope.status == "ok",
             "subject {subject} failed: {} {}",
@@ -173,6 +172,15 @@ impl TestHarness {
         );
         Ok(envelope)
     }
+}
+
+fn test_audit() -> Option<AuditContext> {
+    Some(AuditContext {
+        actor_id: "smoke-user".to_string(),
+        actor_type: "test".to_string(),
+        request_id: new_corr_id(),
+        reason: "smoke test".to_string(),
+    })
 }
 
 #[tokio::test]
@@ -217,6 +225,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
             CONTROL_POLICIES_LIST,
             ListPoliciesRequest {
                 correlation_id: new_corr_id(),
+                paging: None,
             },
         )
         .await?;
@@ -230,6 +239,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                 name: "baseline".to_string(),
                 description: "baseline policy".to_string(),
                 policy_body_json: r#"{"paths":["/var/log/*.log"]}"#.to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -244,6 +254,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                 policy_id: policy.policy_id.clone(),
                 description: "baseline updated".to_string(),
                 policy_body_json: r#"{"paths":["/var/log/syslog"]}"#.to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -255,6 +266,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
             GetPolicyRevisionsRequest {
                 correlation_id: new_corr_id(),
                 policy_id: policy.policy_id.clone(),
+                paging: None,
             },
         )
         .await?;
@@ -277,6 +289,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                     .into_iter()
                     .collect(),
                 }),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -298,6 +311,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                         .into_iter()
                         .collect(),
                 }),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -309,6 +323,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
             CONTROL_HOSTS_LIST,
             ListHostsRequest {
                 correlation_id: new_corr_id(),
+                paging: None,
             },
         )
         .await?;
@@ -321,6 +336,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                 correlation_id: new_corr_id(),
                 name: "linux-nodes".to_string(),
                 description: "all linux".to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -333,6 +349,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                 correlation_id: new_corr_id(),
                 host_group_id: group.host_group_id.clone(),
                 host_id: host.host_id.clone(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -343,6 +360,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
             CONTROL_HOST_GROUPS_LIST,
             ListHostGroupsRequest {
                 correlation_id: new_corr_id(),
+                paging: None,
             },
         )
         .await?;
@@ -356,6 +374,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                 correlation_id: new_corr_id(),
                 host_group_id: group.host_group_id.clone(),
                 host_id: host.host_id.clone(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -368,6 +387,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                 host_group_id: group.host_group_id.clone(),
                 name: "linux-critical".to_string(),
                 description: "critical linux".to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -383,6 +403,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                 kind: "ssh_key".to_string(),
                 description: "Default SSH key".to_string(),
                 vault_ref: "secret/data/ssh/default".to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -393,6 +414,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
             CONTROL_CREDENTIALS_LIST,
             ListCredentialsRequest {
                 correlation_id: new_corr_id(),
+                paging: None,
             },
         )
         .await?;
