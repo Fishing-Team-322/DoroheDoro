@@ -2,7 +2,11 @@ pub const AGENTS_ENROLL_REQUEST: &str = "agents.enroll.request";
 pub const AGENTS_POLICY_FETCH: &str = "agents.policy.fetch";
 pub const AGENTS_HEARTBEAT: &str = "agents.heartbeat";
 pub const AGENTS_DIAGNOSTICS: &str = "agents.diagnostics";
+pub const AGENTS_REGISTRY_LIST: &str = "agents.registry.list";
+pub const AGENTS_REGISTRY_GET: &str = "agents.registry.get";
+pub const AGENTS_DIAGNOSTICS_GET: &str = "agents.diagnostics.get";
 pub const AGENTS_BOOTSTRAP_TOKEN_ISSUE: &str = "agents.bootstrap-token.issue";
+
 pub const CONTROL_POLICIES_LIST: &str = "control.policies.list";
 pub const CONTROL_POLICIES_GET: &str = "control.policies.get";
 pub const CONTROL_POLICIES_CREATE: &str = "control.policies.create";
@@ -21,6 +25,7 @@ pub const CONTROL_HOST_GROUPS_REMOVE_MEMBER: &str = "control.host-groups.remove-
 pub const CONTROL_CREDENTIALS_LIST: &str = "control.credentials.list";
 pub const CONTROL_CREDENTIALS_GET: &str = "control.credentials.get";
 pub const CONTROL_CREDENTIALS_CREATE: &str = "control.credentials.create";
+
 pub const DEPLOYMENTS_JOBS_CREATE: &str = "deployments.jobs.create";
 pub const DEPLOYMENTS_JOBS_GET: &str = "deployments.jobs.get";
 pub const DEPLOYMENTS_JOBS_LIST: &str = "deployments.jobs.list";
@@ -40,6 +45,9 @@ mod tests {
         assert_eq!(AGENTS_POLICY_FETCH, "agents.policy.fetch");
         assert_eq!(AGENTS_HEARTBEAT, "agents.heartbeat");
         assert_eq!(AGENTS_DIAGNOSTICS, "agents.diagnostics");
+        assert_eq!(AGENTS_REGISTRY_LIST, "agents.registry.list");
+        assert_eq!(AGENTS_REGISTRY_GET, "agents.registry.get");
+        assert_eq!(AGENTS_DIAGNOSTICS_GET, "agents.diagnostics.get");
         assert_eq!(AGENTS_BOOTSTRAP_TOKEN_ISSUE, "agents.bootstrap-token.issue");
         assert_eq!(CONTROL_POLICIES_LIST, "control.policies.list");
         assert_eq!(CONTROL_POLICIES_GET, "control.policies.get");

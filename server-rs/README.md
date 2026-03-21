@@ -60,12 +60,15 @@ docker compose up -d postgres nats
 3. Start the Rust runtime components:
 
 ```bash
+cd server-rs
 cargo run -p enrollment-plane
 # separate terminal
 cargo run -p control-plane
 # separate terminal
 cargo run -p deployment-plane
 ```
+
+Migrations are applied automatically on startup.
 
 4. Optional smoke tests:
 
@@ -96,7 +99,13 @@ Each runtime exposes:
 - `agents.policy.fetch`
 - `agents.heartbeat`
 - `agents.diagnostics`
+- `agents.registry.list`
+- `agents.registry.get`
+- `agents.diagnostics.get`
 - `agents.bootstrap-token.issue`
+- `control.policies.list`
+- `control.policies.get`
+- `control.policies.revisions`
 
 `control-plane` listens to:
 
@@ -194,8 +203,12 @@ Deployment-plane:
 
 Implemented:
 
-- shared Rust protobuf generation for enrollment, control, and deployment contracts
-- PostgreSQL-backed enrollment, control, and deployment state
+- shared contract generation for Rust
+- PostgreSQL-backed enrollment state
+- PostgreSQL-backed control and deployment state
+- NATS request/reply and publish handlers
+- dev bootstrap seeding for policy and bootstrap token
+- read-only agents and policies bridge used by `edge_api`
 - bootstrap token issuance pinned to a specific policy revision
 - deployment snapshot generation and bootstrap YAML rendering for the current agent shape
 - mock deployment execution with persisted attempts, targets, steps, and NATS status events

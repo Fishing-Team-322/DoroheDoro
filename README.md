@@ -22,6 +22,30 @@ docker compose up --build
 
 This is the recommended local workflow for `WEB + SERVER boundary + server-rs enrollment-plane`.
 
+## What is live today
+
+After startup, the current integrated slice is:
+
+- WEB login through `frontend -> /api/edge -> edge-api`
+- real `edge-api -> NATS -> enrollment-plane` bridge
+- real agents read-side:
+  - `GET /api/v1/agents`
+  - `GET /api/v1/agents/{id}`
+  - `GET /api/v1/agents/{id}/diagnostics`
+  - `GET /api/v1/agents/{id}/policy`
+- real policy read-side:
+  - `GET /api/v1/policies`
+  - `GET /api/v1/policies/{id}`
+  - `GET /api/v1/policies/{id}/revisions`
+- agent gRPC ingress with TLS + mTLS:
+  - `Enroll`
+  - `FetchPolicy`
+  - `SendHeartbeat`
+  - `SendDiagnostics`
+  - `IngestLogs`
+
+Domains that do not yet have a Rust runtime behind them still return controlled `501 not_implemented` from `edge-api` instead of fake Go business logic.
+
 ## What changed in edge-api
 
 `edge_api` now behaves as a thin boundary service:
@@ -66,6 +90,16 @@ docker exec dorohedoro-edge-api-1 /bin/sh -lc \
 ```
 
 If you need a separate host-side cert set for manual experiments, generate one with `cd edge_api && go run ./cmd/dev-certs` and run a standalone `edge-api` against that directory.
+
+## Demo flow
+
+See [`docs/demo-smoke.md`](C:/C++WWW/DoroheDoro/docs/demo-smoke.md) for the current end-to-end smoke/demo scenario:
+
+1. start the stack
+2. log into WEB
+3. enroll a fake agent over gRPC + mTLS
+4. inspect real agents/policies data through `edge-api`
+5. verify the SSE gateway
 
 ## Useful checks
 

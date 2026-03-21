@@ -1,4 +1,5 @@
 use prost::Message;
+use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 
@@ -50,6 +51,24 @@ where
     }
 }
 
+pub fn ok_json_envelope<T>(
+    payload: &T,
+    correlation_id: impl Into<String>,
+) -> AppResult<AgentReplyEnvelope>
+where
+    T: Serialize,
+{
+    let payload = serde_json::to_vec(payload)
+        .map_err(|error| AppError::internal(format!("serialize json payload: {error}")))?;
+    Ok(AgentReplyEnvelope {
+        status: "ok".to_string(),
+        code: "ok".to_string(),
+        message: String::new(),
+        payload,
+        correlation_id: correlation_id.into(),
+    })
+}
+
 pub fn control_ok_envelope<T>(
     payload: &T,
     correlation_id: impl Into<String>,
@@ -84,10 +103,12 @@ where
 
 #[cfg(test)]
 mod tests {
+    use serde::Serialize;
+
     use super::{
         agent::FetchPolicyRequest, control::Host, control::ListHostsResponse, control_ok_envelope,
         decode_message, deployment::ListDeploymentJobsResponse, deployment_ok_envelope,
-        encode_message, ok_envelope,
+        encode_message, ok_envelope, ok_json_envelope,
     };
 
     #[test]
@@ -116,6 +137,23 @@ mod tests {
         assert_eq!(envelope.code, "ok");
         assert_eq!(envelope.correlation_id, "corr-2");
         assert!(!envelope.payload.is_empty());
+    }
+
+    #[derive(Serialize)]
+    struct JsonPayload {
+        status: &'static str,
+    }
+
+    #[test]
+    fn wraps_ok_json_envelope() {
+        let envelope = ok_json_envelope(&JsonPayload { status: "ok" }, "corr-json").unwrap();
+        assert_eq!(envelope.status, "ok");
+        assert_eq!(envelope.code, "ok");
+        assert_eq!(envelope.correlation_id, "corr-json");
+        assert_eq!(
+            String::from_utf8(envelope.payload).unwrap(),
+            "{\"status\":\"ok\"}"
+        );
     }
 
     #[test]

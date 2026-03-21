@@ -19,7 +19,10 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
 pub async fn run(config: RuntimeConfig) -> anyhow::Result<()> {
     let pool = connect_postgres(&config.postgres_dsn).await?;
-    MIGRATOR.run(&pool).await.context("run postgres migrations")?;
+    MIGRATOR
+        .run(&pool)
+        .await
+        .context("run postgres migrations")?;
     let nats = connect_nats(&config.nats_url).await?;
 
     let repo = EnrollmentRepository::new(pool.clone());

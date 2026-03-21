@@ -1,10 +1,13 @@
 package subjects
 
 type Registry struct {
-	AgentsEnrollRequest string
-	AgentsPolicyFetch   string
-	AgentsHeartbeat     string
-	AgentsDiagnostics   string
+	AgentsEnrollRequest  string
+	AgentsPolicyFetch    string
+	AgentsHeartbeat      string
+	AgentsDiagnostics    string
+	AgentsRegistryList   string
+	AgentsRegistryGet    string
+	AgentsDiagnosticsGet string
 
 	ControlPoliciesList      string
 	ControlPoliciesGet       string
@@ -66,10 +69,13 @@ type Registry struct {
 
 func Defaults() Registry {
 	return Registry{
-		AgentsEnrollRequest: "agents.enroll.request",
-		AgentsPolicyFetch:   "agents.policy.fetch",
-		AgentsHeartbeat:     "agents.heartbeat",
-		AgentsDiagnostics:   "agents.diagnostics",
+		AgentsEnrollRequest:  "agents.enroll.request",
+		AgentsPolicyFetch:    "agents.policy.fetch",
+		AgentsHeartbeat:      "agents.heartbeat",
+		AgentsDiagnostics:    "agents.diagnostics",
+		AgentsRegistryList:   "agents.registry.list",
+		AgentsRegistryGet:    "agents.registry.get",
+		AgentsDiagnosticsGet: "agents.diagnostics.get",
 
 		ControlPoliciesList:      "control.policies.list",
 		ControlPoliciesGet:       "control.policies.get",

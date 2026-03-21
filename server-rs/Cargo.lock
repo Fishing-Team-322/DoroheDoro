@@ -516,6 +516,7 @@ dependencies = [
  "futures",
  "hex",
  "reqwest",
+ "serde",
  "serde_json",
  "serial_test",
  "sha2",
