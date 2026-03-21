@@ -11,3 +11,4 @@
 */.env/
 */.gocache/
 /server-rs/.cargo-home/
+*/.gomodcache/

@@ -7,6 +7,34 @@ use crate::executor::MockFailMode;
 use crate::models::ExecutorKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactResolverConfig {
+    pub manifest_url: String,
+    pub release_base_url: Option<String>,
+    pub artifact_version: Option<String>,
+    pub preferred_package_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultRuntimeConfig {
+    pub addr: String,
+    pub role_id: String,
+    pub secret_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTlsMaterialConfig {
+    pub ca_vault_ref: Option<String>,
+    pub cert_vault_ref: Option<String>,
+    pub key_vault_ref: Option<String>,
+}
+
+impl AgentTlsMaterialConfig {
+    pub fn has_any_material(&self) -> bool {
+        self.ca_vault_ref.is_some() || self.cert_vault_ref.is_some() || self.key_vault_ref.is_some()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeploymentConfig {
     pub shared: SharedRuntimeConfig,
     pub deployment_http_addr: String,
@@ -17,6 +45,15 @@ pub struct DeploymentConfig {
     pub ansible_runner_bin: Option<String>,
     pub ansible_playbook_path: Option<String>,
     pub deployment_temp_dir: Option<PathBuf>,
+    pub ansible_successful_workspace_retention: usize,
+    pub artifact_manifest_url: Option<String>,
+    pub release_base_url: Option<String>,
+    pub artifact_version: Option<String>,
+    pub preferred_package_type: Option<String>,
+    pub vault_addr: Option<String>,
+    pub vault_role_id: Option<String>,
+    pub vault_secret_id: Option<String>,
+    pub agent_tls_material: AgentTlsMaterialConfig,
     pub mock_executor_step_delay_ms: u64,
     pub mock_executor_fail_mode: MockFailMode,
     pub mock_executor_fail_hosts: Vec<String>,
@@ -48,6 +85,38 @@ impl DeploymentConfig {
         let ansible_runner_bin = optional_trimmed(&vars, "ANSIBLE_RUNNER_BIN");
         let ansible_playbook_path = optional_trimmed(&vars, "ANSIBLE_PLAYBOOK_PATH");
         let deployment_temp_dir = optional_trimmed(&vars, "DEPLOYMENT_TEMP_DIR").map(PathBuf::from);
+        let ansible_successful_workspace_retention =
+            optional_trimmed(&vars, "ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION")
+                .map(|value| {
+                    value.parse::<usize>().map_err(|_| {
+                        ConfigError::InvalidNumber("ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION")
+                    })
+                })
+                .transpose()?
+                .unwrap_or(10);
+        let artifact_manifest_url = optional_trimmed(&vars, "AGENT_ARTIFACT_MANIFEST_URL");
+        let release_base_url = optional_trimmed(&vars, "AGENT_RELEASE_BASE_URL");
+        let artifact_version = optional_trimmed(&vars, "AGENT_ARTIFACT_VERSION");
+        let preferred_package_type = optional_trimmed(&vars, "AGENT_PREFERRED_PACKAGE_TYPE");
+        if let Some(value) = preferred_package_type.as_deref() {
+            if !matches!(value, "deb" | "tar.gz") {
+                return Err(ConfigError::InvalidEnum("AGENT_PREFERRED_PACKAGE_TYPE"));
+            }
+        }
+        let vault_addr = optional_trimmed(&vars, "VAULT_ADDR");
+        let vault_role_id = optional_trimmed(&vars, "VAULT_ROLE_ID");
+        let vault_secret_id = optional_trimmed(&vars, "VAULT_SECRET_ID");
+        let agent_tls_material = AgentTlsMaterialConfig {
+            ca_vault_ref: optional_trimmed(&vars, "AGENT_MTLS_CA_VAULT_REF"),
+            cert_vault_ref: optional_trimmed(&vars, "AGENT_MTLS_CERT_VAULT_REF"),
+            key_vault_ref: optional_trimmed(&vars, "AGENT_MTLS_KEY_VAULT_REF"),
+        };
+        if agent_tls_material.cert_vault_ref.is_some() ^ agent_tls_material.key_vault_ref.is_some()
+        {
+            return Err(ConfigError::InvalidCombination(
+                "AGENT_MTLS_CERT_VAULT_REF and AGENT_MTLS_KEY_VAULT_REF must be configured together",
+            ));
+        }
         let mock_executor_step_delay_ms = optional_trimmed(&vars, "MOCK_EXECUTOR_STEP_DELAY_MS")
             .map(|value| {
                 value
@@ -81,10 +150,50 @@ impl DeploymentConfig {
             ansible_runner_bin,
             ansible_playbook_path,
             deployment_temp_dir,
+            ansible_successful_workspace_retention,
+            artifact_manifest_url,
+            release_base_url,
+            artifact_version,
+            preferred_package_type,
+            vault_addr,
+            vault_role_id,
+            vault_secret_id,
+            agent_tls_material,
             mock_executor_step_delay_ms,
             mock_executor_fail_mode,
             mock_executor_fail_hosts,
         })
+    }
+
+    pub fn artifact_resolver_config(&self) -> Result<Option<ArtifactResolverConfig>, ConfigError> {
+        let Some(manifest_url) = self.artifact_manifest_url.clone() else {
+            return Ok(None);
+        };
+
+        Ok(Some(ArtifactResolverConfig {
+            manifest_url,
+            release_base_url: self.release_base_url.clone(),
+            artifact_version: self.artifact_version.clone(),
+            preferred_package_type: self.preferred_package_type.clone(),
+        }))
+    }
+
+    pub fn vault_runtime_config(&self) -> Result<Option<VaultRuntimeConfig>, ConfigError> {
+        match (
+            self.vault_addr.clone(),
+            self.vault_role_id.clone(),
+            self.vault_secret_id.clone(),
+        ) {
+            (None, None, None) => Ok(None),
+            (Some(addr), Some(role_id), Some(secret_id)) => Ok(Some(VaultRuntimeConfig {
+                addr,
+                role_id,
+                secret_id,
+            })),
+            _ => Err(ConfigError::InvalidCombination(
+                "VAULT_ADDR, VAULT_ROLE_ID and VAULT_SECRET_ID must be configured together",
+            )),
+        }
     }
 }
 
@@ -98,6 +207,8 @@ pub enum ConfigError {
     InvalidNumber(&'static str),
     #[error("invalid enum value for: {0}")]
     InvalidEnum(&'static str),
+    #[error("{0}")]
+    InvalidCombination(&'static str),
 }
 
 #[cfg(test)]
@@ -118,6 +229,23 @@ mod tests {
             ("ANSIBLE_RUNNER_BIN", "/usr/bin/ansible-runner"),
             ("ANSIBLE_PLAYBOOK_PATH", "/srv/playbooks/install.yaml"),
             ("DEPLOYMENT_TEMP_DIR", "/tmp/doro"),
+            ("ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION", "7"),
+            (
+                "AGENT_ARTIFACT_MANIFEST_URL",
+                "https://downloads.example.local/manifest.json",
+            ),
+            (
+                "AGENT_RELEASE_BASE_URL",
+                "https://downloads.example.local/agent",
+            ),
+            ("AGENT_ARTIFACT_VERSION", "0.2.0"),
+            ("AGENT_PREFERRED_PACKAGE_TYPE", "deb"),
+            ("VAULT_ADDR", "https://vault.example.local"),
+            ("VAULT_ROLE_ID", "role-id"),
+            ("VAULT_SECRET_ID", "secret-id"),
+            ("AGENT_MTLS_CA_VAULT_REF", "secret/data/agent/ca"),
+            ("AGENT_MTLS_CERT_VAULT_REF", "secret/data/agent/cert"),
+            ("AGENT_MTLS_KEY_VAULT_REF", "secret/data/agent/key"),
             ("MOCK_EXECUTOR_STEP_DELAY_MS", "25"),
             ("MOCK_EXECUTOR_FAIL_MODE", "partial"),
             ("MOCK_EXECUTOR_FAIL_HOSTS", "host-a,host-b"),
@@ -130,8 +258,26 @@ mod tests {
             Some("/usr/bin/ansible-runner")
         );
         assert_eq!(
-            config.deployment_temp_dir.unwrap().to_string_lossy(),
+            config
+                .deployment_temp_dir
+                .as_ref()
+                .unwrap()
+                .to_string_lossy(),
             "/tmp/doro"
+        );
+        assert_eq!(config.ansible_successful_workspace_retention, 7);
+        assert_eq!(
+            config.artifact_manifest_url.as_deref(),
+            Some("https://downloads.example.local/manifest.json")
+        );
+        assert_eq!(config.preferred_package_type.as_deref(), Some("deb"));
+        assert_eq!(
+            config.vault_addr.as_deref(),
+            Some("https://vault.example.local")
+        );
+        assert_eq!(
+            config.agent_tls_material.cert_vault_ref.as_deref(),
+            Some("secret/data/agent/cert")
         );
         assert_eq!(config.mock_executor_step_delay_ms, 25);
         assert_eq!(
@@ -143,5 +289,26 @@ mod tests {
             vec!["host-a".to_string(), "host-b".to_string()]
         );
         assert_eq!(config.shared.postgres_dsn, "postgres://example");
+        assert!(config.artifact_resolver_config().unwrap().is_some());
+        assert!(config.vault_runtime_config().unwrap().is_some());
+    }
+
+    #[test]
+    fn rejects_partial_agent_mtls_keypair_config() {
+        let error = DeploymentConfig::from_pairs([
+            ("POSTGRES_DSN", "postgres://example"),
+            ("NATS_URL", "nats://example:4222"),
+            ("DEPLOYMENT_HTTP_ADDR", "127.0.0.1:9191"),
+            ("DEPLOYMENT_EXECUTOR_KIND", "ansible"),
+            ("EDGE_PUBLIC_URL", "https://edge.example.local"),
+            ("EDGE_GRPC_ADDR", "edge.example.local:9090"),
+            ("AGENT_STATE_DIR_DEFAULT", "/srv/doro-agent"),
+            ("AGENT_MTLS_CERT_VAULT_REF", "secret/data/agent/cert"),
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains(
+            "AGENT_MTLS_CERT_VAULT_REF and AGENT_MTLS_KEY_VAULT_REF must be configured together"
+        ));
     }
 }

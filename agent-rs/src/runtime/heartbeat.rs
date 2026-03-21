@@ -5,15 +5,17 @@ use tokio_util::sync::CancellationToken;
 use tracing::error;
 
 use crate::{
-    error::AppResult,
+    error::{AppError, AppResult},
     proto::agent,
-    runtime::{DiagnosticsSnapshot, RuntimeStatusHandle},
+    runtime::{state_writer::StateWriterHandle, DiagnosticsSnapshot, RuntimeStatusHandle},
+    state::RuntimeStatePatch,
     transport::AgentTransport,
 };
 
 pub fn spawn_heartbeat_worker(
     transport: Arc<dyn AgentTransport>,
     status: RuntimeStatusHandle,
+    state_writer: StateWriterHandle,
     shutdown: CancellationToken,
     edge_url: String,
     interval_sec: u64,
@@ -27,8 +29,22 @@ pub fn spawn_heartbeat_worker(
                     let snapshot = status.snapshot();
                     let heartbeat = build_heartbeat_payload(&snapshot, &edge_url);
                     if let Err(error) = transport.send_heartbeat(heartbeat).await {
-                        status.record_error(format!("heartbeat send failed: {error}"));
+                        let detail = format!("heartbeat send failed: {error}");
+                        status.record_error(detail);
+                        status.record_connectivity_error(&error);
+                        let _ = state_writer
+                            .update_runtime_state(connectivity_error_patch(&error))
+                            .await;
                         error!(error = %error, "failed to send heartbeat");
+                    } else {
+                        let now = chrono::Utc::now().timestamp_millis();
+                        status.record_connectivity_success(now);
+                        let _ = state_writer
+                            .update_runtime_state(RuntimeStatePatch {
+                                last_handshake_success_at_unix_ms: Some(Some(now)),
+                                ..RuntimeStatePatch::default()
+                            })
+                            .await;
                     }
                 }
             }
@@ -117,13 +133,29 @@ pub fn build_heartbeat_payload(
         agent_id: snapshot.agent_id.clone(),
         hostname: snapshot.hostname.clone(),
         version: snapshot.version.clone(),
-        status: if snapshot.degraded_mode {
-            "degraded".to_string()
-        } else {
-            "online".to_string()
-        },
+        status: snapshot.runtime_status.clone(),
         host_metadata,
         sent_at_unix_ms: chrono::Utc::now().timestamp_millis(),
+    }
+}
+
+fn connectivity_error_patch(error: &AppError) -> RuntimeStatePatch {
+    let message = error.to_string();
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("tls")
+        || lower.contains("certificate")
+        || lower.contains("rustls")
+        || lower.contains("ssl")
+    {
+        RuntimeStatePatch {
+            last_tls_error: Some(Some(message)),
+            ..RuntimeStatePatch::default()
+        }
+    } else {
+        RuntimeStatePatch {
+            last_connect_error: Some(Some(message)),
+            ..RuntimeStatePatch::default()
+        }
     }
 }
 

@@ -1,24 +1,37 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use anyhow::{bail, ensure};
+use anyhow::{anyhow, bail, ensure};
 use async_nats::Client;
 use axum::{body::Body, http::Request};
 use common::{
     nats_subjects::{
-        CONTROL_CREDENTIALS_CREATE, CONTROL_CREDENTIALS_GET, CONTROL_CREDENTIALS_LIST,
-        CONTROL_HOSTS_CREATE, CONTROL_HOSTS_LIST, CONTROL_HOSTS_UPDATE,
+        ANOMALIES_INSTANCES_LIST, ANOMALIES_RULES_CREATE, ANOMALIES_RULES_UPDATE,
+        CONTROL_CLUSTERS_ADD_HOST, CONTROL_CLUSTERS_CREATE, CONTROL_CLUSTERS_GET,
+        CONTROL_CLUSTERS_LIST, CONTROL_CREDENTIALS_CREATE, CONTROL_CREDENTIALS_GET,
+        CONTROL_CREDENTIALS_LIST, CONTROL_HOSTS_CREATE, CONTROL_HOSTS_LIST, CONTROL_HOSTS_UPDATE,
         CONTROL_HOST_GROUPS_ADD_MEMBER, CONTROL_HOST_GROUPS_CREATE, CONTROL_HOST_GROUPS_LIST,
-        CONTROL_HOST_GROUPS_REMOVE_MEMBER, CONTROL_HOST_GROUPS_UPDATE, CONTROL_POLICIES_CREATE,
-        CONTROL_POLICIES_LIST, CONTROL_POLICIES_REVISIONS, CONTROL_POLICIES_UPDATE,
+        CONTROL_HOST_GROUPS_REMOVE_MEMBER, CONTROL_HOST_GROUPS_UPDATE, CONTROL_INTEGRATIONS_BIND,
+        CONTROL_INTEGRATIONS_CREATE, CONTROL_POLICIES_CREATE, CONTROL_POLICIES_LIST,
+        CONTROL_POLICIES_REVISIONS, CONTROL_POLICIES_UPDATE, CONTROL_ROLE_BINDINGS_CREATE,
+        CONTROL_ROLES_CREATE, CONTROL_ROLES_PERMISSIONS_SET, TICKETS_ASSIGN, TICKETS_CLOSE,
+        TICKETS_COMMENT_ADD, TICKETS_CREATE, TICKETS_STATUS_CHANGE,
     },
     proto::{
         control::{
-            AddHostGroupMemberRequest, CreateCredentialsRequest, CreateHostGroupRequest,
-            CreateHostRequest, CreatePolicyRequest, CredentialProfileMetadata,
-            GetCredentialsRequest, GetPolicyRevisionsRequest, GetPolicyRevisionsResponse, Host,
-            HostGroup, HostGroupMember, HostInput, ListCredentialsRequest, ListCredentialsResponse,
+            AddHostGroupMemberRequest, AddTicketCommentRequest, AnomalyRule, AssignTicketRequest,
+            BindIntegrationRequest, ChangeTicketStatusRequest, CloseTicketRequest,
+            ClusterHostMutationRequest, CreateAnomalyRuleRequest, CreateClusterRequest,
+            CreateCredentialsRequest, CreateHostGroupRequest, CreateHostRequest,
+            CreateIntegrationRequest, CreatePolicyRequest, CreateRoleBindingRequest,
+            CreateRoleRequest, CreateTicketRequest, CredentialProfileMetadata, GetClusterRequest,
+            GetClusterResponse, GetCredentialsRequest, GetPolicyRevisionsRequest,
+            GetPolicyRevisionsResponse, GetRolePermissionsResponse, GetTicketResponse, Host,
+            HostGroup, HostGroupMember, HostInput, Integration, IntegrationBinding,
+            ListAnomalyInstancesRequest, ListAnomalyInstancesResponse, ListClustersRequest,
+            ListClustersResponse, ListCredentialsRequest, ListCredentialsResponse,
             ListHostGroupsRequest, ListHostGroupsResponse, ListHostsRequest, ListHostsResponse,
-            ListPoliciesRequest, ListPoliciesResponse, Policy, RemoveHostGroupMemberRequest,
+            ListPoliciesRequest, ListPoliciesResponse, Policy, RemoveHostGroupMemberRequest, Role,
+            RoleBinding, SetRolePermissionsRequest, TicketDetails, UpdateAnomalyRuleRequest,
             UpdateHostGroupRequest, UpdateHostRequest, UpdatePolicyRequest,
         },
         decode_message, encode_message,
@@ -36,6 +49,7 @@ use prost::Message;
 use reqwest::StatusCode;
 use serial_test::serial;
 use sqlx::{postgres::PgPoolOptions, PgPool};
+use serde_json::json;
 use tokio::{net::TcpListener, task::JoinHandle, time::sleep};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
@@ -65,7 +79,12 @@ impl TestHarness {
         truncate_tables(&pool).await?;
 
         let repo = ControlRepository::new(pool.clone());
-        let service = Arc::new(ControlService::new(repo));
+        let service_inner = ControlService::new(repo);
+        service_inner
+            .bootstrap()
+            .await
+            .map_err(|error| anyhow!(error.to_string()))?;
+        let service = Arc::new(service_inner);
 
         let nats = async_nats::connect(&config.shared.nats_url).await?;
         let shutdown = CancellationToken::new();
@@ -435,6 +454,328 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+#[ignore]
+#[serial]
+async fn clusters_rbac_integrations_tickets_anomalies_flow() -> anyhow::Result<()> {
+    let harness = TestHarness::start().await?;
+
+    let host: Host = harness
+        .request_payload(
+            CONTROL_HOSTS_CREATE,
+            CreateHostRequest {
+                correlation_id: new_corr_id(),
+                host: Some(HostInput {
+                    hostname: "cluster-host-1".to_string(),
+                    ip: "10.20.0.5".to_string(),
+                    ssh_port: 22,
+                    remote_user: "root".to_string(),
+                    labels: [("role".to_string(), "ops".to_string())]
+                        .into_iter()
+                        .collect(),
+                }),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+
+    let cluster_response: GetClusterResponse = harness
+        .request_payload(
+            CONTROL_CLUSTERS_CREATE,
+            CreateClusterRequest {
+                correlation_id: new_corr_id(),
+                name: "prod-cluster".to_string(),
+                slug: "prod-cluster".to_string(),
+                description: "Production scope".to_string(),
+                is_active: true,
+                metadata_json: json!({ "tier": "prod" }).to_string(),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    let cluster_details = cluster_response
+        .cluster
+        .and_then(|details| details.cluster)
+        .ok_or_else(|| anyhow!("cluster not returned"))?;
+    let cluster_id = cluster_details.cluster_id.clone();
+
+    harness
+        .request_ack(
+            CONTROL_CLUSTERS_ADD_HOST,
+            ClusterHostMutationRequest {
+                correlation_id: new_corr_id(),
+                cluster_id: cluster_id.clone(),
+                host_id: host.host_id.clone(),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+
+    let fetched: GetClusterResponse = harness
+        .request_payload(
+            CONTROL_CLUSTERS_GET,
+            GetClusterRequest {
+                correlation_id: new_corr_id(),
+                cluster_id: cluster_id.clone(),
+                include_members: true,
+            },
+        )
+        .await?;
+    let host_bindings = fetched
+        .cluster
+        .map(|details| details.hosts)
+        .unwrap_or_default();
+    assert_eq!(host_bindings.len(), 1);
+
+    let listed: ListClustersResponse = harness
+        .request_payload(
+            CONTROL_CLUSTERS_LIST,
+            ListClustersRequest {
+                correlation_id: new_corr_id(),
+                paging: None,
+                query: String::new(),
+                host_id: host.host_id.clone(),
+                include_members: false,
+            },
+        )
+        .await?;
+    assert_eq!(listed.clusters.len(), 1);
+    assert_eq!(listed.clusters[0].host_count, 1);
+
+    let role: Role = harness
+        .request_payload(
+            CONTROL_ROLES_CREATE,
+            CreateRoleRequest {
+                correlation_id: new_corr_id(),
+                name: "cluster-admin".to_string(),
+                slug: "cluster-admin".to_string(),
+                description: "Manages prod cluster".to_string(),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+
+    let perms: GetRolePermissionsResponse = harness
+        .request_payload(
+            CONTROL_ROLES_PERMISSIONS_SET,
+            SetRolePermissionsRequest {
+                correlation_id: new_corr_id(),
+                role_id: role.role_id.clone(),
+                permission_codes: vec![
+                    "clusters.view".to_string(),
+                    "clusters.manage".to_string(),
+                    "tickets.manage".to_string(),
+                ],
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    assert_eq!(perms.permissions.len(), 3);
+
+    let binding: RoleBinding = harness
+        .request_payload(
+            CONTROL_ROLE_BINDINGS_CREATE,
+            CreateRoleBindingRequest {
+                correlation_id: new_corr_id(),
+                user_id: "ops@example.com".to_string(),
+                role_id: role.role_id.clone(),
+                scope_type: "cluster".to_string(),
+                scope_id: cluster_id.clone(),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    assert_eq!(binding.scope_id, cluster_id);
+
+    let integration: Integration = harness
+        .request_payload(
+            CONTROL_INTEGRATIONS_CREATE,
+            CreateIntegrationRequest {
+                correlation_id: new_corr_id(),
+                name: "ops-telegram".to_string(),
+                kind: "telegram_bot".to_string(),
+                description: "Telegram on-call".to_string(),
+                config_json: json!({ "token": "fake" }).to_string(),
+                is_active: true,
+                audit: test_audit(),
+            },
+        )
+        .await?;
+
+    let integration_binding: IntegrationBinding = harness
+        .request_payload(
+            CONTROL_INTEGRATIONS_BIND,
+            BindIntegrationRequest {
+                correlation_id: new_corr_id(),
+                integration_id: integration.integration_id.clone(),
+                scope_type: "cluster".to_string(),
+                scope_id: cluster_id.clone(),
+                event_types_json: json!(["ticket.created"]).to_string(),
+                severity_threshold: "high".to_string(),
+                is_active: true,
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    assert_eq!(integration_binding.scope_id, cluster_id);
+
+    let ticket_response: GetTicketResponse = harness
+        .request_payload(
+            TICKETS_CREATE,
+            CreateTicketRequest {
+                correlation_id: new_corr_id(),
+                title: "Disk pressure".to_string(),
+                description: "rootfs at 95%".to_string(),
+                cluster_id: cluster_id.clone(),
+                source_type: "manual".to_string(),
+                source_id: "ops-test".to_string(),
+                severity: "high".to_string(),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    let ticket = ticket_response
+        .ticket
+        .and_then(|details| details.ticket)
+        .ok_or_else(|| anyhow!("ticket payload missing"))?;
+    let ticket_id = ticket.ticket_id.clone();
+
+    let assigned: TicketDetails = harness
+        .request_payload(
+            TICKETS_ASSIGN,
+            AssignTicketRequest {
+                correlation_id: new_corr_id(),
+                ticket_id: ticket_id.clone(),
+                assignee_user_id: "ops@example.com".to_string(),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    assert_eq!(
+        assigned
+            .ticket
+            .as_ref()
+            .map(|t| t.assignee_user_id.clone()),
+        Some("ops@example.com".to_string())
+    );
+
+    let commented: TicketDetails = harness
+        .request_payload(
+            TICKETS_COMMENT_ADD,
+            AddTicketCommentRequest {
+                correlation_id: new_corr_id(),
+                ticket_id: ticket_id.clone(),
+                body: "Investigating disk usage".to_string(),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    assert_eq!(commented.comments.len(), 1);
+
+    let in_progress: TicketDetails = harness
+        .request_payload(
+            TICKETS_STATUS_CHANGE,
+            ChangeTicketStatusRequest {
+                correlation_id: new_corr_id(),
+                ticket_id: ticket_id.clone(),
+                status: "in_progress".to_string(),
+                resolution: String::new(),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    assert_eq!(
+        in_progress
+            .ticket
+            .as_ref()
+            .map(|t| t.status.clone()),
+        Some("in_progress".to_string())
+    );
+
+    let closed: TicketDetails = harness
+        .request_payload(
+            TICKETS_CLOSE,
+            CloseTicketRequest {
+                correlation_id: new_corr_id(),
+                ticket_id: ticket_id.clone(),
+                resolution: "Cleaned tmp".to_string(),
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    assert_eq!(
+        closed
+            .ticket
+            .as_ref()
+            .map(|t| t.status.clone()),
+        Some("closed".to_string())
+    );
+
+    let rule: AnomalyRule = harness
+        .request_payload(
+            ANOMALIES_RULES_CREATE,
+            CreateAnomalyRuleRequest {
+                correlation_id: new_corr_id(),
+                name: "CPU spike".to_string(),
+                kind: "threshold".to_string(),
+                scope_type: "cluster".to_string(),
+                scope_id: cluster_id.clone(),
+                config_json: json!({ "metric": "cpu", "threshold": 90 }).to_string(),
+                is_active: true,
+                audit: test_audit(),
+            },
+        )
+        .await?;
+
+    let updated_rule: AnomalyRule = harness
+        .request_payload(
+            ANOMALIES_RULES_UPDATE,
+            UpdateAnomalyRuleRequest {
+                correlation_id: new_corr_id(),
+                anomaly_rule_id: rule.anomaly_rule_id.clone(),
+                name: "CPU spike severe".to_string(),
+                config_json: json!({ "metric": "cpu", "threshold": 95 }).to_string(),
+                is_active: true,
+                audit: test_audit(),
+            },
+        )
+        .await?;
+    assert_eq!(updated_rule.name, "CPU spike severe");
+
+    let rule_uuid = Uuid::parse_str(&rule.anomaly_rule_id)?;
+    let cluster_uuid = Uuid::parse_str(&cluster_id)?;
+    sqlx::query(
+        "INSERT INTO anomaly_instances (id, rule_id, cluster_id, severity, status, started_at, payload_json)
+         VALUES ($1, $2, $3, $4, $5, NOW(), $6)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(rule_uuid)
+    .bind(cluster_uuid)
+    .bind("critical")
+    .bind("open")
+    .bind(json!({ "source": "test" }))
+    .execute(&harness.pool)
+    .await?;
+
+    let instances: ListAnomalyInstancesResponse = harness
+        .request_payload(
+            ANOMALIES_INSTANCES_LIST,
+            ListAnomalyInstancesRequest {
+                correlation_id: new_corr_id(),
+                paging: None,
+                anomaly_rule_id: rule.anomaly_rule_id.clone(),
+                cluster_id: cluster_id.clone(),
+                status: "open".to_string(),
+            },
+        )
+        .await?;
+    assert_eq!(instances.instances.len(), 1);
+    assert_eq!(instances.instances[0].severity, "critical");
+
+    harness.shutdown().await;
+    Ok(())
+}
+
 fn new_corr_id() -> String {
     Uuid::new_v4().to_string()
 }
@@ -451,7 +792,30 @@ async fn run_migrations(pool: &PgPool) -> anyhow::Result<()> {
 
 async fn truncate_tables(pool: &PgPool) -> anyhow::Result<()> {
     sqlx::query(
-        "TRUNCATE TABLE host_group_members, host_groups, hosts, credentials_profiles_metadata, policy_revisions, policies RESTART IDENTITY CASCADE",
+        "TRUNCATE TABLE
+            control_audit_events,
+            anomaly_instances,
+            anomaly_rules,
+            ticket_events,
+            ticket_comments,
+            tickets,
+            integration_bindings,
+            integrations,
+            role_permissions,
+            user_role_bindings,
+            roles,
+            permissions,
+            cluster_hosts,
+            cluster_agents,
+            cluster_metadata,
+            clusters,
+            host_group_members,
+            host_groups,
+            hosts,
+            credentials_profiles_metadata,
+            policy_revisions,
+            policies
+        RESTART IDENTITY CASCADE",
     )
     .execute(pool)
     .await?;

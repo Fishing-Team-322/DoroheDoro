@@ -1,6 +1,5 @@
 "use client";
 
-import { PageHeader } from "@/src/widgets/dashboard-layout";
 import { getAuthContext, getHealthStatus, getReadinessStatus } from "../api";
 import { useApiQuery } from "../model";
 import { ErrorState, LoadingState, PageStack } from "./operations-ui";
@@ -105,7 +104,7 @@ export function SystemStatusPage() {
       ? healthQuery.error
       : readinessQuery.error && !readinessQuery.data
         ? readinessQuery.error
-        : authQuery.error) ?? null;
+        : authQuery.error) ?? undefined;
 
   return (
     <PageStack>

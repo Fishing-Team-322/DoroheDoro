@@ -3,6 +3,7 @@
 import { startTransition, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { ApiResponseMeta } from "@/src/shared/lib/api";
 import {
   Button,
   EmptyState,
@@ -578,7 +579,7 @@ function DashboardBlock({
 }: {
   title: string;
   subtitle: string;
-  meta?: unknown;
+  meta?: ApiResponseMeta;
   children: React.ReactNode;
 }) {
   return (

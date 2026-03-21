@@ -1,88 +1,34 @@
 export type DashboardNavItemKey =
   | "overview"
   | "system"
+  | "inventory"
   | "policies"
+  | "credentials"
   | "deployments"
   | "agents"
   | "logs"
   | "live-logs"
-  | "hosts"
-  | "host-groups"
-  | "credentials"
+  | "alerts"
+  | "audit"
   | "profile";
 
 export type DashboardNavItem = {
   key: DashboardNavItemKey;
   href: string;
-  label: string;
-  description?: string;
+  fallbackLabel: string;
 };
 
 export const dashboardNavigation: DashboardNavItem[] = [
-  {
-    key: "overview",
-    href: "/overview",
-    label: "Overview",
-    description: "Operational summary",
-  },
-  {
-    key: "system",
-    href: "/system",
-    label: "System",
-    description: "Health, readiness, and auth context",
-  },
-  {
-    key: "policies",
-    href: "/policies",
-    label: "Policies",
-    description: "Policy catalog and details",
-  },
-  {
-    key: "deployments",
-    href: "/deployments",
-    label: "Deployments",
-    description: "Jobs, details, and actions",
-  },
-  {
-    key: "agents",
-    href: "/agents",
-    label: "Agents",
-    description: "Agent registry and diagnostics",
-  },
-  {
-    key: "logs",
-    href: "/logs",
-    label: "Logs",
-    description: "Search and analytics",
-  },
-  {
-    key: "live-logs",
-    href: "/logs/live",
-    label: "Live Logs",
-    description: "SSE tail",
-  },
-  {
-    key: "hosts",
-    href: "/hosts",
-    label: "Hosts",
-    description: "Future inventory management",
-  },
-  {
-    key: "host-groups",
-    href: "/host-groups",
-    label: "Host Groups",
-    description: "Future grouping workflow",
-  },
-  {
-    key: "credentials",
-    href: "/credentials",
-    label: "Credentials",
-    description: "Future credential metadata",
-  },
-  {
-    key: "profile",
-    href: "/profile",
-    label: "Profile",
-    description: "Current account and session settings",
-  },
+  { key: "overview", href: "/overview", fallbackLabel: "Overview" },
+  { key: "system", href: "/system", fallbackLabel: "System" },
+  { key: "inventory", href: "/inventory", fallbackLabel: "Inventory" },
+  { key: "policies", href: "/policies", fallbackLabel: "Policies" },
+  { key: "credentials", href: "/credentials", fallbackLabel: "Credentials" },
+  { key: "deployments", href: "/deployments", fallbackLabel: "Deployments" },
+  { key: "agents", href: "/agents", fallbackLabel: "Agents" },
+  { key: "logs", href: "/logs", fallbackLabel: "Logs" },
+  { key: "live-logs", href: "/logs/live", fallbackLabel: "Live Logs" },
+  { key: "alerts", href: "/alerts", fallbackLabel: "Alerts" },
+  { key: "audit", href: "/audit", fallbackLabel: "Audit" },
+  { key: "profile", href: "/profile", fallbackLabel: "Profile" },
 ] as const;

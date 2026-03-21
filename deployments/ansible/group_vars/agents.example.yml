@@ -1,0 +1,30 @@
+---
+# Copy this file to a private inventory/group_vars location and replace placeholders.
+# It is intentionally example-only and must not contain real secrets in the repo.
+
+doro_agent_artifact_manifest_url: https://edge.example.com/artifacts/agent/release-manifest.json
+doro_agent_release_base_url: https://edge.example.com/artifacts/agent
+doro_agent_install_mode: auto
+
+# Single-host public boundary on the same domain as WEB.
+doro_agent_edge_url: https://edge.example.com
+doro_agent_edge_grpc_addr: edge.example.com:443
+
+# Replace with a real bootstrap token or the runtime-issued token flow.
+doro_agent_bootstrap_token: CHANGE_ME
+
+doro_agent_log_level: info
+doro_agent_transport_mode: edge
+
+doro_agent_sources:
+  - type: file
+    source_id: file:/var/log/syslog
+    path: /var/log/syslog
+    start_at: end
+    source: syslog
+    service: host
+    severity_hint: info
+
+# deployment-plane can now inject CA/cert/key material through the ansible install contract
+# when Vault refs are configured on the SERVER side. For manual ansible runs you can still
+# keep the public TLS path and omit client identity files until mTLS material is available.

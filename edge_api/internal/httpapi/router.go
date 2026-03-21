@@ -99,6 +99,8 @@ func NewRouter(deps RouterDeps) http.Handler {
 		api.Post("/host-groups", hostGroupCreateHandler(deps))
 		api.Get("/host-groups/{id}", hostGroupDetailHandler(deps))
 		api.Patch("/host-groups/{id}", hostGroupUpdateHandler(deps))
+		api.Post("/host-groups/{id}/members", hostGroupAddMemberHandler(deps))
+		api.Delete("/host-groups/{id}/members/{hostId}", hostGroupRemoveMemberHandler(deps))
 
 		api.Get("/credentials", credentialsListHandler(deps))
 		api.Post("/credentials", credentialCreateHandler(deps))
@@ -113,54 +115,66 @@ func NewRouter(deps RouterDeps) http.Handler {
 		api.Post("/deployments/{id}/cancel", deploymentCancelHandler(deps))
 		api.Post("/deployments/plan", deploymentPlanHandler(deps))
 
-		api.Post("/logs/search", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsSearch, "query-plane is served by server-rs runtime"))
-		api.Get("/logs/{eventId}", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsGet, "query-plane is served by server-rs runtime"))
-		api.Post("/logs/context", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsContext, "query-plane is served by server-rs runtime"))
-		api.Get("/logs/histogram", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsHistogram, "query-plane is served by server-rs runtime"))
-		api.Get("/logs/severity", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsSeverity, "query-plane is served by server-rs runtime"))
-		api.Get("/logs/top-hosts", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsTopHosts, "query-plane is served by server-rs runtime"))
-		api.Get("/logs/top-services", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsTopServices, "query-plane is served by server-rs runtime"))
-		api.Get("/logs/heatmap", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsHeatmap, "query-plane is served by server-rs runtime"))
-		api.Get("/logs/top-patterns", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsTopPatterns, "query-plane is served by server-rs runtime"))
-		api.Get("/logs/anomalies", runtimeUnavailable(deps.Config.NATS.Subjects.QueryLogsAnomalies, "query-plane is served by server-rs runtime"))
-		api.Get("/dashboards/overview", runtimeUnavailable(deps.Config.NATS.Subjects.QueryDashboardsOverview, "dashboard query-plane is served by server-rs runtime"))
+		api.Post("/logs/search", logsSearchHandler(deps))
+		api.Get("/logs/{eventId}", logDetailHandler(deps))
+		api.Post("/logs/context", logsContextHandler(deps))
+		api.Get("/logs/histogram", logsHistogramHandler(deps))
+		api.Get("/logs/severity", logsSeverityHandler(deps))
+		api.Get("/logs/top-hosts", logsTopHostsHandler(deps))
+		api.Get("/logs/top-services", logsTopServicesHandler(deps))
+		api.Get("/logs/heatmap", logsHeatmapHandler(deps))
+		api.Get("/logs/top-patterns", logsTopPatternsHandler(deps))
+		api.Get("/logs/anomalies", logsAnomaliesHandler(deps))
+		api.Get("/dashboards/overview", dashboardOverviewHandler(deps))
 
-		api.Get("/alerts", runtimeUnavailable(deps.Config.NATS.Subjects.AlertsList, "alert-plane is served by server-rs runtime"))
-		api.Get("/alerts/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.AlertsGet, "alert-plane is served by server-rs runtime"))
-		api.Post("/alerts", runtimeUnavailable(deps.Config.NATS.Subjects.AlertsRulesCreate, "alert-plane is served by server-rs runtime"))
-		api.Patch("/alerts/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.AlertsRulesUpdate, "alert-plane is served by server-rs runtime"))
+		api.Get("/alerts", alertsListHandler(deps))
+		api.Get("/alerts/rules", alertRulesListHandler(deps))
+		api.Get("/alerts/rules/{id}", alertRuleDetailHandler(deps))
+		api.Get("/alerts/{id}", alertDetailHandler(deps))
+		api.Post("/alerts", alertRuleCreateHandler(deps))
+		api.Patch("/alerts/{id}", alertRuleUpdateHandler(deps))
 
-		api.Get("/audit", runtimeUnavailable(deps.Config.NATS.Subjects.AuditList, "audit-plane is served by server-rs runtime"))
+		api.Get("/audit", auditListHandler(deps))
 
-		api.Get("/clusters", runtimeUnavailable(deps.Config.NATS.Subjects.ControlClustersList, "cluster control-plane is served by server-rs runtime"))
-		api.Get("/clusters/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlClustersGet, "cluster control-plane is served by server-rs runtime"))
-		api.Post("/clusters", runtimeUnavailable(deps.Config.NATS.Subjects.ControlClustersCreate, "cluster control-plane is served by server-rs runtime"))
-		api.Patch("/clusters/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlClustersUpdate, "cluster control-plane is served by server-rs runtime"))
+		api.Get("/clusters", clustersListHandler(deps))
+		api.Get("/clusters/{id}", clusterDetailHandler(deps))
+		api.Post("/clusters", clusterCreateHandler(deps))
+		api.Patch("/clusters/{id}", clusterUpdateHandler(deps))
+		api.Post("/clusters/{id}/hosts", clusterAddHostHandler(deps))
+		api.Delete("/clusters/{id}/hosts/{hostId}", clusterRemoveHostHandler(deps))
 
-		api.Get("/roles", runtimeUnavailable(deps.Config.NATS.Subjects.ControlRolesList, "roles and permissions runtime is served by server-rs runtime"))
-		api.Get("/roles/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlRolesGet, "roles and permissions runtime is served by server-rs runtime"))
-		api.Post("/roles", runtimeUnavailable(deps.Config.NATS.Subjects.ControlRolesCreate, "roles and permissions runtime is served by server-rs runtime"))
-		api.Patch("/roles/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlRolesUpdate, "roles and permissions runtime is served by server-rs runtime"))
+		api.Get("/roles", rolesListHandler(deps))
+		api.Get("/roles/{id}", roleDetailHandler(deps))
+		api.Post("/roles", roleCreateHandler(deps))
+		api.Patch("/roles/{id}", roleUpdateHandler(deps))
+		api.Get("/roles/{id}/permissions", rolePermissionsGetHandler(deps))
+		api.Put("/roles/{id}/permissions", rolePermissionsSetHandler(deps))
+		api.Get("/role-bindings", roleBindingsListHandler(deps))
+		api.Post("/role-bindings", roleBindingCreateHandler(deps))
+		api.Delete("/role-bindings/{id}", roleBindingDeleteHandler(deps))
 
-		api.Get("/permissions", runtimeUnavailable(deps.Config.NATS.Subjects.ControlPermissionsList, "roles and permissions runtime is served by server-rs runtime"))
-		api.Get("/permissions/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlPermissionsGet, "roles and permissions runtime is served by server-rs runtime"))
-		api.Post("/permissions", runtimeUnavailable(deps.Config.NATS.Subjects.ControlPermissionsCreate, "roles and permissions runtime is served by server-rs runtime"))
-		api.Patch("/permissions/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlPermissionsUpdate, "roles and permissions runtime is served by server-rs runtime"))
+		api.Get("/integrations", integrationsListHandler(deps))
+		api.Get("/integrations/{id}", integrationDetailHandler(deps))
+		api.Post("/integrations", integrationCreateHandler(deps))
+		api.Patch("/integrations/{id}", integrationUpdateHandler(deps))
+		api.Post("/integrations/{id}/bindings", integrationBindHandler(deps))
+		api.Delete("/integrations/{id}/bindings/{bindingId}", integrationUnbindHandler(deps))
 
-		api.Get("/integrations", runtimeUnavailable(deps.Config.NATS.Subjects.IntegrationsList, "integration runtime is served by server-rs runtime"))
-		api.Get("/integrations/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.IntegrationsGet, "integration runtime is served by server-rs runtime"))
-		api.Post("/integrations", runtimeUnavailable(deps.Config.NATS.Subjects.IntegrationsCreate, "integration runtime is served by server-rs runtime"))
-		api.Patch("/integrations/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.IntegrationsUpdate, "integration runtime is served by server-rs runtime"))
+		api.Get("/tickets", ticketsListHandler(deps))
+		api.Get("/tickets/{id}", ticketDetailHandler(deps))
+		api.Post("/tickets", ticketCreateHandler(deps))
+		api.Post("/tickets/{id}/assign", ticketAssignHandler(deps))
+		api.Post("/tickets/{id}/unassign", ticketUnassignHandler(deps))
+		api.Post("/tickets/{id}/comments", ticketCommentAddHandler(deps))
+		api.Post("/tickets/{id}/status", ticketStatusHandler(deps))
+		api.Post("/tickets/{id}/close", ticketCloseHandler(deps))
 
-		api.Get("/tickets", runtimeUnavailable(deps.Config.NATS.Subjects.TicketsList, "ticket runtime is served by server-rs runtime"))
-		api.Get("/tickets/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.TicketsGet, "ticket runtime is served by server-rs runtime"))
-		api.Post("/tickets", runtimeUnavailable(deps.Config.NATS.Subjects.TicketsCreate, "ticket runtime is served by server-rs runtime"))
-		api.Patch("/tickets/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.TicketsUpdate, "ticket runtime is served by server-rs runtime"))
-
-		api.Get("/anomalies", runtimeUnavailable(deps.Config.NATS.Subjects.AnomaliesList, "anomaly runtime is served by server-rs runtime"))
-		api.Get("/anomalies/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.AnomaliesGet, "anomaly runtime is served by server-rs runtime"))
-		api.Post("/anomalies", runtimeUnavailable(deps.Config.NATS.Subjects.AnomaliesCreate, "anomaly runtime is served by server-rs runtime"))
-		api.Patch("/anomalies/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.AnomaliesUpdate, "anomaly runtime is served by server-rs runtime"))
+		api.Get("/anomalies/rules", anomalyRulesListHandler(deps))
+		api.Get("/anomalies/rules/{id}", anomalyRuleDetailHandler(deps))
+		api.Post("/anomalies/rules", anomalyRuleCreateHandler(deps))
+		api.Patch("/anomalies/rules/{id}", anomalyRuleUpdateHandler(deps))
+		api.Get("/anomalies/instances", anomalyInstancesListHandler(deps))
+		api.Get("/anomalies/instances/{id}", anomalyInstanceDetailHandler(deps))
 
 		api.Get("/stream/logs", func(w http.ResponseWriter, r *http.Request) {
 			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamLogs, Event: "log"})
@@ -176,15 +190,6 @@ func NewRouter(deps RouterDeps) http.Handler {
 		})
 		api.Get("/stream/agents", func(w http.ResponseWriter, r *http.Request) {
 			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamAgents, Event: "agent"})
-		})
-		api.Get("/stream/clusters", func(w http.ResponseWriter, r *http.Request) {
-			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamClusters, Event: "cluster"})
-		})
-		api.Get("/stream/tickets", func(w http.ResponseWriter, r *http.Request) {
-			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamTickets, Event: "ticket"})
-		})
-		api.Get("/stream/anomalies", func(w http.ResponseWriter, r *http.Request) {
-			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamAnomalies, Event: "anomaly"})
 		})
 	})
 
@@ -259,19 +264,19 @@ func agentPolicyHandler(deps RouterDeps) http.HandlerFunc {
 			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "agent id is required")
 			return
 		}
-		replyMsg, err := deps.Bridge.Request(r.Context(), deps.Config.NATS.Subjects.AgentsPolicyFetch, envelope.EncodeFetchPolicyRequest(envelope.FetchPolicyRequest{
+		replyMsg, err := deps.Bridge.Request(r.Context(), deps.Config.NATS.Subjects.AgentsPolicyGet, envelope.EncodeGetAgentPolicyRequest(envelope.GetAgentPolicyRequest{
 			CorrelationID: middleware.GetRequestID(r.Context()),
 			AgentID:       agentID,
 		}))
 		if err != nil {
-			deps.Logger.Error("nats request failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyFetch), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
+			deps.Logger.Error("nats request failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyGet), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
 			middleware.WriteTransportError(w, r, err)
 			return
 		}
 
 		reply, err := envelope.DecodeAgentReplyEnvelope(replyMsg.Data)
 		if err != nil {
-			deps.Logger.Error("decode upstream agent reply failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyFetch), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
+			deps.Logger.Error("decode upstream agent reply failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyGet), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
 			middleware.WriteError(w, r, http.StatusBadGateway, "internal", "invalid upstream response")
 			return
 		}
@@ -280,22 +285,26 @@ func agentPolicyHandler(deps RouterDeps) http.HandlerFunc {
 			return
 		}
 
-		payload, err := envelope.DecodeFetchPolicyResponse(reply.Payload)
+		payload, err := envelope.DecodeGetAgentPolicyResponse(reply.Payload)
 		if err != nil {
-			deps.Logger.Error("decode upstream policy payload failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyFetch), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
+			deps.Logger.Error("decode upstream policy payload failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyGet), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
 			middleware.WriteError(w, r, http.StatusBadGateway, "internal", "invalid upstream response")
 			return
 		}
 
-		w.Header().Set("X-NATS-Subject", deps.Config.NATS.Subjects.AgentsPolicyFetch)
+		w.Header().Set("X-NATS-Subject", deps.Config.NATS.Subjects.AgentsPolicyGet)
+		policy := map[string]any{}
+		if payload.Policy != nil {
+			policy["id"] = payload.Policy.PolicyID
+			policy["revision_id"] = payload.Policy.PolicyRevisionID
+			policy["revision"] = payload.Policy.PolicyRevision
+			policy["assigned_at"] = payload.Policy.AssignedAt
+			policy["name"] = payload.Policy.PolicyName
+			policy["description"] = payload.Policy.PolicyDescription
+		}
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
-			"agent_id": payload.AgentID,
-			"policy": map[string]any{
-				"id":        payload.PolicyID,
-				"revision":  payload.PolicyRevision,
-				"body_json": payload.PolicyBodyJSON,
-				"status":    payload.Status,
-			},
+			"agent_id":   agentID,
+			"policy":     policy,
 			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
 		})
 	}
@@ -303,13 +312,16 @@ func agentPolicyHandler(deps RouterDeps) http.HandlerFunc {
 
 func agentsListHandler(deps RouterDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		subject := deps.Config.NATS.Subjects.AgentsRegistryList
-		items, reply, err := requestJSONEnvelope[[]agentRegistryItem](
+		subject := deps.Config.NATS.Subjects.AgentsList
+		payload, reply, err := requestAgentEnvelope(
 			r.Context(),
 			deps.Bridge,
 			deps.Logger,
 			subject,
-			map[string]string{"correlation_id": middleware.GetRequestID(r.Context())},
+			envelope.EncodeListAgentsRequest(envelope.ListAgentsRequest{
+				CorrelationID: middleware.GetRequestID(r.Context()),
+			}),
+			envelope.DecodeListAgentsResponse,
 		)
 		if err != nil {
 			deps.Logger.Error("nats request failed", zap.String("subject", subject), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
@@ -321,6 +333,17 @@ func agentsListHandler(deps RouterDeps) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("X-NATS-Subject", subject)
+		items := make([]agentRegistryItem, 0, len(payload.Agents))
+		for _, agent := range payload.Agents {
+			items = append(items, agentRegistryItem{
+				AgentID:      agent.AgentID,
+				Hostname:     agent.Hostname,
+				Status:       agent.Status,
+				Version:      agent.Version,
+				LastSeenAt:   agent.LastSeenAt,
+				MetadataJSON: map[string]any{},
+			})
+		}
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
 			"items":      items,
 			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
@@ -335,13 +358,17 @@ func agentDetailHandler(deps RouterDeps) http.HandlerFunc {
 			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "agent id is required")
 			return
 		}
-		subject := deps.Config.NATS.Subjects.AgentsRegistryGet
-		item, reply, err := requestJSONEnvelope[agentRegistryItem](
+		subject := deps.Config.NATS.Subjects.AgentsGet
+		item, reply, err := requestAgentEnvelope(
 			r.Context(),
 			deps.Bridge,
 			deps.Logger,
 			subject,
-			map[string]string{"correlation_id": middleware.GetRequestID(r.Context()), "agent_id": agentID},
+			envelope.EncodeGetAgentRequest(envelope.GetAgentRequest{
+				CorrelationID: middleware.GetRequestID(r.Context()),
+				AgentID:       agentID,
+			}),
+			envelope.DecodeAgentDetail,
 		)
 		if err != nil {
 			deps.Logger.Error("nats request failed", zap.String("subject", subject), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
@@ -354,7 +381,16 @@ func agentDetailHandler(deps RouterDeps) http.HandlerFunc {
 		}
 		w.Header().Set("X-NATS-Subject", subject)
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
-			"item":       item,
+			"item": map[string]any{
+				"agent_id":         item.AgentID,
+				"hostname":         item.Hostname,
+				"status":           item.Status,
+				"version":          item.Version,
+				"metadata_json":    item.Metadata,
+				"first_seen_at":    item.FirstSeenAt,
+				"last_seen_at":     item.LastSeenAt,
+				"effective_policy": mapPolicyBinding(item.EffectivePolicy),
+			},
 			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
 		})
 	}
@@ -368,12 +404,16 @@ func agentDiagnosticsHandler(deps RouterDeps) http.HandlerFunc {
 			return
 		}
 		subject := deps.Config.NATS.Subjects.AgentsDiagnosticsGet
-		item, reply, err := requestJSONEnvelope[agentDiagnosticsItem](
+		item, reply, err := requestAgentEnvelope(
 			r.Context(),
 			deps.Bridge,
 			deps.Logger,
 			subject,
-			map[string]string{"correlation_id": middleware.GetRequestID(r.Context()), "agent_id": agentID},
+			envelope.EncodeGetAgentDiagnosticsRequest(envelope.GetAgentDiagnosticsRequest{
+				CorrelationID: middleware.GetRequestID(r.Context()),
+				AgentID:       agentID,
+			}),
+			envelope.DecodeDiagnosticsSnapshot,
 		)
 		if err != nil {
 			deps.Logger.Error("nats request failed", zap.String("subject", subject), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
@@ -386,9 +426,27 @@ func agentDiagnosticsHandler(deps RouterDeps) http.HandlerFunc {
 		}
 		w.Header().Set("X-NATS-Subject", subject)
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
-			"item":       item,
+			"item": map[string]any{
+				"agent_id":     item.AgentID,
+				"payload_json": item.PayloadJSON,
+				"created_at":   item.CreatedAt,
+			},
 			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
 		})
+	}
+}
+
+func mapPolicyBinding(binding *envelope.AgentPolicyBinding) map[string]any {
+	if binding == nil {
+		return nil
+	}
+	return map[string]any{
+		"policy_id":          binding.PolicyID,
+		"policy_revision_id": binding.PolicyRevisionID,
+		"policy_revision":    binding.PolicyRevision,
+		"assigned_at":        binding.AssignedAt,
+		"policy_name":        binding.PolicyName,
+		"policy_description": binding.PolicyDescription,
 	}
 }
 
@@ -498,15 +556,5 @@ func writeAgentReplyError(w http.ResponseWriter, r *http.Request, reply envelope
 		middleware.WriteError(w, r, http.StatusServiceUnavailable, "unavailable", message)
 	default:
 		middleware.WriteError(w, r, http.StatusBadGateway, "internal", message)
-	}
-}
-
-func runtimeUnavailable(subject, message string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if strings.TrimSpace(subject) != "" {
-			w.Header().Set("X-NATS-Subject", subject)
-		}
-		w.Header().Set("X-Boundary-State", "awaiting-runtime")
-		middleware.WriteError(w, r, http.StatusNotImplemented, "not_implemented", message)
 	}
 }

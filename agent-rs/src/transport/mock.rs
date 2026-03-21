@@ -67,7 +67,6 @@ impl AgentTransport for MockTransport {
 
     async fn fetch_policy(&self, request: FetchPolicyRequest) -> AppResult<PolicySnapshot> {
         Ok(PolicySnapshot {
-            agent_id: request.agent_id,
             policy_id: "mock-policy".to_string(),
             policy_revision: request
                 .current_revision
@@ -105,7 +104,7 @@ mod tests {
 
     use crate::{
         proto::agent,
-        transport::{AgentTransport, EnrollRequest, FetchPolicyRequest},
+        transport::{AgentTransport, EnrollRequest},
     };
 
     use super::MockTransport;
@@ -124,16 +123,7 @@ mod tests {
             .await
             .unwrap();
 
-        let policy = transport
-            .fetch_policy(FetchPolicyRequest {
-                agent_id: enroll.agent_id.clone(),
-                current_revision: None,
-            })
-            .await
-            .unwrap();
-
         assert!(enroll.agent_id.starts_with("mock-agent-"));
-        assert_eq!(policy.agent_id, enroll.agent_id);
         assert_eq!(transport.snapshot(), (0, 0, 0));
     }
 

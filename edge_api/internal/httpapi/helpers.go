@@ -75,6 +75,50 @@ func requestJSONEnvelope[T any](
 	return zero, reply, nil
 }
 
+func requestAgentEnvelope[T any](
+	ctx context.Context,
+	bridge *natsbridge.Bridge,
+	logger *zap.Logger,
+	subject string,
+	request []byte,
+	decode func([]byte) (T, error),
+) (T, envelope.AgentReplyEnvelope, error) {
+	var zero T
+
+	replyMsg, err := bridge.Request(ctx, subject, request)
+	if err != nil {
+		return zero, envelope.AgentReplyEnvelope{}, err
+	}
+
+	reply, err := envelope.DecodeAgentReplyEnvelope(replyMsg.Data)
+	if err != nil {
+		if logger != nil {
+			logger.Error("decode upstream agent reply envelope failed",
+				zap.String("subject", subject),
+				zap.String("request_id", middleware.GetRequestID(ctx)),
+				zap.Error(err),
+			)
+		}
+		return zero, envelope.AgentReplyEnvelope{}, err
+	}
+	if reply.Status == "error" || len(reply.Payload) == 0 {
+		return zero, reply, nil
+	}
+
+	value, err := decode(reply.Payload)
+	if err != nil {
+		if logger != nil {
+			logger.Error("decode upstream agent payload failed",
+				zap.String("subject", subject),
+				zap.String("request_id", middleware.GetRequestID(ctx)),
+				zap.Error(err),
+			)
+		}
+		return zero, reply, err
+	}
+	return value, reply, nil
+}
+
 func requestControlEnvelope[T any](
 	ctx context.Context,
 	bridge *natsbridge.Bridge,

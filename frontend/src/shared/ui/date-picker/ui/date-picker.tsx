@@ -230,6 +230,7 @@ export function DateTimePicker({
     selectedDate ? `${selectedDate.getMinutes()}`.padStart(2, "0") : "00"
   );
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const parsed = parseLocalDateTime(value);
     setSelectedDate(parsed);
@@ -237,6 +238,7 @@ export function DateTimePicker({
     setHour(parsed ? `${parsed.getHours()}`.padStart(2, "0") : "00");
     setMinute(parsed ? `${parsed.getMinutes()}`.padStart(2, "0") : "00");
   }, [value]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!open) return;
@@ -321,7 +323,7 @@ export function DateTimePicker({
           aria-haspopup="dialog"
           aria-expanded={open}
           aria-describedby={describedBy}
-          aria-invalid={Boolean(error)}
+          data-invalid={Boolean(error) || undefined}
           onClick={() => setOpen((current) => !current)}
           className={cn(
             "peer relative flex h-14 w-full items-end rounded-xl border px-4 pb-2 pt-6 text-left outline-none transition-all duration-200",

@@ -14,6 +14,7 @@ type Config struct {
 	ServiceName string
 	Version     string
 	LogLevel    string
+	Public      PublicConfig
 	HTTP        HTTPConfig
 	GRPC        GRPCConfig
 	NATS        NATSConfig
@@ -21,6 +22,12 @@ type Config struct {
 	Limits      LimitsConfig
 	Auth        AuthConfig
 	Stream      StreamConfig
+}
+
+type PublicConfig struct {
+	BaseURL       string
+	EdgeURL       string
+	AgentGRPCAddr string
 }
 
 type HTTPConfig struct {
@@ -92,6 +99,11 @@ func Load() (Config, error) {
 		ServiceName: env("SERVICE_NAME", "edge-api"),
 		Version:     env("SERVICE_VERSION", "dev"),
 		LogLevel:    env("LOG_LEVEL", "info"),
+		Public: PublicConfig{
+			BaseURL:       env("PUBLIC_BASE_URL", "http://localhost:3000"),
+			EdgeURL:       env("EDGE_PUBLIC_URL", "http://localhost:8080"),
+			AgentGRPCAddr: env("AGENT_PUBLIC_GRPC_ADDR", "localhost:9090"),
+		},
 		HTTP: HTTPConfig{
 			ListenAddr:         env("HTTP_LISTEN_ADDR", ":8080"),
 			TLSCert:            os.Getenv("HTTP_TLS_CERT_FILE"),
@@ -117,9 +129,10 @@ func Load() (Config, error) {
 				AgentsPolicyFetch:             env("SUBJECT_AGENTS_POLICY_FETCH", defaultSubjects.AgentsPolicyFetch),
 				AgentsHeartbeat:               env("SUBJECT_AGENTS_HEARTBEAT", defaultSubjects.AgentsHeartbeat),
 				AgentsDiagnostics:             env("SUBJECT_AGENTS_DIAGNOSTICS", defaultSubjects.AgentsDiagnostics),
-				AgentsRegistryList:            env("SUBJECT_AGENTS_REGISTRY_LIST", defaultSubjects.AgentsRegistryList),
-				AgentsRegistryGet:             env("SUBJECT_AGENTS_REGISTRY_GET", defaultSubjects.AgentsRegistryGet),
+				AgentsList:                    env("SUBJECT_AGENTS_LIST", defaultSubjects.AgentsList),
+				AgentsGet:                     env("SUBJECT_AGENTS_GET", defaultSubjects.AgentsGet),
 				AgentsDiagnosticsGet:          env("SUBJECT_AGENTS_DIAGNOSTICS_GET", defaultSubjects.AgentsDiagnosticsGet),
+				AgentsPolicyGet:               env("SUBJECT_AGENTS_POLICY_GET", defaultSubjects.AgentsPolicyGet),
 				ControlPoliciesList:           env("SUBJECT_CONTROL_POLICIES_LIST", defaultSubjects.ControlPoliciesList),
 				ControlPoliciesGet:            env("SUBJECT_CONTROL_POLICIES_GET", defaultSubjects.ControlPoliciesGet),
 				ControlPoliciesCreate:         env("SUBJECT_CONTROL_POLICIES_CREATE", defaultSubjects.ControlPoliciesCreate),
@@ -142,26 +155,37 @@ func Load() (Config, error) {
 				ControlClustersGet:            env("SUBJECT_CONTROL_CLUSTERS_GET", defaultSubjects.ControlClustersGet),
 				ControlClustersCreate:         env("SUBJECT_CONTROL_CLUSTERS_CREATE", defaultSubjects.ControlClustersCreate),
 				ControlClustersUpdate:         env("SUBJECT_CONTROL_CLUSTERS_UPDATE", defaultSubjects.ControlClustersUpdate),
+				ControlClustersAddHost:        env("SUBJECT_CONTROL_CLUSTERS_ADD_HOST", defaultSubjects.ControlClustersAddHost),
+				ControlClustersRemoveHost:     env("SUBJECT_CONTROL_CLUSTERS_REMOVE_HOST", defaultSubjects.ControlClustersRemoveHost),
 				ControlRolesList:              env("SUBJECT_CONTROL_ROLES_LIST", defaultSubjects.ControlRolesList),
 				ControlRolesGet:               env("SUBJECT_CONTROL_ROLES_GET", defaultSubjects.ControlRolesGet),
 				ControlRolesCreate:            env("SUBJECT_CONTROL_ROLES_CREATE", defaultSubjects.ControlRolesCreate),
 				ControlRolesUpdate:            env("SUBJECT_CONTROL_ROLES_UPDATE", defaultSubjects.ControlRolesUpdate),
-				ControlPermissionsList:        env("SUBJECT_CONTROL_PERMISSIONS_LIST", defaultSubjects.ControlPermissionsList),
-				ControlPermissionsGet:         env("SUBJECT_CONTROL_PERMISSIONS_GET", defaultSubjects.ControlPermissionsGet),
-				ControlPermissionsCreate:      env("SUBJECT_CONTROL_PERMISSIONS_CREATE", defaultSubjects.ControlPermissionsCreate),
-				ControlPermissionsUpdate:      env("SUBJECT_CONTROL_PERMISSIONS_UPDATE", defaultSubjects.ControlPermissionsUpdate),
-				IntegrationsList:              env("SUBJECT_INTEGRATIONS_LIST", defaultSubjects.IntegrationsList),
-				IntegrationsGet:               env("SUBJECT_INTEGRATIONS_GET", defaultSubjects.IntegrationsGet),
-				IntegrationsCreate:            env("SUBJECT_INTEGRATIONS_CREATE", defaultSubjects.IntegrationsCreate),
-				IntegrationsUpdate:            env("SUBJECT_INTEGRATIONS_UPDATE", defaultSubjects.IntegrationsUpdate),
+				ControlRolesPermissionsGet:    env("SUBJECT_CONTROL_ROLES_PERMISSIONS_GET", defaultSubjects.ControlRolesPermissionsGet),
+				ControlRolesPermissionsSet:    env("SUBJECT_CONTROL_ROLES_PERMISSIONS_SET", defaultSubjects.ControlRolesPermissionsSet),
+				ControlRoleBindingsList:       env("SUBJECT_CONTROL_ROLE_BINDINGS_LIST", defaultSubjects.ControlRoleBindingsList),
+				ControlRoleBindingsCreate:     env("SUBJECT_CONTROL_ROLE_BINDINGS_CREATE", defaultSubjects.ControlRoleBindingsCreate),
+				ControlRoleBindingsDelete:     env("SUBJECT_CONTROL_ROLE_BINDINGS_DELETE", defaultSubjects.ControlRoleBindingsDelete),
+				ControlIntegrationsList:       env("SUBJECT_CONTROL_INTEGRATIONS_LIST", defaultSubjects.ControlIntegrationsList),
+				ControlIntegrationsGet:        env("SUBJECT_CONTROL_INTEGRATIONS_GET", defaultSubjects.ControlIntegrationsGet),
+				ControlIntegrationsCreate:     env("SUBJECT_CONTROL_INTEGRATIONS_CREATE", defaultSubjects.ControlIntegrationsCreate),
+				ControlIntegrationsUpdate:     env("SUBJECT_CONTROL_INTEGRATIONS_UPDATE", defaultSubjects.ControlIntegrationsUpdate),
+				ControlIntegrationsBind:       env("SUBJECT_CONTROL_INTEGRATIONS_BIND", defaultSubjects.ControlIntegrationsBind),
+				ControlIntegrationsUnbind:     env("SUBJECT_CONTROL_INTEGRATIONS_UNBIND", defaultSubjects.ControlIntegrationsUnbind),
 				TicketsList:                   env("SUBJECT_TICKETS_LIST", defaultSubjects.TicketsList),
 				TicketsGet:                    env("SUBJECT_TICKETS_GET", defaultSubjects.TicketsGet),
 				TicketsCreate:                 env("SUBJECT_TICKETS_CREATE", defaultSubjects.TicketsCreate),
-				TicketsUpdate:                 env("SUBJECT_TICKETS_UPDATE", defaultSubjects.TicketsUpdate),
-				AnomaliesList:                 env("SUBJECT_ANOMALIES_LIST", defaultSubjects.AnomaliesList),
-				AnomaliesGet:                  env("SUBJECT_ANOMALIES_GET", defaultSubjects.AnomaliesGet),
-				AnomaliesCreate:               env("SUBJECT_ANOMALIES_CREATE", defaultSubjects.AnomaliesCreate),
-				AnomaliesUpdate:               env("SUBJECT_ANOMALIES_UPDATE", defaultSubjects.AnomaliesUpdate),
+				TicketsAssign:                 env("SUBJECT_TICKETS_ASSIGN", defaultSubjects.TicketsAssign),
+				TicketsUnassign:               env("SUBJECT_TICKETS_UNASSIGN", defaultSubjects.TicketsUnassign),
+				TicketsCommentAdd:             env("SUBJECT_TICKETS_COMMENT_ADD", defaultSubjects.TicketsCommentAdd),
+				TicketsStatusChange:           env("SUBJECT_TICKETS_STATUS_CHANGE", defaultSubjects.TicketsStatusChange),
+				TicketsClose:                  env("SUBJECT_TICKETS_CLOSE", defaultSubjects.TicketsClose),
+				AnomalyRulesList:              env("SUBJECT_ANOMALIES_RULES_LIST", defaultSubjects.AnomalyRulesList),
+				AnomalyRulesGet:               env("SUBJECT_ANOMALIES_RULES_GET", defaultSubjects.AnomalyRulesGet),
+				AnomalyRulesCreate:            env("SUBJECT_ANOMALIES_RULES_CREATE", defaultSubjects.AnomalyRulesCreate),
+				AnomalyRulesUpdate:            env("SUBJECT_ANOMALIES_RULES_UPDATE", defaultSubjects.AnomalyRulesUpdate),
+				AnomalyInstancesList:          env("SUBJECT_ANOMALIES_INSTANCES_LIST", defaultSubjects.AnomalyInstancesList),
+				AnomalyInstancesGet:           env("SUBJECT_ANOMALIES_INSTANCES_GET", defaultSubjects.AnomalyInstancesGet),
 				DeploymentsJobsCreate:         env("SUBJECT_DEPLOYMENTS_JOBS_CREATE", defaultSubjects.DeploymentsJobsCreate),
 				DeploymentsJobsGet:            env("SUBJECT_DEPLOYMENTS_JOBS_GET", defaultSubjects.DeploymentsJobsGet),
 				DeploymentsJobsList:           env("SUBJECT_DEPLOYMENTS_JOBS_LIST", defaultSubjects.DeploymentsJobsList),
@@ -183,17 +207,17 @@ func Load() (Config, error) {
 				QueryDashboardsOverview:       env("SUBJECT_QUERY_DASHBOARDS_OVERVIEW", defaultSubjects.QueryDashboardsOverview),
 				AlertsList:                    env("SUBJECT_ALERTS_LIST", defaultSubjects.AlertsList),
 				AlertsGet:                     env("SUBJECT_ALERTS_GET", defaultSubjects.AlertsGet),
+				AlertsRulesList:               env("SUBJECT_ALERTS_RULES_LIST", defaultSubjects.AlertsRulesList),
+				AlertsRulesGet:                env("SUBJECT_ALERTS_RULES_GET", defaultSubjects.AlertsRulesGet),
 				AlertsRulesCreate:             env("SUBJECT_ALERTS_RULES_CREATE", defaultSubjects.AlertsRulesCreate),
 				AlertsRulesUpdate:             env("SUBJECT_ALERTS_RULES_UPDATE", defaultSubjects.AlertsRulesUpdate),
 				AuditList:                     env("SUBJECT_AUDIT_LIST", defaultSubjects.AuditList),
+				AuditEventsAppend:             env("SUBJECT_AUDIT_EVENTS_APPEND", defaultSubjects.AuditEventsAppend),
 				LogsIngestRaw:                 env("SUBJECT_LOGS_INGEST_RAW", defaultSubjects.LogsIngestRaw),
+				LogsIngestNormalized:          env("SUBJECT_LOGS_INGEST_NORMALIZED", defaultSubjects.LogsIngestNormalized),
 				StreamLogs:                    env("SUBJECT_UI_STREAM_LOGS", defaultSubjects.StreamLogs),
-				StreamDeployments:             env("SUBJECT_UI_STREAM_DEPLOYMENTS", defaultSubjects.StreamDeployments),
 				StreamAlerts:                  env("SUBJECT_UI_STREAM_ALERTS", defaultSubjects.StreamAlerts),
 				StreamAgents:                  env("SUBJECT_UI_STREAM_AGENTS", defaultSubjects.StreamAgents),
-				StreamClusters:                env("SUBJECT_UI_STREAM_CLUSTERS", defaultSubjects.StreamClusters),
-				StreamTickets:                 env("SUBJECT_UI_STREAM_TICKETS", defaultSubjects.StreamTickets),
-				StreamAnomalies:               env("SUBJECT_UI_STREAM_ANOMALIES", defaultSubjects.StreamAnomalies),
 			},
 		},
 		Timeouts: TimeoutConfig{

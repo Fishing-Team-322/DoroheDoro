@@ -1,5 +1,5 @@
-import { LogsExplorerPage } from "@/src/features/operations";
+import { LogsPage as LogsPageView } from "@/src/page-modules/logs";
 
-export default function DashboardLogsRoute() {
-  return <LogsExplorerPage />;
+export default function LogsPage() {
+  return <LogsPageView />;
 }

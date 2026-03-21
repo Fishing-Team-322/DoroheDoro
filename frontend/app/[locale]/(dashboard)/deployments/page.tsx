@@ -1,5 +1,5 @@
-import { DeploymentsPage } from "@/src/features/operations";
+import { DeploymentsPage as DeploymentsPageView } from "@/src/page-modules/deployments";
 
-export default function DashboardDeploymentsRoute() {
-  return <DeploymentsPage />;
+export default function DeploymentsPage() {
+  return <DeploymentsPageView />;
 }

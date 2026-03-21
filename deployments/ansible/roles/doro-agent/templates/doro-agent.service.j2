@@ -8,6 +8,7 @@ Type=simple
 User={{ doro_agent_user }}
 Group={{ doro_agent_group }}
 EnvironmentFile=-{{ doro_agent_env_path }}
+ExecStartPre={{ doro_agent_runtime_binary_path }} doctor --config {{ doro_agent_config_path }}
 ExecStart={{ doro_agent_runtime_binary_path }} --config {{ doro_agent_config_path }}
 Restart=always
 RestartSec=5

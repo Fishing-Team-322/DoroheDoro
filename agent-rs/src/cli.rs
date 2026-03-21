@@ -19,6 +19,7 @@ pub struct Cli {
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum CliCommand {
     Run,
+    #[command(visible_alias = "check-config")]
     Doctor,
 }
 

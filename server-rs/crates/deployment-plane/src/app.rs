@@ -38,6 +38,10 @@ pub async fn run(config: DeploymentConfig) -> anyhow::Result<()> {
         config.edge_public_url.clone(),
         config.edge_grpc_addr.clone(),
         config.agent_state_dir_default.clone(),
+        config
+            .artifact_resolver_config()
+            .context("build artifact resolver config")?,
+        config.agent_tls_material.clone(),
     ));
     service
         .reconcile_stale_attempts()
@@ -97,10 +101,21 @@ fn build_executor(config: &DeploymentConfig) -> anyhow::Result<DynDeploymentExec
                 .deployment_temp_dir
                 .clone()
                 .unwrap_or_else(|| std::env::temp_dir().join("doro-deployment-plane"));
+            let vault_config = config
+                .vault_runtime_config()
+                .context("build vault runtime config")?
+                .context("VAULT_ADDR, VAULT_ROLE_ID and VAULT_SECRET_ID are required for ansible executor")?;
+            config
+                .artifact_resolver_config()
+                .context("build artifact resolver config")?
+                .context("AGENT_ARTIFACT_MANIFEST_URL is required for ansible executor")?;
             Ok(Arc::new(AnsibleRunnerExecutor::new(
                 runner_bin,
                 playbook_path,
                 temp_dir,
+                config.ansible_successful_workspace_retention,
+                vault_config,
+                config.agent_tls_material.clone(),
             )))
         }
     }

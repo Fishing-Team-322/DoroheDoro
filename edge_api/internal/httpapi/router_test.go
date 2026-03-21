@@ -27,7 +27,7 @@ func TestReadyzReflectsBridgeState(t *testing.T) {
 	}
 }
 
-func TestRuntimeUnavailableRoutesExposeBoundaryMetadata(t *testing.T) {
+func TestRuntimeRoutesExposeSubjectMetadataWhenBridgeMissing(t *testing.T) {
 	router := NewRouter(RouterDeps{
 		Config: testRouterConfig(),
 		Logger: zap.NewNop(),
@@ -37,35 +37,29 @@ func TestRuntimeUnavailableRoutesExposeBoundaryMetadata(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/logs/histogram", nil)
 	router.ServeHTTP(response, request)
 
-	if response.Code != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d body=%s", response.Code, response.Body.String())
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d body=%s", response.Code, response.Body.String())
 	}
 	if got := response.Header().Get("X-NATS-Subject"); got != "query.logs.histogram" {
 		t.Fatalf("expected X-NATS-Subject query.logs.histogram, got %q", got)
 	}
-	if got := response.Header().Get("X-Boundary-State"); got != "awaiting-runtime" {
-		t.Fatalf("expected X-Boundary-State awaiting-runtime, got %q", got)
-	}
 }
 
-func TestFutureBoundaryGroupsExposeControlledPlaceholderMetadata(t *testing.T) {
+func TestAlertRoutesExposeSubjectMetadataWhenBridgeMissing(t *testing.T) {
 	router := NewRouter(RouterDeps{
 		Config: testRouterConfig(),
 		Logger: zap.NewNop(),
 	})
 
 	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/alerts", nil)
 	router.ServeHTTP(response, request)
 
-	if response.Code != http.StatusNotImplemented {
-		t.Fatalf("expected 501, got %d body=%s", response.Code, response.Body.String())
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d body=%s", response.Code, response.Body.String())
 	}
-	if got := response.Header().Get("X-NATS-Subject"); got != "control.clusters.list" {
-		t.Fatalf("expected X-NATS-Subject control.clusters.list, got %q", got)
-	}
-	if got := response.Header().Get("X-Boundary-State"); got != "awaiting-runtime" {
-		t.Fatalf("expected X-Boundary-State awaiting-runtime, got %q", got)
+	if got := response.Header().Get("X-NATS-Subject"); got != "alerts.list" {
+		t.Fatalf("expected X-NATS-Subject alerts.list, got %q", got)
 	}
 }
 

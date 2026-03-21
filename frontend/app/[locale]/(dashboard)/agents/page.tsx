@@ -1,5 +1,5 @@
-import { AgentsPage } from "@/src/features/operations";
+import { AgentsPage as AgentsPageView } from "@/src/page-modules/agents";
 
-export default function DashboardAgentsRoute() {
-  return <AgentsPage />;
+export default function AgentsPage() {
+  return <AgentsPageView />;
 }

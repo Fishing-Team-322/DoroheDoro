@@ -17,14 +17,17 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	if registry.AgentsDiagnostics != "agents.diagnostics" {
 		t.Fatalf("unexpected diagnostics subject: %s", registry.AgentsDiagnostics)
 	}
-	if registry.AgentsRegistryList != "agents.registry.list" {
-		t.Fatalf("unexpected agents list subject: %s", registry.AgentsRegistryList)
+	if registry.AgentsList != "agents.list" {
+		t.Fatalf("unexpected agents list subject: %s", registry.AgentsList)
 	}
-	if registry.AgentsRegistryGet != "agents.registry.get" {
-		t.Fatalf("unexpected agents get subject: %s", registry.AgentsRegistryGet)
+	if registry.AgentsGet != "agents.get" {
+		t.Fatalf("unexpected agents get subject: %s", registry.AgentsGet)
 	}
 	if registry.AgentsDiagnosticsGet != "agents.diagnostics.get" {
 		t.Fatalf("unexpected diagnostics get subject: %s", registry.AgentsDiagnosticsGet)
+	}
+	if registry.AgentsPolicyGet != "agents.policy.get" {
+		t.Fatalf("unexpected policy get subject: %s", registry.AgentsPolicyGet)
 	}
 	if registry.ControlPoliciesList != "control.policies.list" {
 		t.Fatalf("unexpected policies list subject: %s", registry.ControlPoliciesList)
@@ -50,20 +53,32 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	if registry.ControlClustersList != "control.clusters.list" {
 		t.Fatalf("unexpected clusters list subject: %s", registry.ControlClustersList)
 	}
+	if registry.ControlClustersAddHost != "control.clusters.add-host" {
+		t.Fatalf("unexpected clusters add-host subject: %s", registry.ControlClustersAddHost)
+	}
 	if registry.ControlRolesList != "control.roles.list" {
 		t.Fatalf("unexpected roles list subject: %s", registry.ControlRolesList)
 	}
-	if registry.ControlPermissionsList != "control.permissions.list" {
-		t.Fatalf("unexpected permissions list subject: %s", registry.ControlPermissionsList)
+	if registry.ControlRolesPermissionsGet != "control.roles.permissions.get" {
+		t.Fatalf("unexpected role permissions get subject: %s", registry.ControlRolesPermissionsGet)
 	}
-	if registry.IntegrationsList != "integrations.list" {
-		t.Fatalf("unexpected integrations list subject: %s", registry.IntegrationsList)
+	if registry.ControlRoleBindingsList != "control.role-bindings.list" {
+		t.Fatalf("unexpected role bindings list subject: %s", registry.ControlRoleBindingsList)
+	}
+	if registry.ControlIntegrationsList != "control.integrations.list" {
+		t.Fatalf("unexpected integrations list subject: %s", registry.ControlIntegrationsList)
 	}
 	if registry.TicketsList != "tickets.list" {
 		t.Fatalf("unexpected tickets list subject: %s", registry.TicketsList)
 	}
-	if registry.AnomaliesList != "anomalies.list" {
-		t.Fatalf("unexpected anomalies list subject: %s", registry.AnomaliesList)
+	if registry.TicketsStatusChange != "tickets.status.change" {
+		t.Fatalf("unexpected tickets status subject: %s", registry.TicketsStatusChange)
+	}
+	if registry.AnomalyRulesList != "anomalies.rules.list" {
+		t.Fatalf("unexpected anomaly rules list subject: %s", registry.AnomalyRulesList)
+	}
+	if registry.AnomalyInstancesList != "anomalies.instances.list" {
+		t.Fatalf("unexpected anomaly instances list subject: %s", registry.AnomalyInstancesList)
 	}
 	if registry.DeploymentsJobsCreate != "deployments.jobs.create" {
 		t.Fatalf("unexpected deployments create subject: %s", registry.DeploymentsJobsCreate)
@@ -83,13 +98,13 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	if registry.DeploymentsPlanCreate != "deployments.plan.create" {
 		t.Fatalf("unexpected deployments plan subject: %s", registry.DeploymentsPlanCreate)
 	}
-	if registry.StreamClusters != "ui.stream.clusters" {
-		t.Fatalf("unexpected clusters stream subject: %s", registry.StreamClusters)
+	if registry.StreamLogs != "ui.stream.logs" {
+		t.Fatalf("unexpected logs stream subject: %s", registry.StreamLogs)
 	}
-	if registry.StreamTickets != "ui.stream.tickets" {
-		t.Fatalf("unexpected tickets stream subject: %s", registry.StreamTickets)
+	if registry.StreamAlerts != "ui.stream.alerts" {
+		t.Fatalf("unexpected alerts stream subject: %s", registry.StreamAlerts)
 	}
-	if registry.StreamAnomalies != "ui.stream.anomalies" {
-		t.Fatalf("unexpected anomalies stream subject: %s", registry.StreamAnomalies)
+	if registry.StreamAgents != "ui.stream.agents" {
+		t.Fatalf("unexpected agents stream subject: %s", registry.StreamAgents)
 	}
 }

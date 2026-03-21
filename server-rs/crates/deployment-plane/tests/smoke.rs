@@ -350,9 +350,11 @@ impl TestHarness {
             deployment_repo,
             nats.clone(),
             executor.clone(),
-            deployment.edge_public_url,
-            deployment.edge_grpc_addr,
-            deployment.agent_state_dir_default,
+            deployment.edge_public_url.clone(),
+            deployment.edge_grpc_addr.clone(),
+            deployment.agent_state_dir_default.clone(),
+            deployment.artifact_resolver_config()?,
+            deployment.agent_tls_material.clone(),
         ));
         deployment_service.reconcile_stale_attempts().await?;
         subscriber_tasks.extend(

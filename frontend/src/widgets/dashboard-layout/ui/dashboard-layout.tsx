@@ -2,10 +2,10 @@
 
 import type { ComponentType, ReactNode } from "react";
 import { useMemo, useState } from "react";
+import * as Tooltip from "@radix-ui/react-tooltip";
+import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion } from "motion/react";
-import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   dashboardNavigation,
   type DashboardNavItem,
@@ -16,23 +16,22 @@ import { cn } from "@/src/shared/lib/cn";
 import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
 import { ConsolePage } from "@/src/shared/ui";
 import { DashboardSidebarLanguageSwitch } from "@/src/shared/ui/lang-switch";
-import { useSidebarCollapsedState } from "../model/use-sidebar-collapsed-state";
 import {
+  ActivityIcon,
+  BellIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  GridIcon,
   HomeIcon,
   LogsIcon,
   MenuIcon,
   PulseIcon,
   RocketIcon,
   ServerIcon,
-  ShieldIcon,
   SettingsIcon,
-  ActivityIcon,
-  GridIcon,
-  ChartIcon,
-  BellIcon,
+  ShieldIcon,
 } from "../icons";
+import { useSidebarCollapsedState } from "../model/use-sidebar-collapsed-state";
 
 type DashboardLayoutProps = {
   locale: Locale;
@@ -184,12 +183,19 @@ export function DashboardSidebar({
                 const isActive =
                   pathname === href || pathname.startsWith(`${href}/`);
                 const Icon = item.icon;
+                const navItem =
+                  (
+                    dictionary.navigation as Record<
+                      string,
+                      { label?: string; description?: string } | undefined
+                    >
+                  )[item.key] ?? {};
 
                 return (
                   <SidebarNavItem
                     key={item.href}
                     href={href}
-                    label={item.label}
+                    label={navItem.label ?? item.fallbackLabel}
                     Icon={Icon}
                     isActive={isActive}
                     collapsed={collapsed}
@@ -417,19 +423,34 @@ export function Section({
 }
 
 function getSidebarIcon(item: Pick<NavItem, "key">) {
-  if (item.key === "overview") return HomeIcon;
-  if (item.key === "system") return ServerIcon;
-  if (item.key === "policies") return ShieldIcon;
-  if (item.key === "deployments") return RocketIcon;
-  if (item.key === "agents") return ActivityIcon;
-  if (item.key === "logs") return LogsIcon;
-  if (item.key === "live-logs") return PulseIcon;
-  if (item.key === "hosts") return GridIcon;
-  if (item.key === "host-groups") return ChartIcon;
-  if (item.key === "credentials") return BellIcon;
-  if (item.key === "profile") return SettingsIcon;
-
-  return undefined;
+  switch (item.key) {
+    case "overview":
+      return HomeIcon;
+    case "system":
+      return ServerIcon;
+    case "inventory":
+      return GridIcon;
+    case "policies":
+      return ShieldIcon;
+    case "credentials":
+      return GridIcon;
+    case "deployments":
+      return RocketIcon;
+    case "agents":
+      return PulseIcon;
+    case "logs":
+      return LogsIcon;
+    case "live-logs":
+      return ActivityIcon;
+    case "alerts":
+      return BellIcon;
+    case "audit":
+      return ActivityIcon;
+    case "profile":
+      return SettingsIcon;
+    default:
+      return undefined;
+  }
 }
 
 function getSidebarUsername(

@@ -1,0 +1,85 @@
+server {
+    listen 80;
+    server_name ${NGINX_SERVER_NAME};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${NGINX_SERVER_NAME};
+
+    ssl_certificate /certs/server.crt;
+    ssl_certificate_key /certs/server.key;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    client_max_body_size 8m;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+
+    location = /healthz {
+        proxy_pass http://edge-api:8080/healthz;
+    }
+
+    location = /readyz {
+        proxy_pass http://edge-api:8080/readyz;
+    }
+
+    location = /version {
+        proxy_pass http://edge-api:8080/version;
+    }
+
+    location = /openapi.json {
+        proxy_pass http://edge-api:8080/openapi.json;
+    }
+
+    location = /openapi.yaml {
+        proxy_pass http://edge-api:8080/openapi.yaml;
+    }
+
+    location /docs {
+        proxy_pass http://edge-api:8080/docs;
+    }
+
+    location /auth/ {
+        proxy_pass http://edge-api:8080/auth/;
+    }
+
+    location = /profile {
+        proxy_pass http://edge-api:8080/profile;
+    }
+
+    location /api/edge/ {
+        proxy_pass http://edge-api:8080/;
+        proxy_buffering off;
+    }
+
+    location /api/v1/stream/ {
+        proxy_pass http://edge-api:8080/api/v1/stream/;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+        add_header Cache-Control no-cache;
+    }
+
+    location /api/v1/ {
+        proxy_pass http://edge-api:8080/api/v1/;
+    }
+
+    location /dorohedoro.edge.v1.AgentIngressService/ {
+        grpc_set_header Host $host;
+        grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        grpc_set_header X-Forwarded-Proto $scheme;
+        grpc_pass grpc://edge-api:9090;
+    }
+
+    location / {
+        proxy_pass http://frontend:3000;
+    }
+}

@@ -74,6 +74,11 @@ type hostGroupUpsertRequest struct {
 	Description string `json:"description"`
 }
 
+type hostGroupMemberMutationRequest struct {
+	HostID string `json:"host_id"`
+	Reason string `json:"reason"`
+}
+
 type credentialCreateRequest struct {
 	Name        string `json:"name"`
 	Kind        string `json:"kind"`
@@ -533,6 +538,92 @@ func hostGroupUpdateHandler(deps RouterDeps) http.HandlerFunc {
 			deps.Logger,
 			subject,
 			envelope.EncodeControlUpdateHostGroupRequest(middleware.GetRequestID(r.Context()), groupID, strings.TrimSpace(body.Name), strings.TrimSpace(body.Description)),
+			envelope.DecodeControlHostGroup,
+		)
+		if err != nil {
+			deps.Logger.Error("control request failed", zap.String("subject", subject), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
+			middleware.WriteTransportError(w, r, err)
+			return
+		}
+		if strings.EqualFold(reply.Status, "error") {
+			writeControlReplyError(w, r, reply)
+			return
+		}
+		w.Header().Set("X-NATS-Subject", subject)
+		middleware.WriteJSON(w, http.StatusOK, map[string]any{
+			"item":       mapControlHostGroupItem(payload),
+			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
+		})
+	}
+}
+
+func hostGroupAddMemberHandler(deps RouterDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		groupID := strings.TrimSpace(chi.URLParam(r, "id"))
+		if groupID == "" {
+			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "host group id is required")
+			return
+		}
+		var body hostGroupMemberMutationRequest
+		if err := decodeJSONBody(r, &body); err != nil {
+			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", err.Error())
+			return
+		}
+		if strings.TrimSpace(body.HostID) == "" {
+			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "host_id is required")
+			return
+		}
+		subject := deps.Config.NATS.Subjects.ControlHostGroupsAddMember
+		payload, reply, err := requestControlEnvelope(
+			r.Context(),
+			deps.Bridge,
+			deps.Logger,
+			subject,
+			envelope.EncodeControlAddHostGroupMemberRequest(
+				middleware.GetRequestID(r.Context()),
+				groupID,
+				strings.TrimSpace(body.HostID),
+				controlAuditContextFromRequest(r, firstNonEmpty(strings.TrimSpace(body.Reason), "host group member added")),
+			),
+			envelope.DecodeControlHostGroup,
+		)
+		if err != nil {
+			deps.Logger.Error("control request failed", zap.String("subject", subject), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
+			middleware.WriteTransportError(w, r, err)
+			return
+		}
+		if strings.EqualFold(reply.Status, "error") {
+			writeControlReplyError(w, r, reply)
+			return
+		}
+		w.Header().Set("X-NATS-Subject", subject)
+		middleware.WriteJSON(w, http.StatusOK, map[string]any{
+			"item":       mapControlHostGroupItem(payload),
+			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
+		})
+	}
+}
+
+func hostGroupRemoveMemberHandler(deps RouterDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		groupID := strings.TrimSpace(chi.URLParam(r, "id"))
+		hostID := strings.TrimSpace(chi.URLParam(r, "hostId"))
+		if groupID == "" || hostID == "" {
+			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "host group id and host id are required")
+			return
+		}
+		subject := deps.Config.NATS.Subjects.ControlHostGroupsRemoveMember
+		payload, reply, err := requestControlEnvelope(
+			r.Context(),
+			deps.Bridge,
+			deps.Logger,
+			subject,
+			envelope.EncodeControlRemoveHostGroupMemberRequest(
+				middleware.GetRequestID(r.Context()),
+				groupID,
+				hostID,
+				controlAuditContextFromRequest(r, "host group member removed"),
+			),
 			envelope.DecodeControlHostGroup,
 		)
 		if err != nil {

@@ -11,6 +11,7 @@
     msg: doro_agent_artifact_manifest_path or doro_agent_artifact_manifest_url must be provided when state=present
   when:
     - doro_agent_state == 'present'
+    - doro_agent_selected_artifact is not mapping
     - doro_agent_artifact_manifest_path | trim == ''
     - doro_agent_artifact_manifest_url | trim == ''
 
@@ -21,30 +22,39 @@
     mode: "0644"
   when:
     - doro_agent_state == 'present'
+    - doro_agent_selected_artifact is not mapping
     - doro_agent_artifact_manifest_url | trim != ''
 
 - name: Resolve manifest path
   ansible.builtin.set_fact:
     doro_agent_manifest_path_resolved: >-
       {{ '/tmp/doro-agent-release-manifest.json' if (doro_agent_artifact_manifest_url | trim) != '' else doro_agent_artifact_manifest_path }}
-  when: doro_agent_state == 'present'
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact is not mapping
 
 - name: Read release manifest
   ansible.builtin.slurp:
     src: "{{ doro_agent_manifest_path_resolved }}"
   register: doro_agent_manifest_raw
-  when: doro_agent_state == 'present'
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact is not mapping
 
 - name: Parse release manifest
   ansible.builtin.set_fact:
     doro_agent_manifest: "{{ doro_agent_manifest_raw.content | b64decode | from_json }}"
-  when: doro_agent_state == 'present'
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact is not mapping
 
 - name: Select preferred package type
   ansible.builtin.set_fact:
     doro_agent_preferred_package_type: >-
       {% if doro_agent_install_mode == 'deb' %}deb{% elif doro_agent_install_mode == 'tar.gz' %}tar.gz{% elif doro_agent_target_distro_family in ['debian', 'astra-linux'] %}deb{% else %}tar.gz{% endif %}
-  when: doro_agent_state == 'present'
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact is not mapping
 
 - name: Gather artifacts for current arch
   ansible.builtin.set_fact:
@@ -55,7 +65,9 @@
         | selectattr('arch', 'equalto', doro_agent_target_arch)
         | list
       }}
-  when: doro_agent_state == 'present'
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact is not mapping
 
 - name: Select best matching artifact
   ansible.builtin.set_fact:
@@ -90,7 +102,9 @@
           true
         )
       }}
-  when: doro_agent_state == 'present'
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact is not mapping
 
 - name: Ensure selected artifact exists
   ansible.builtin.fail:
@@ -111,7 +125,13 @@
 - name: Resolve artifact sources
   ansible.builtin.set_fact:
     doro_agent_selected_artifact_url: >-
-      {% if doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' %}
+      {% if doro_agent_selected_artifact.source_uri is defined and (doro_agent_selected_artifact.source_uri | trim) != '' %}
+      {% if doro_agent_selected_artifact.source_uri[:7] == 'http://' or doro_agent_selected_artifact.source_uri[:8] == 'https://' %}
+      {{ doro_agent_selected_artifact.source_uri }}
+      {% else %}
+      {{ '' }}
+      {% endif %}
+      {% elif doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' %}
       {{ doro_agent_selected_artifact.artifact_path }}
       {% elif doro_agent_release_base_url | trim != '' %}
       {{ doro_agent_release_base_url }}/{{ doro_agent_selected_artifact.artifact_path | regex_replace('^\\./', '') | regex_replace('^/', '') }}
@@ -119,7 +139,13 @@
       {{ '' }}
       {% endif %}
     doro_agent_selected_artifact_local_path: >-
-      {% if doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' or doro_agent_release_base_url | trim != '' %}
+      {% if doro_agent_selected_artifact.source_uri is defined and (doro_agent_selected_artifact.source_uri | trim) != '' %}
+      {% if doro_agent_selected_artifact.source_uri[:7] == 'http://' or doro_agent_selected_artifact.source_uri[:8] == 'https://' %}
+      {{ '' }}
+      {% else %}
+      {{ doro_agent_selected_artifact.source_uri }}
+      {% endif %}
+      {% elif doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' or doro_agent_release_base_url | trim != '' %}
       {{ '' }}
       {% else %}
       {{ doro_agent_selected_artifact.artifact_path }}
@@ -150,10 +176,47 @@
     mode: "0750"
   loop:
     - "{{ doro_agent_config_dir }}"
+    - "{{ doro_agent_pki_dir }}"
     - "{{ doro_agent_state_dir }}"
     - "{{ doro_agent_log_dir }}"
     - "{{ doro_agent_docs_dir }}"
   when: doro_agent_state == 'present'
+
+- name: Install TLS CA bundle
+  ansible.builtin.copy:
+    src: "{{ doro_agent_tls_ca_src_path }}"
+    dest: "{{ doro_agent_tls_ca_path }}"
+    owner: root
+    group: "{{ doro_agent_group }}"
+    mode: "0640"
+  notify: Restart doro-agent
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_tls_ca_src_path | trim != ''
+
+- name: Install TLS client certificate
+  ansible.builtin.copy:
+    src: "{{ doro_agent_tls_cert_src_path }}"
+    dest: "{{ doro_agent_tls_cert_path }}"
+    owner: root
+    group: "{{ doro_agent_group }}"
+    mode: "0640"
+  notify: Restart doro-agent
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_tls_cert_src_path | trim != ''
+
+- name: Install TLS client private key
+  ansible.builtin.copy:
+    src: "{{ doro_agent_tls_key_src_path }}"
+    dest: "{{ doro_agent_tls_key_path }}"
+    owner: root
+    group: "{{ doro_agent_group }}"
+    mode: "0640"
+  notify: Restart doro-agent
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_tls_key_src_path | trim != ''
 
 - name: Ensure spool directory exists
   ansible.builtin.file:

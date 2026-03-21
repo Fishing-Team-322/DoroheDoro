@@ -1,30 +1,49 @@
 # DoroheDoro platform stack
 
-The repository builds a 3-service platform:
+This repository builds a 3-service platform:
 
 - `WEB` -> `frontend/`
 - `SERVER` -> public Go `edge_api/` + private Rust runtime in `server-rs/`
 - `AGENT` -> `agent-rs/`
 
-`edge_api` is the only public boundary for both `WEB` and `AGENT`. Domain state and control/deployment runtime logic live in `server-rs`.
+`edge_api` is the only public boundary for both `WEB` and `AGENT`. Business logic, persistence and processing live in the Rust runtime planes.
 
-## Local demo stack
+## Local full stack
 
-The root [`docker-compose.yml`](./docker-compose.yml) is the primary local workflow. It starts:
-
-- `frontend` on `http://localhost:3000`
-- `edge-api` on `http://localhost:8080` and `localhost:9090`
-- `nats` on `nats://localhost:4222`
-- `postgres` on `localhost:5432`
-- `enrollment-plane` on `http://localhost:8081`
-- `control-plane` on `http://localhost:8082`
-- `deployment-plane` on `http://localhost:8083`
-
-Run:
+Primary workflow:
 
 ```bash
 docker compose up --build
 ```
+
+The local stack now starts:
+
+- `frontend`
+- `edge-api`
+- `agent-artifacts`
+- `nats`
+- `postgres`
+- `vault`
+- `vault-init`
+- `opensearch`
+- `clickhouse`
+- `enrollment-plane`
+- `control-plane`
+- `deployment-plane`
+- `ingestion-plane`
+- `query-alert-plane`
+
+Published local ports:
+
+- `3000` -> WEB
+- `8080` -> edge-api HTTP
+- `9090` -> edge-api gRPC
+- `18081` -> agent artifact mirror
+- `4222` / `8222` -> NATS
+- `5432` -> PostgreSQL
+- `8200` -> Vault dev API
+- `9200` -> OpenSearch
+- `8123` / `9000` -> ClickHouse
 
 DEV auth for the current WEB flow:
 
@@ -32,128 +51,159 @@ DEV auth for the current WEB flow:
 - email: `admin@example.com`
 - password: `admin123`
 
-## Server demo/staging stack
+Important local compose defaults:
 
-[`docker-compose.server.yml`](./docker-compose.server.yml) is the VPS-friendly stack for `fishingteam.su`. It runs the same runtime internally, but only binds localhost-facing ports that Nginx should proxy:
+- `DEPLOYMENT_EXECUTOR_KIND=ansible`
+- `deployment-plane` uses real `ansible-runner`
+- `agent-artifacts` builds and serves release artifacts from the repo
+- `vault-init` seeds AppRole access plus dev TLS material
+- the seeded `secret/data/ssh/dev` entry is a placeholder and must be replaced before a real remote rollout
 
-- `127.0.0.1:13000 -> frontend:3000`
-- `127.0.0.1:18080 -> edge-api:8080`
+## Single-host/domain stack
 
-Run:
+Server-style workflow:
 
 ```bash
-docker compose -f docker-compose.server.yml up -d --build
+docker compose --env-file .env.server -f docker-compose.server.yml up -d --build
 ```
 
-The server env lives in [`edge_api/.env.server`](./edge_api/.env.server). Replace the demo auth password there before exposing the stack publicly.
+This stack is the preprod single-host/domain profile:
 
-For the Nginx/domain layout on `fishingteam.su`, see [`docs/server-deploy.md`](./docs/server-deploy.md).
+- one host
+- one public domain
+- `WEB` and `SERVER` on the same machine
+- compose-managed `nginx` publishes `80/443`
+- HTTP, SSE and gRPC all arrive on the same domain
+- agent gRPC+mTLS is proxied to `edge-api:9090`
+- real ingress and trust material is mounted from `SERVER_CERTS_DIR`
 
-## What is live today
+Related docs:
 
-The current integrated slice is no longer just enrollment. The local stack now has live boundary flows for:
+- stack overview: [`docs/demo-stack.md`](./docs/demo-stack.md)
+- smoke flow: [`docs/demo-smoke.md`](./docs/demo-smoke.md)
+- single-host deploy notes: [`docs/server-deploy.md`](./docs/server-deploy.md)
+- compose env example: [`.env.server.example`](./.env.server.example)
 
-- WEB login through `frontend -> /api/edge -> edge-api`
-- agents read-side:
-  - `GET /api/v1/agents`
-  - `GET /api/v1/agents/{id}`
-  - `GET /api/v1/agents/{id}/diagnostics`
-  - `GET /api/v1/agents/{id}/policy`
-- policies:
-  - `GET /api/v1/policies`
-  - `GET /api/v1/policies/{id}`
-  - `POST /api/v1/policies`
-  - `PATCH /api/v1/policies/{id}`
-  - `GET /api/v1/policies/{id}/revisions`
-- inventory:
-  - `GET /api/v1/hosts`
-  - `POST /api/v1/hosts`
-  - `GET /api/v1/host-groups`
-  - `POST /api/v1/host-groups`
-- credentials metadata:
-  - `GET /api/v1/credentials`
-  - `POST /api/v1/credentials`
-- deployments:
-  - `POST /api/v1/deployments/plan`
-  - `POST /api/v1/deployments`
-  - `GET /api/v1/deployments`
-  - `GET /api/v1/deployments/{id}`
-  - `GET /api/v1/deployments/{id}/steps`
-  - `GET /api/v1/deployments/{id}/targets`
-  - `POST /api/v1/deployments/{id}/retry`
-  - `POST /api/v1/deployments/{id}/cancel`
-- deployment SSE stream:
-  - `GET /api/v1/stream/deployments`
-- agent gRPC ingress with TLS + mTLS:
+## What is live
+
+Current live boundary/runtime surface:
+
+- control-plane HTTP flows:
+  - policies
+  - hosts
+  - host groups
+  - credentials metadata
+  - clusters
+  - roles / permissions / bindings
+  - integrations
+  - tickets
+  - anomaly rules / instances
+- deployment flows:
+  - plan
+  - create
+  - list / get
+  - retry / cancel
+  - steps / targets
+  - deployment SSE
+- agent lifecycle:
   - `Enroll`
   - `FetchPolicy`
   - `SendHeartbeat`
   - `SendDiagnostics`
   - `IngestLogs`
+- ingest / query / analytics:
+  - `/api/v1/logs/search`
+  - `/api/v1/logs/{eventId}`
+  - `/api/v1/logs/context`
+  - `/api/v1/logs/histogram`
+  - `/api/v1/logs/severity`
+  - `/api/v1/logs/top-hosts`
+  - `/api/v1/logs/top-services`
+  - `/api/v1/logs/heatmap`
+  - `/api/v1/logs/top-patterns`
+  - `/api/v1/logs/anomalies`
+  - `/api/v1/dashboards/overview`
+- alerting:
+  - `GET /api/v1/alerts`
+  - `GET /api/v1/alerts/{id}`
+  - `GET /api/v1/alerts/rules`
+  - `GET /api/v1/alerts/rules/{id}`
+  - `POST /api/v1/alerts`
+  - `PATCH /api/v1/alerts/{id}`
+- audit:
+  - `GET /api/v1/audit`
+- stable SSE:
+  - `GET /api/v1/stream/deployments`
+  - `GET /api/v1/stream/agents`
+  - `GET /api/v1/stream/logs`
+  - `GET /api/v1/stream/alerts`
 
-Query, dashboards, alerts and audit still return controlled `501 not_implemented` from `edge-api` until the corresponding Rust runtime exists.
+The stable surface no longer uses `runtimeUnavailable` placeholders for logs, dashboards, alerts or audit.
 
-## Smoke and boundary docs
+## Practical rollout notes
 
-- local end-to-end smoke: [`docs/demo-smoke.md`](./docs/demo-smoke.md)
-- server/VPS deploy notes: [`docs/server-deploy.md`](./docs/server-deploy.md)
-- boundary details: [`edge_api/README.md`](./edge_api/README.md)
+`deployment-plane` now expects:
 
-Useful checks:
+- real ansible execution
+- artifact manifest and release source
+- Vault-backed SSH credentials
+- optional Vault-backed agent mTLS material
+
+For the first real rollout:
+
+1. replace the placeholder SSH secret in Vault
+2. create a credentials profile in WEB or via API that points to that Vault ref
+3. create policy, hosts and host groups
+4. build a deployment plan
+5. execute the job from WEB
+6. verify deployment stream, agent enrollment, heartbeat, diagnostics, logs, alerts and audit
+
+The agent install contract now renders:
+
+- `tls.ca_path`
+- `tls.cert_path`
+- `tls.key_path`
+- `tls.server_name`
+
+and runs `doro-agent doctor --config ...` as `ExecStartPre`.
+
+The current compat/stub WEB auth remains an internal or preprod-only profile. Treat it as non-production auth even though the rest of the stack is aligned for a practical run.
+
+## OpenAPI
+
+Source of truth:
+
+- generator: [`edge_api/scripts/render-openapi.cjs`](./edge_api/scripts/render-openapi.cjs)
+- rendered docs: [`edge_api/docs/openapi.json`](./edge_api/docs/openapi.json) and [`edge_api/docs/openapi.yaml`](./edge_api/docs/openapi.yaml)
+
+Refresh:
+
+```bash
+make swagger
+```
+
+Verify drift:
+
+```bash
+make swagger-check
+```
+
+Runtime smoke gates against a live Postgres/NATS stack:
+
+```bash
+make server-smoke
+```
+
+## Useful checks
 
 ```bash
 cd edge_api
 go test ./...
 
-cargo test --manifest-path ../server-rs/Cargo.toml -p common -p enrollment-plane -p control-plane -p deployment-plane
+cargo check --manifest-path ../server-rs/Cargo.toml \
+  -p enrollment-plane \
+  -p control-plane \
+  -p deployment-plane \
+  -p ingestion-plane \
+  -p query-alert-plane
 ```
-
-## Agent release and delivery
-
-The repository now includes a delivery layer for `AGENT` artifacts without changing `agent-rs` runtime code.
-
-Available pieces:
-
-- release scripts:
-  - [`scripts/release/build-agent-artifacts.sh`](./scripts/release/build-agent-artifacts.sh)
-  - [`scripts/release/generate-manifest.sh`](./scripts/release/generate-manifest.sh)
-- manifest contract:
-  - [`deployments/artifacts/manifest.schema.json`](./deployments/artifacts/manifest.schema.json)
-  - [`deployments/artifacts/example.manifest.json`](./deployments/artifacts/example.manifest.json)
-- packaging/install contract:
-  - [`deployments/packaging/INSTALL.md`](./deployments/packaging/INSTALL.md)
-- Ansible install layer:
-  - [`deployments/ansible/playbooks/install-agent.yml`](./deployments/ansible/playbooks/install-agent.yml)
-
-Build local artifacts:
-
-```bash
-bash scripts/release/build-agent-artifacts.sh --version 0.2.0
-bash scripts/release/generate-manifest.sh --version 0.2.0
-```
-
-Details:
-
-- [`docs/agent-distribution.md`](./docs/agent-distribution.md)
-
-## Dev/test mTLS
-
-The local compose stack already starts `edge-api` with mTLS enabled for AGENT ingress.
-
-Standalone PKI scripts:
-
-```bash
-bash scripts/pki/dev-ca.sh
-bash scripts/pki/issue-edge-cert.sh
-bash scripts/pki/issue-agent-cert.sh
-```
-
-Details:
-
-- [`docs/dev-pki.md`](./docs/dev-pki.md)
-
-## Demo docs
-
-- stack overview: [`docs/demo-stack.md`](./docs/demo-stack.md)
-- end-to-end smoke: [`docs/demo-smoke.md`](./docs/demo-smoke.md)
-- VPS/Nginx deploy: [`docs/server-deploy.md`](./docs/server-deploy.md)

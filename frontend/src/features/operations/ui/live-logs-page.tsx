@@ -122,6 +122,8 @@ export function LiveLogsPage() {
     return items;
   }, [liveLogs.items, sortKey, sortDirection]);
 
+  const currentSortDirection = sortDirection ?? undefined;
+
   const handleSort = (key: SortKey) => {
     if (sortKey !== key) {
       setSortKey(key);
@@ -223,7 +225,7 @@ export function LiveLogsPage() {
                     <TableHead>
                       <TableSortButton
                         active={sortKey === "timestamp"}
-                        direction={sortDirection}
+                        direction={currentSortDirection}
                         onClick={() => handleSort("timestamp")}
                       >
                         время
@@ -233,7 +235,7 @@ export function LiveLogsPage() {
                     <TableHead>
                       <TableSortButton
                         active={sortKey === "severity"}
-                        direction={sortDirection}
+                        direction={currentSortDirection}
                         onClick={() => handleSort("severity")}
                       >
                         severity
@@ -243,7 +245,7 @@ export function LiveLogsPage() {
                     <TableHead>
                       <TableSortButton
                         active={sortKey === "host"}
-                        direction={sortDirection}
+                        direction={currentSortDirection}
                         onClick={() => handleSort("host")}
                       >
                         host
@@ -253,7 +255,7 @@ export function LiveLogsPage() {
                     <TableHead>
                       <TableSortButton
                         active={sortKey === "service"}
-                        direction={sortDirection}
+                        direction={currentSortDirection}
                         onClick={() => handleSort("service")}
                       >
                         service
@@ -263,7 +265,7 @@ export function LiveLogsPage() {
                     <TableHead>
                       <TableSortButton
                         active={sortKey === "message"}
-                        direction={sortDirection}
+                        direction={currentSortDirection}
                         onClick={() => handleSort("message")}
                       >
                         сообщение

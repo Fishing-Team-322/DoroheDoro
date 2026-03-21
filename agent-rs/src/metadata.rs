@@ -685,8 +685,8 @@ mod tests {
         CANONICAL_PACKAGE_BIN,
     };
     use crate::config::{
-        AgentConfig, InstallConfig, InstallMode, PlatformConfig, ScopeConfig, SourceConfig,
-        SpoolConfig, StartAt, TransportConfig, TransportMode,
+        AgentConfig, InstallConfig, InstallMode, PlatformConfig, PolicyConfig, ScopeConfig,
+        SourceConfig, SpoolConfig, StartAt, TlsConfig, TransportConfig, TransportMode,
     };
 
     fn test_config() -> AgentConfig {
@@ -698,6 +698,7 @@ mod tests {
             log_level: "info".to_string(),
             heartbeat: Default::default(),
             diagnostics: Default::default(),
+            policy: PolicyConfig::default(),
             batch: Default::default(),
             queues: Default::default(),
             degraded: Default::default(),
@@ -715,6 +716,7 @@ mod tests {
             platform: PlatformConfig {
                 allow_machine_id: false,
             },
+            tls: TlsConfig::default(),
             scope: ScopeConfig::default(),
             sources: vec![SourceConfig {
                 kind: "file".to_string(),

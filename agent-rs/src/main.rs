@@ -6,10 +6,13 @@ mod doctor;
 mod error;
 mod logging;
 mod metadata;
+mod policy;
 mod proto;
 mod runtime;
 mod sources;
 mod state;
+#[cfg(test)]
+mod test_support;
 mod transport;
 
 use clap::Parser;

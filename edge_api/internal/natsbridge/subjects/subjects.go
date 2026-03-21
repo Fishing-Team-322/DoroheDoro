@@ -5,9 +5,10 @@ type Registry struct {
 	AgentsPolicyFetch    string
 	AgentsHeartbeat      string
 	AgentsDiagnostics    string
-	AgentsRegistryList   string
-	AgentsRegistryGet    string
+	AgentsList           string
+	AgentsGet            string
 	AgentsDiagnosticsGet string
+	AgentsPolicyGet      string
 
 	ControlPoliciesList      string
 	ControlPoliciesGet       string
@@ -31,35 +32,45 @@ type Registry struct {
 	ControlCredentialsGet    string
 	ControlCredentialsCreate string
 
-	ControlClustersList   string
-	ControlClustersGet    string
-	ControlClustersCreate string
-	ControlClustersUpdate string
+	ControlClustersList       string
+	ControlClustersGet        string
+	ControlClustersCreate     string
+	ControlClustersUpdate     string
+	ControlClustersAddHost    string
+	ControlClustersRemoveHost string
 
-	ControlRolesList   string
-	ControlRolesGet    string
-	ControlRolesCreate string
-	ControlRolesUpdate string
+	ControlRolesList           string
+	ControlRolesGet            string
+	ControlRolesCreate         string
+	ControlRolesUpdate         string
+	ControlRolesPermissionsGet string
+	ControlRolesPermissionsSet string
+	ControlRoleBindingsList    string
+	ControlRoleBindingsCreate  string
+	ControlRoleBindingsDelete  string
 
-	ControlPermissionsList   string
-	ControlPermissionsGet    string
-	ControlPermissionsCreate string
-	ControlPermissionsUpdate string
+	ControlIntegrationsList   string
+	ControlIntegrationsGet    string
+	ControlIntegrationsCreate string
+	ControlIntegrationsUpdate string
+	ControlIntegrationsBind   string
+	ControlIntegrationsUnbind string
 
-	IntegrationsList   string
-	IntegrationsGet    string
-	IntegrationsCreate string
-	IntegrationsUpdate string
+	TicketsList         string
+	TicketsGet          string
+	TicketsCreate       string
+	TicketsAssign       string
+	TicketsUnassign     string
+	TicketsCommentAdd   string
+	TicketsStatusChange string
+	TicketsClose        string
 
-	TicketsList   string
-	TicketsGet    string
-	TicketsCreate string
-	TicketsUpdate string
-
-	AnomaliesList   string
-	AnomaliesGet    string
-	AnomaliesCreate string
-	AnomaliesUpdate string
+	AnomalyRulesList     string
+	AnomalyRulesGet      string
+	AnomalyRulesCreate   string
+	AnomalyRulesUpdate   string
+	AnomalyInstancesList string
+	AnomalyInstancesGet  string
 
 	DeploymentsJobsCreate string
 	DeploymentsJobsGet    string
@@ -84,20 +95,20 @@ type Registry struct {
 
 	AlertsList        string
 	AlertsGet         string
+	AlertsRulesList   string
+	AlertsRulesGet    string
 	AlertsRulesCreate string
 	AlertsRulesUpdate string
 
-	AuditList string
+	AuditList         string
+	AuditEventsAppend string
 
-	LogsIngestRaw string
+	LogsIngestRaw        string
+	LogsIngestNormalized string
 
-	StreamLogs        string
-	StreamDeployments string
-	StreamAlerts      string
-	StreamAgents      string
-	StreamClusters    string
-	StreamTickets     string
-	StreamAnomalies   string
+	StreamLogs   string
+	StreamAlerts string
+	StreamAgents string
 }
 
 func Defaults() Registry {
@@ -106,9 +117,10 @@ func Defaults() Registry {
 		AgentsPolicyFetch:    "agents.policy.fetch",
 		AgentsHeartbeat:      "agents.heartbeat",
 		AgentsDiagnostics:    "agents.diagnostics",
-		AgentsRegistryList:   "agents.registry.list",
-		AgentsRegistryGet:    "agents.registry.get",
+		AgentsList:           "agents.list",
+		AgentsGet:            "agents.get",
 		AgentsDiagnosticsGet: "agents.diagnostics.get",
+		AgentsPolicyGet:      "agents.policy.get",
 
 		ControlPoliciesList:      "control.policies.list",
 		ControlPoliciesGet:       "control.policies.get",
@@ -132,35 +144,45 @@ func Defaults() Registry {
 		ControlCredentialsGet:    "control.credentials.get",
 		ControlCredentialsCreate: "control.credentials.create",
 
-		ControlClustersList:   "control.clusters.list",
-		ControlClustersGet:    "control.clusters.get",
-		ControlClustersCreate: "control.clusters.create",
-		ControlClustersUpdate: "control.clusters.update",
+		ControlClustersList:       "control.clusters.list",
+		ControlClustersGet:        "control.clusters.get",
+		ControlClustersCreate:     "control.clusters.create",
+		ControlClustersUpdate:     "control.clusters.update",
+		ControlClustersAddHost:    "control.clusters.add-host",
+		ControlClustersRemoveHost: "control.clusters.remove-host",
 
-		ControlRolesList:   "control.roles.list",
-		ControlRolesGet:    "control.roles.get",
-		ControlRolesCreate: "control.roles.create",
-		ControlRolesUpdate: "control.roles.update",
+		ControlRolesList:           "control.roles.list",
+		ControlRolesGet:            "control.roles.get",
+		ControlRolesCreate:         "control.roles.create",
+		ControlRolesUpdate:         "control.roles.update",
+		ControlRolesPermissionsGet: "control.roles.permissions.get",
+		ControlRolesPermissionsSet: "control.roles.permissions.set",
+		ControlRoleBindingsList:    "control.role-bindings.list",
+		ControlRoleBindingsCreate:  "control.role-bindings.create",
+		ControlRoleBindingsDelete:  "control.role-bindings.delete",
 
-		ControlPermissionsList:   "control.permissions.list",
-		ControlPermissionsGet:    "control.permissions.get",
-		ControlPermissionsCreate: "control.permissions.create",
-		ControlPermissionsUpdate: "control.permissions.update",
+		ControlIntegrationsList:   "control.integrations.list",
+		ControlIntegrationsGet:    "control.integrations.get",
+		ControlIntegrationsCreate: "control.integrations.create",
+		ControlIntegrationsUpdate: "control.integrations.update",
+		ControlIntegrationsBind:   "control.integrations.bind",
+		ControlIntegrationsUnbind: "control.integrations.unbind",
 
-		IntegrationsList:   "integrations.list",
-		IntegrationsGet:    "integrations.get",
-		IntegrationsCreate: "integrations.create",
-		IntegrationsUpdate: "integrations.update",
+		TicketsList:         "tickets.list",
+		TicketsGet:          "tickets.get",
+		TicketsCreate:       "tickets.create",
+		TicketsAssign:       "tickets.assign",
+		TicketsUnassign:     "tickets.unassign",
+		TicketsCommentAdd:   "tickets.comment.add",
+		TicketsStatusChange: "tickets.status.change",
+		TicketsClose:        "tickets.close",
 
-		TicketsList:   "tickets.list",
-		TicketsGet:    "tickets.get",
-		TicketsCreate: "tickets.create",
-		TicketsUpdate: "tickets.update",
-
-		AnomaliesList:   "anomalies.list",
-		AnomaliesGet:    "anomalies.get",
-		AnomaliesCreate: "anomalies.create",
-		AnomaliesUpdate: "anomalies.update",
+		AnomalyRulesList:     "anomalies.rules.list",
+		AnomalyRulesGet:      "anomalies.rules.get",
+		AnomalyRulesCreate:   "anomalies.rules.create",
+		AnomalyRulesUpdate:   "anomalies.rules.update",
+		AnomalyInstancesList: "anomalies.instances.list",
+		AnomalyInstancesGet:  "anomalies.instances.get",
 
 		DeploymentsJobsCreate: "deployments.jobs.create",
 		DeploymentsJobsGet:    "deployments.jobs.get",
@@ -185,19 +207,19 @@ func Defaults() Registry {
 
 		AlertsList:        "alerts.list",
 		AlertsGet:         "alerts.get",
+		AlertsRulesList:   "alerts.rules.list",
+		AlertsRulesGet:    "alerts.rules.get",
 		AlertsRulesCreate: "alerts.rules.create",
 		AlertsRulesUpdate: "alerts.rules.update",
 
-		AuditList: "audit.list",
+		AuditList:         "audit.list",
+		AuditEventsAppend: "audit.events.append",
 
-		LogsIngestRaw: "logs.ingest.raw",
+		LogsIngestRaw:        "logs.ingest.raw",
+		LogsIngestNormalized: "logs.ingest.normalized",
 
-		StreamLogs:        "ui.stream.logs",
-		StreamDeployments: "ui.stream.deployments",
-		StreamAlerts:      "ui.stream.alerts",
-		StreamAgents:      "ui.stream.agents",
-		StreamClusters:    "ui.stream.clusters",
-		StreamTickets:     "ui.stream.tickets",
-		StreamAnomalies:   "ui.stream.anomalies",
+		StreamLogs:   "ui.stream.logs",
+		StreamAlerts: "ui.stream.alerts",
+		StreamAgents: "ui.stream.agents",
 	}
 }

@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package dorohedoro.audit.v1;
+
+option go_package = "github.com/example/dorohedoro/contracts/auditproto;auditv1";
+
+import "runtime.proto";
+
+message AuditEvent {
+  string audit_event_id = 1;
+  string event_type = 2;
+  string entity_type = 3;
+  string entity_id = 4;
+  string actor_id = 5;
+  string actor_type = 6;
+  string request_id = 7;
+  string reason = 8;
+  string payload_json = 9;
+  string created_at = 10;
+}
+
+message ListAuditEventsRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+  string event_type = 3;
+  string entity_type = 4;
+  string entity_id = 5;
+  string actor_id = 6;
+}
+
+message ListAuditEventsResponse {
+  repeated AuditEvent items = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}

@@ -1,10 +1,5 @@
-import { UnavailablePage } from "@/src/features/operations";
+import { CredentialsPage as CredentialsPageView } from "@/src/page-modules/credentials";
 
-export default function DashboardCredentialsRoute() {
-  return (
-    <UnavailablePage
-      title="Credentials"
-      description="Credentials management is not available through the current public HTTP API yet."
-    />
-  );
+export default function CredentialsPage() {
+  return <CredentialsPageView />;
 }
