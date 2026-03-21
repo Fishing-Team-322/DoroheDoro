@@ -51,7 +51,27 @@ type Bridge struct {
 }
 
 func New(cfg config.NATSConfig, logger *zap.Logger) (*Bridge, error) {
-	conn, err := nats.Connect(cfg.URL, nats.Name("edge-api"), nats.ReconnectWait(time.Second))
+	conn, err := nats.Connect(
+		cfg.URL,
+		nats.Name("edge-api"),
+		nats.Timeout(5*time.Second),
+		nats.ReconnectWait(time.Second),
+		nats.DisconnectErrHandler(func(c *nats.Conn, err error) {
+			if logger != nil {
+				logger.Warn("nats disconnected", zap.Error(err))
+			}
+		}),
+		nats.ReconnectHandler(func(c *nats.Conn) {
+			if logger != nil {
+				logger.Info("nats reconnected", zap.String("server", c.ConnectedUrl()))
+			}
+		}),
+		nats.ClosedHandler(func(c *nats.Conn) {
+			if logger != nil {
+				logger.Warn("nats connection closed", zap.Error(c.LastError()))
+			}
+		}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("connect nats: %w", err)
 	}
@@ -66,19 +86,41 @@ func (b *Bridge) Close() {
 }
 
 func (b *Bridge) Ready() bool {
-	return b != nil && b.conn != nil && b.conn.Status() == nats.CONNECTED
+	if b == nil || b.conn == nil || b.conn.Status() != nats.CONNECTED {
+		return false
+	}
+	return b.conn.FlushTimeout(250*time.Millisecond) == nil
 }
 
-func (b *Bridge) Request(ctx context.Context, subject string, payload any, out any) error {
-	data, err := marshalPayload(payload)
+func (b *Bridge) Request(ctx context.Context, subject string, payload []byte) (*nats.Msg, error) {
+	requestCtx, cancel := b.withTimeout(ctx)
+	defer cancel()
+	msg := &nats.Msg{Subject: subject, Data: payload, Header: nats.Header{}}
+	msg.Header.Set("X-Request-ID", RequestIDFromContext(requestCtx))
+	reply, err := b.conn.RequestMsgWithContext(requestCtx, msg)
+	if err != nil {
+		return nil, classify(subject, err)
+	}
+	return reply, nil
+}
+
+func (b *Bridge) Publish(ctx context.Context, subject string, payload []byte) error {
+	msg := &nats.Msg{Subject: subject, Data: payload, Header: nats.Header{}}
+	msg.Header.Set("X-Request-ID", RequestIDFromContext(ctx))
+	if err := b.conn.PublishMsg(msg); err != nil {
+		return classify(subject, err)
+	}
+	return nil
+}
+
+func (b *Bridge) RequestJSON(ctx context.Context, subject string, payload any, out any) error {
+	data, err := marshalJSON(payload)
 	if err != nil {
 		return &BridgeError{Kind: ErrorKindEncode, Subject: subject, Err: err}
 	}
-	msg := &nats.Msg{Subject: subject, Data: data, Header: nats.Header{}}
-	msg.Header.Set("X-Request-ID", RequestIDFromContext(ctx))
-	reply, err := b.conn.RequestMsgWithContext(ctx, msg)
+	reply, err := b.Request(ctx, subject, data)
 	if err != nil {
-		return classify(subject, err)
+		return err
 	}
 	if out == nil || len(reply.Data) == 0 {
 		return nil
@@ -89,17 +131,12 @@ func (b *Bridge) Request(ctx context.Context, subject string, payload any, out a
 	return nil
 }
 
-func (b *Bridge) Publish(ctx context.Context, subject string, payload any) error {
-	data, err := marshalPayload(payload)
+func (b *Bridge) PublishJSON(ctx context.Context, subject string, payload any) error {
+	data, err := marshalJSON(payload)
 	if err != nil {
 		return &BridgeError{Kind: ErrorKindEncode, Subject: subject, Err: err}
 	}
-	msg := &nats.Msg{Subject: subject, Data: data, Header: nats.Header{}}
-	msg.Header.Set("X-Request-ID", RequestIDFromContext(ctx))
-	if err := b.conn.PublishMsg(msg); err != nil {
-		return classify(subject, err)
-	}
-	return nil
+	return b.Publish(ctx, subject, data)
 }
 
 func (b *Bridge) Subscribe(subject string, ch chan *nats.Msg) (*nats.Subscription, error) {
@@ -110,7 +147,14 @@ func (b *Bridge) Subscribe(subject string, ch chan *nats.Msg) (*nats.Subscriptio
 	return sub, nil
 }
 
-func marshalPayload(payload any) ([]byte, error) {
+func (b *Bridge) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok || b.cfg.RequestTimeout <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, b.cfg.RequestTimeout)
+}
+
+func marshalJSON(payload any) ([]byte, error) {
 	if payload == nil {
 		return []byte(`{}`), nil
 	}

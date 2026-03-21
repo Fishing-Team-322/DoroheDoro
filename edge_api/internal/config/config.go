@@ -6,10 +6,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/example/dorohedoro/internal/natsbridge/subjects"
 )
 
 type Config struct {
 	ServiceName string
+	Version     string
 	LogLevel    string
 	HTTP        HTTPConfig
 	GRPC        GRPCConfig
@@ -28,42 +31,21 @@ type HTTPConfig struct {
 }
 
 type GRPCConfig struct {
-	ListenAddr   string
-	TLSCert      string
-	TLSKey       string
-	MTLSEnabled  bool
-	ClientCA     string
-	MaxRecvBytes int
-	MaxSendBytes int
-	Keepalive    time.Duration
+	ListenAddr           string
+	TLSCert              string
+	TLSKey               string
+	ClientCA             string
+	MTLSEnabled          bool
+	AllowInsecureDevMode bool
+	MaxRecvBytes         int
+	MaxSendBytes         int
+	Keepalive            time.Duration
 }
 
 type NATSConfig struct {
 	URL            string
 	RequestTimeout time.Duration
-	Subjects       Subjects
-}
-
-type Subjects struct {
-	AgentsEnrollRequest string
-	AgentsPolicyFetch   string
-	AgentsHeartbeat     string
-	AgentsDiagnostics   string
-	LogsIngestRaw       string
-	DeploymentsCreate   string
-	DeploymentsGet      string
-	DeploymentsList     string
-	LogsSearch          string
-	LogsHistogram       string
-	LogsSeverity        string
-	LogsTopHosts        string
-	LogsTopServices     string
-	AgentsList          string
-	AgentsGet           string
-	AgentDiagnosticsGet string
-	PoliciesList        string
-	PoliciesGet         string
-	UIStreamLogs        string
+	Subjects       subjects.Registry
 }
 
 type TimeoutConfig struct {
@@ -80,7 +62,6 @@ type LimitsConfig struct {
 
 type AuthConfig struct {
 	HTTPStubEnabled   bool
-	MTLSHookEnabled   bool
 	SessionCookieName string
 	CSRFCookieName    string
 	CookieSecure      bool
@@ -103,10 +84,13 @@ type StreamConfig struct {
 }
 
 func Load() (Config, error) {
+	defaultSubjects := subjects.Defaults()
 	devLogin := env("DEV_TEST_LOGIN", "admin")
 	devEmail := env("DEV_TEST_EMAIL", "admin@example.com")
+
 	cfg := Config{
 		ServiceName: env("SERVICE_NAME", "edge-api"),
+		Version:     env("SERVICE_VERSION", "dev"),
 		LogLevel:    env("LOG_LEVEL", "info"),
 		HTTP: HTTPConfig{
 			ListenAddr:         env("HTTP_LISTEN_ADDR", ":8080"),
@@ -115,38 +99,71 @@ func Load() (Config, error) {
 			CORSAllowedOrigins: envCSV("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000"}),
 		},
 		GRPC: GRPCConfig{
-			ListenAddr:   env("GRPC_LISTEN_ADDR", ":9090"),
-			TLSCert:      os.Getenv("GRPC_TLS_CERT_FILE"),
-			TLSKey:       os.Getenv("GRPC_TLS_KEY_FILE"),
-			MTLSEnabled:  envBool("GRPC_MTLS_ENABLED", false),
-			ClientCA:     os.Getenv("GRPC_CLIENT_CA_FILE"),
-			MaxRecvBytes: envInt("GRPC_MAX_RECV_BYTES", 4<<20),
-			MaxSendBytes: envInt("GRPC_MAX_SEND_BYTES", 4<<20),
-			Keepalive:    parseDuration(env("GRPC_KEEPALIVE", "30s"), 30*time.Second),
+			ListenAddr:           envAny([]string{"AGENT_GRPC_LISTEN_ADDR", "GRPC_LISTEN_ADDR"}, ":9090"),
+			TLSCert:              envAny([]string{"AGENT_TLS_CERT_FILE", "GRPC_TLS_CERT_FILE"}, ""),
+			TLSKey:               envAny([]string{"AGENT_TLS_KEY_FILE", "GRPC_TLS_KEY_FILE"}, ""),
+			ClientCA:             envAny([]string{"AGENT_TLS_CLIENT_CA_FILE", "GRPC_CLIENT_CA_FILE"}, ""),
+			MTLSEnabled:          envBoolAny([]string{"AGENT_MTLS_ENABLED", "GRPC_MTLS_ENABLED"}, false),
+			AllowInsecureDevMode: envBool("AGENT_ALLOW_INSECURE_DEV_MODE", false),
+			MaxRecvBytes:         envInt("GRPC_MAX_RECV_BYTES", 4<<20),
+			MaxSendBytes:         envInt("GRPC_MAX_SEND_BYTES", 4<<20),
+			Keepalive:            parseDuration(env("GRPC_KEEPALIVE", "30s"), 30*time.Second),
 		},
 		NATS: NATSConfig{
 			URL:            env("NATS_URL", "nats://localhost:4222"),
 			RequestTimeout: parseDuration(env("NATS_REQUEST_TIMEOUT", "3s"), 3*time.Second),
-			Subjects: Subjects{
-				AgentsEnrollRequest: env("SUBJECT_AGENTS_ENROLL_REQUEST", "agents.enroll.request"),
-				AgentsPolicyFetch:   env("SUBJECT_AGENTS_POLICY_FETCH", "agents.policy.fetch"),
-				AgentsHeartbeat:     env("SUBJECT_AGENTS_HEARTBEAT", "agents.heartbeat"),
-				AgentsDiagnostics:   env("SUBJECT_AGENTS_DIAGNOSTICS", "agents.diagnostics"),
-				LogsIngestRaw:       env("SUBJECT_LOGS_INGEST_RAW", "logs.ingest.raw"),
-				DeploymentsCreate:   env("SUBJECT_DEPLOYMENTS_CREATE", "deployments.jobs.create"),
-				DeploymentsGet:      env("SUBJECT_DEPLOYMENTS_GET", "deployments.jobs.get"),
-				DeploymentsList:     env("SUBJECT_DEPLOYMENTS_LIST", "deployments.jobs.list"),
-				LogsSearch:          env("SUBJECT_QUERY_LOGS_SEARCH", "query.logs.search"),
-				LogsHistogram:       env("SUBJECT_QUERY_LOGS_HISTOGRAM", "query.logs.histogram"),
-				LogsSeverity:        env("SUBJECT_QUERY_LOGS_SEVERITY", "query.logs.severity"),
-				LogsTopHosts:        env("SUBJECT_QUERY_LOGS_TOP_HOSTS", "query.logs.top_hosts"),
-				LogsTopServices:     env("SUBJECT_QUERY_LOGS_TOP_SERVICES", "query.logs.top_services"),
-				AgentsList:          env("SUBJECT_AGENTS_LIST", "agents.list"),
-				AgentsGet:           env("SUBJECT_AGENTS_GET", "agents.get"),
-				AgentDiagnosticsGet: env("SUBJECT_AGENTS_DIAGNOSTICS_GET", "agents.diagnostics.get"),
-				PoliciesList:        env("SUBJECT_POLICIES_LIST", "policies.list"),
-				PoliciesGet:         env("SUBJECT_POLICIES_GET", "policies.get"),
-				UIStreamLogs:        env("SUBJECT_UI_STREAM_LOGS", "ui.stream.logs"),
+			Subjects: subjects.Registry{
+				AgentsEnrollRequest:           env("SUBJECT_AGENTS_ENROLL_REQUEST", defaultSubjects.AgentsEnrollRequest),
+				AgentsPolicyFetch:             env("SUBJECT_AGENTS_POLICY_FETCH", defaultSubjects.AgentsPolicyFetch),
+				AgentsHeartbeat:               env("SUBJECT_AGENTS_HEARTBEAT", defaultSubjects.AgentsHeartbeat),
+				AgentsDiagnostics:             env("SUBJECT_AGENTS_DIAGNOSTICS", defaultSubjects.AgentsDiagnostics),
+				ControlPoliciesList:           env("SUBJECT_CONTROL_POLICIES_LIST", defaultSubjects.ControlPoliciesList),
+				ControlPoliciesGet:            env("SUBJECT_CONTROL_POLICIES_GET", defaultSubjects.ControlPoliciesGet),
+				ControlPoliciesCreate:         env("SUBJECT_CONTROL_POLICIES_CREATE", defaultSubjects.ControlPoliciesCreate),
+				ControlPoliciesUpdate:         env("SUBJECT_CONTROL_POLICIES_UPDATE", defaultSubjects.ControlPoliciesUpdate),
+				ControlPoliciesRevisions:      env("SUBJECT_CONTROL_POLICIES_REVISIONS", defaultSubjects.ControlPoliciesRevisions),
+				ControlHostsList:              env("SUBJECT_CONTROL_HOSTS_LIST", defaultSubjects.ControlHostsList),
+				ControlHostsGet:               env("SUBJECT_CONTROL_HOSTS_GET", defaultSubjects.ControlHostsGet),
+				ControlHostsCreate:            env("SUBJECT_CONTROL_HOSTS_CREATE", defaultSubjects.ControlHostsCreate),
+				ControlHostsUpdate:            env("SUBJECT_CONTROL_HOSTS_UPDATE", defaultSubjects.ControlHostsUpdate),
+				ControlHostGroupsList:         env("SUBJECT_CONTROL_HOST_GROUPS_LIST", defaultSubjects.ControlHostGroupsList),
+				ControlHostGroupsGet:          env("SUBJECT_CONTROL_HOST_GROUPS_GET", defaultSubjects.ControlHostGroupsGet),
+				ControlHostGroupsCreate:       env("SUBJECT_CONTROL_HOST_GROUPS_CREATE", defaultSubjects.ControlHostGroupsCreate),
+				ControlHostGroupsUpdate:       env("SUBJECT_CONTROL_HOST_GROUPS_UPDATE", defaultSubjects.ControlHostGroupsUpdate),
+				ControlHostGroupsAddMember:    env("SUBJECT_CONTROL_HOST_GROUPS_ADD_MEMBER", defaultSubjects.ControlHostGroupsAddMember),
+				ControlHostGroupsRemoveMember: env("SUBJECT_CONTROL_HOST_GROUPS_REMOVE_MEMBER", defaultSubjects.ControlHostGroupsRemoveMember),
+				ControlCredentialsList:        env("SUBJECT_CONTROL_CREDENTIALS_LIST", defaultSubjects.ControlCredentialsList),
+				ControlCredentialsGet:         env("SUBJECT_CONTROL_CREDENTIALS_GET", defaultSubjects.ControlCredentialsGet),
+				ControlCredentialsCreate:      env("SUBJECT_CONTROL_CREDENTIALS_CREATE", defaultSubjects.ControlCredentialsCreate),
+				DeploymentsJobsCreate:         env("SUBJECT_DEPLOYMENTS_JOBS_CREATE", defaultSubjects.DeploymentsJobsCreate),
+				DeploymentsJobsGet:            env("SUBJECT_DEPLOYMENTS_JOBS_GET", defaultSubjects.DeploymentsJobsGet),
+				DeploymentsJobsList:           env("SUBJECT_DEPLOYMENTS_JOBS_LIST", defaultSubjects.DeploymentsJobsList),
+				DeploymentsJobsRetry:          env("SUBJECT_DEPLOYMENTS_JOBS_RETRY", defaultSubjects.DeploymentsJobsRetry),
+				DeploymentsJobsCancel:         env("SUBJECT_DEPLOYMENTS_JOBS_CANCEL", defaultSubjects.DeploymentsJobsCancel),
+				DeploymentsJobsStatus:         env("SUBJECT_DEPLOYMENTS_JOBS_STATUS", defaultSubjects.DeploymentsJobsStatus),
+				DeploymentsJobsStep:           env("SUBJECT_DEPLOYMENTS_JOBS_STEP", defaultSubjects.DeploymentsJobsStep),
+				DeploymentsPlanCreate:         env("SUBJECT_DEPLOYMENTS_PLAN_CREATE", defaultSubjects.DeploymentsPlanCreate),
+				QueryLogsSearch:               env("SUBJECT_QUERY_LOGS_SEARCH", defaultSubjects.QueryLogsSearch),
+				QueryLogsGet:                  env("SUBJECT_QUERY_LOGS_GET", defaultSubjects.QueryLogsGet),
+				QueryLogsContext:              env("SUBJECT_QUERY_LOGS_CONTEXT", defaultSubjects.QueryLogsContext),
+				QueryLogsHistogram:            env("SUBJECT_QUERY_LOGS_HISTOGRAM", defaultSubjects.QueryLogsHistogram),
+				QueryLogsSeverity:             env("SUBJECT_QUERY_LOGS_SEVERITY", defaultSubjects.QueryLogsSeverity),
+				QueryLogsTopHosts:             env("SUBJECT_QUERY_LOGS_TOP_HOSTS", defaultSubjects.QueryLogsTopHosts),
+				QueryLogsTopServices:          env("SUBJECT_QUERY_LOGS_TOP_SERVICES", defaultSubjects.QueryLogsTopServices),
+				QueryLogsHeatmap:              env("SUBJECT_QUERY_LOGS_HEATMAP", defaultSubjects.QueryLogsHeatmap),
+				QueryLogsTopPatterns:          env("SUBJECT_QUERY_LOGS_TOP_PATTERNS", defaultSubjects.QueryLogsTopPatterns),
+				QueryLogsAnomalies:            env("SUBJECT_QUERY_LOGS_ANOMALIES", defaultSubjects.QueryLogsAnomalies),
+				QueryDashboardsOverview:       env("SUBJECT_QUERY_DASHBOARDS_OVERVIEW", defaultSubjects.QueryDashboardsOverview),
+				AlertsList:                    env("SUBJECT_ALERTS_LIST", defaultSubjects.AlertsList),
+				AlertsGet:                     env("SUBJECT_ALERTS_GET", defaultSubjects.AlertsGet),
+				AlertsRulesCreate:             env("SUBJECT_ALERTS_RULES_CREATE", defaultSubjects.AlertsRulesCreate),
+				AlertsRulesUpdate:             env("SUBJECT_ALERTS_RULES_UPDATE", defaultSubjects.AlertsRulesUpdate),
+				AuditList:                     env("SUBJECT_AUDIT_LIST", defaultSubjects.AuditList),
+				LogsIngestRaw:                 env("SUBJECT_LOGS_INGEST_RAW", defaultSubjects.LogsIngestRaw),
+				StreamLogs:                    env("SUBJECT_UI_STREAM_LOGS", defaultSubjects.StreamLogs),
+				StreamDeployments:             env("SUBJECT_UI_STREAM_DEPLOYMENTS", defaultSubjects.StreamDeployments),
+				StreamAlerts:                  env("SUBJECT_UI_STREAM_ALERTS", defaultSubjects.StreamAlerts),
+				StreamAgents:                  env("SUBJECT_UI_STREAM_AGENTS", defaultSubjects.StreamAgents),
 			},
 		},
 		Timeouts: TimeoutConfig{
@@ -161,7 +178,6 @@ func Load() (Config, error) {
 		},
 		Auth: AuthConfig{
 			HTTPStubEnabled:   envBool("HTTP_AUTH_STUB_ENABLED", true),
-			MTLSHookEnabled:   envBool("GRPC_MTLS_HOOK_ENABLED", false),
 			SessionCookieName: env("SESSION_COOKIE_NAME", "session_token"),
 			CSRFCookieName:    env("CSRF_COOKIE_NAME", "csrf_token"),
 			CookieSecure:      envBoolWithFallback(false, "COOKIE_SECURE", "SESSION_COOKIE_SECURE"),
@@ -180,8 +196,9 @@ func Load() (Config, error) {
 			RetryInterval:     parseDuration(env("STREAM_RETRY_INTERVAL", "5s"), 5*time.Second),
 		},
 	}
+
 	if cfg.HTTP.ListenAddr == "" || cfg.GRPC.ListenAddr == "" || cfg.NATS.URL == "" {
-		return Config{}, fmt.Errorf("HTTP_LISTEN_ADDR, GRPC_LISTEN_ADDR and NATS_URL are required")
+		return Config{}, fmt.Errorf("HTTP_LISTEN_ADDR, AGENT_GRPC_LISTEN_ADDR and NATS_URL are required")
 	}
 	if cfg.Limits.HTTPBodyBytes <= 0 {
 		cfg.Limits.HTTPBodyBytes = 1 << 20
@@ -201,12 +218,29 @@ func Load() (Config, error) {
 	if strings.TrimSpace(cfg.Auth.DevUser.DisplayName) == "" {
 		cfg.Auth.DevUser.DisplayName = humanizeIdentifier(cfg.Auth.DevUser.Login)
 	}
+	if cfg.GRPC.MTLSEnabled {
+		if cfg.GRPC.TLSCert == "" || cfg.GRPC.TLSKey == "" || cfg.GRPC.ClientCA == "" {
+			return Config{}, fmt.Errorf("AGENT_MTLS_ENABLED requires AGENT_TLS_CERT_FILE, AGENT_TLS_KEY_FILE and AGENT_TLS_CLIENT_CA_FILE")
+		}
+	}
+	if !cfg.GRPC.MTLSEnabled && !cfg.GRPC.AllowInsecureDevMode && (cfg.GRPC.TLSCert == "" || cfg.GRPC.TLSKey == "") {
+		return Config{}, fmt.Errorf("agent gRPC transport requires TLS cert/key unless AGENT_ALLOW_INSECURE_DEV_MODE=true is set explicitly")
+	}
 	return cfg, nil
 }
 
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envAny(keys []string, fallback string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
 	}
 	return fallback
 }
@@ -221,6 +255,20 @@ func envBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
+}
+
+func envBoolAny(keys []string, fallback bool) bool {
+	for _, key := range keys {
+		v := os.Getenv(key)
+		if v == "" {
+			continue
+		}
+		parsed, err := strconv.ParseBool(v)
+		if err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func envBoolWithFallback(fallback bool, keys ...string) bool {

@@ -19,7 +19,12 @@ type Gateway struct {
 	cfg    config.StreamConfig
 }
 
-type logFilter struct {
+type StreamRequest struct {
+	Subject string
+	Event   string
+}
+
+type streamFilter struct {
 	Host     string
 	Service  string
 	Severity string
@@ -29,13 +34,13 @@ func NewGateway(bridge *natsbridge.Bridge, cfg config.StreamConfig) *Gateway {
 	return &Gateway{bridge: bridge, cfg: cfg}
 }
 
-func (g *Gateway) ServeLogs(w http.ResponseWriter, r *http.Request, subject string) {
+func (g *Gateway) Serve(w http.ResponseWriter, r *http.Request, req StreamRequest) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		middleware.WriteError(w, r, http.StatusInternalServerError, "internal", "streaming is not supported")
 		return
 	}
-	filters := logFilter{
+	filters := streamFilter{
 		Host:     strings.TrimSpace(r.URL.Query().Get("host")),
 		Service:  strings.TrimSpace(r.URL.Query().Get("service")),
 		Severity: strings.TrimSpace(r.URL.Query().Get("severity")),
@@ -44,19 +49,23 @@ func (g *Gateway) ServeLogs(w http.ResponseWriter, r *http.Request, subject stri
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
+
 	ch := make(chan *nats.Msg, 64)
-	sub, err := g.bridge.Subscribe(subject, ch)
+	sub, err := g.bridge.Subscribe(req.Subject, ch)
 	if err != nil {
 		middleware.WriteTransportError(w, r, err)
 		return
 	}
 	defer sub.Unsubscribe()
+
 	eventID := 0
 	fmt.Fprintf(w, "retry: %d\n", g.cfg.RetryInterval.Milliseconds())
-	fmt.Fprintf(w, "event: ready\nid: %d\ndata: {\"request_id\":%q,\"subject\":%q}\n\n", eventID, middleware.GetRequestID(r.Context()), subject)
+	fmt.Fprintf(w, "event: ready\nid: %d\ndata: {\"request_id\":%q,\"subject\":%q,\"event\":%q}\n\n", eventID, middleware.GetRequestID(r.Context()), req.Subject, req.Event)
 	flusher.Flush()
+
 	heartbeat := time.NewTicker(g.cfg.HeartbeatInterval)
 	defer heartbeat.Stop()
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -72,13 +81,13 @@ func (g *Gateway) ServeLogs(w http.ResponseWriter, r *http.Request, subject stri
 				continue
 			}
 			eventID++
-			fmt.Fprintf(w, "event: log\nid: %d\ndata: %s\n\n", eventID, msg.Data)
+			fmt.Fprintf(w, "event: %s\nid: %d\ndata: %s\n\n", req.Event, eventID, msg.Data)
 			flusher.Flush()
 		}
 	}
 }
 
-func matchesFilter(data []byte, filter logFilter) bool {
+func matchesFilter(data []byte, filter streamFilter) bool {
 	if filter.Host == "" && filter.Service == "" && filter.Severity == "" {
 		return true
 	}

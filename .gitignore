@@ -5,6 +5,7 @@
 *.log
 /.tmp/
 /cookies.txt
+/edge_api/*.exe
 */target
 /server-rs/.env
 */.env/

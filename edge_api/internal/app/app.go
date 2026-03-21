@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -36,6 +37,7 @@ type App struct {
 }
 
 func New(ctx context.Context) (*App, error) {
+	_ = ctx
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -48,10 +50,23 @@ func New(ctx context.Context) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	authHooks := auth.Hooks{}
 	streamGateway := stream.NewGateway(bridge, cfg.Stream)
-	httpHandler := httpapi.NewRouter(httpapi.RouterDeps{Config: cfg, Bridge: bridge, Stream: streamGateway, Logger: logger, Auth: authHooks, ReadyFn: bridge.Ready})
-	httpServer := &http.Server{Addr: cfg.HTTP.ListenAddr, Handler: httpHandler, ReadHeaderTimeout: 5 * time.Second}
+	httpHandler := httpapi.NewRouter(httpapi.RouterDeps{
+		Config:  cfg,
+		Bridge:  bridge,
+		Stream:  streamGateway,
+		Logger:  logger,
+		Auth:    authHooks,
+		ReadyFn: bridge.Ready,
+	})
+	httpServer := &http.Server{
+		Addr:              cfg.HTTP.ListenAddr,
+		Handler:           httpHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
 	grpcOptions := []grpc.ServerOption{
 		grpc.ForceServerCodec(edgev1.JSONCodec{}),
 		grpc.MaxRecvMsgSize(cfg.GRPC.MaxRecvBytes),
@@ -59,14 +74,21 @@ func New(ctx context.Context) (*App, error) {
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: cfg.GRPC.Keepalive}),
 		middleware.UnaryServerInterceptors(logger, cfg.Timeouts.GRPC, authHooks.GRPCUnaryInterceptor),
 	}
-	if creds, err := maybeTransportCredentials(cfg); err != nil {
+
+	transportCreds, err := grpcTransportCredentials(cfg)
+	if err != nil {
 		bridge.Close()
 		return nil, err
-	} else if creds != nil {
-		grpcOptions = append(grpcOptions, grpc.Creds(creds))
 	}
+	if transportCreds != nil {
+		grpcOptions = append(grpcOptions, grpc.Creds(transportCreds))
+	} else if cfg.GRPC.AllowInsecureDevMode {
+		logger.Warn("starting agent gRPC ingress without TLS because AGENT_ALLOW_INSECURE_DEV_MODE=true")
+	}
+
 	grpcServer := grpc.NewServer(grpcOptions...)
 	edgev1.RegisterAgentIngressServiceServer(grpcServer, grpcapi.New(cfg, bridge, logger))
+
 	return &App{cfg: cfg, logger: logger, bridge: bridge, httpServer: httpServer, grpcServer: grpcServer}, nil
 }
 
@@ -80,9 +102,10 @@ func (a *App) Run(ctx context.Context) error {
 		_ = grpcLn.Close()
 		return fmt.Errorf("listen http: %w", err)
 	}
+
 	errCh := make(chan error, 2)
 	go func() {
-		a.logger.Info("starting grpc server", zap.String("addr", a.cfg.GRPC.ListenAddr))
+		a.logger.Info("starting grpc server", zap.String("addr", a.cfg.GRPC.ListenAddr), zap.Bool("mtls_enabled", a.cfg.GRPC.MTLSEnabled))
 		if err := a.grpcServer.Serve(grpcLn); err != nil {
 			errCh <- err
 		}
@@ -93,6 +116,7 @@ func (a *App) Run(ctx context.Context) error {
 			errCh <- err
 		}
 	}()
+
 	select {
 	case <-ctx.Done():
 		return a.Shutdown(context.Background())
@@ -124,15 +148,35 @@ func Main() error {
 	return app.Run(ctx)
 }
 
-func maybeTransportCredentials(cfg config.Config) (credentials.TransportCredentials, error) {
+func grpcTransportCredentials(cfg config.Config) (credentials.TransportCredentials, error) {
 	if cfg.GRPC.TLSCert == "" || cfg.GRPC.TLSKey == "" {
 		return nil, nil
 	}
+
 	certificate, err := tls.LoadX509KeyPair(cfg.GRPC.TLSCert, cfg.GRPC.TLSKey)
 	if err != nil {
 		return nil, fmt.Errorf("load grpc tls cert: %w", err)
 	}
-	return credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}), nil
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	if cfg.GRPC.MTLSEnabled {
+		caPEM, err := os.ReadFile(cfg.GRPC.ClientCA)
+		if err != nil {
+			return nil, fmt.Errorf("read grpc client ca: %w", err)
+		}
+		clientCAs := x509.NewCertPool()
+		if ok := clientCAs.AppendCertsFromPEM(caPEM); !ok {
+			return nil, fmt.Errorf("parse grpc client ca bundle")
+		}
+		tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsConfig.ClientCAs = clientCAs
+	}
+
+	return credentials.NewTLS(tlsConfig), nil
 }
 
 func serveHTTP(server *http.Server, ln net.Listener, cfg config.Config) error {

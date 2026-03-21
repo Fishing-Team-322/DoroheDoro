@@ -1,32 +1,81 @@
 # edge-api
 
-Go Edge API lives in `edge_api/` and stays a thin ingress / gateway / bridge layer for the 3-service platform:
+`edge_api/` is the public boundary service for the platform:
 
-- WEB -> HTTP ingress -> NATS -> internal SERVER responders
-- AGENT -> gRPC ingress -> NATS -> internal SERVER responders
-- UI live logs -> SSE gateway <- NATS
+- `WEB -> edge-api -> NATS -> server-rs`
+- `AGENT -> edge-api gRPC -> NATS -> server-rs`
+- `WEB streams <- edge-api SSE <- NATS`
 
-The current implementation keeps Go focused on transport concerns and MVP bridge behavior. The frontend auth routes described below are a **DEV/STUB compatibility layer** for local frontend work, not a production auth backend.
+The Go service now stays on transport/security/bridge duties. Legacy PoC packages for enrollment, policy, diagnostics, query, ingest, indexers and telemetry are excluded from the default build with `legacy` build tags and are no longer part of the active runtime path.
 
-## What works
+## Active responsibilities
 
-### HTTP routes
+- HTTP ingress for `WEB`
+- SSE gateway for UI streams
+- gRPC ingress for `AGENT`
+- TLS/mTLS termination for agent gRPC
+- request validation
+- request ID propagation
+- NATS request/reply and publish bridge
+- transport error mapping
+- health/readiness/version endpoints
+- local DEV auth compatibility endpoints for the frontend only
 
-- `GET /`
+## Not owned here
+
+`edge_api` is not the source of truth for:
+
+- enrollment state
+- policy state
+- diagnostics state
+- query logic
+- deployment logic
+- indexing pipelines
+
+Those belong in `server-rs`.
+
+## Current NATS alignment
+
+The active live bridge is aligned with `server-rs` enrollment-plane on:
+
+- `agents.enroll.request`
+- `agents.policy.fetch`
+- `agents.heartbeat`
+- `agents.diagnostics`
+
+The wider control/deployment/query/alert subject registry is already centralized in [`internal/natsbridge/subjects`](C:/C++WWW/DoroheDoro/edge_api/internal/natsbridge/subjects/subjects.go), but routes without a live `server-rs` implementation return a deliberate `501 not_implemented` instead of fake business logic in Go.
+
+## HTTP surface
+
+Always available:
+
 - `GET /healthz`
 - `GET /readyz`
+- `GET /version`
 - `GET /docs`
-- `GET /docs/index.html`
 - `GET /openapi.json`
-- `GET /openapi.yaml`
+
+WEB boundary routes:
+
+- `GET /api/v1/me`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/agents/{id}/policy`
+- `GET /api/v1/stream/logs`
+- `GET /api/v1/stream/deployments`
+- `GET /api/v1/stream/alerts`
+- `GET /api/v1/stream/agents`
+
+Compatibility routes kept for the current frontend:
+
 - `GET /auth/csrf`
 - `POST /auth/login`
 - `POST /auth/logout`
 - `GET /auth/me`
 - `PATCH /profile`
-- current `GET/POST /api/v1/*` MVP routes
 
-### gRPC
+## gRPC surface
 
 Service: `dorohedoro.edge.v1.AgentIngressService`
 
@@ -36,59 +85,40 @@ Service: `dorohedoro.edge.v1.AgentIngressService`
 - `SendDiagnostics`
 - `IngestLogs`
 
-### Infra paths kept intact
+The external gRPC contract stays compatible with the current agent-side transport, while the internal NATS bridge now maps those calls onto the shared protobuf contract used by `server-rs`.
 
-- NATS bridge
-- SSE log stream via `/api/v1/stream/logs`
-- fake-agent smoke path via `cmd/fake-agent`
+## Agent TLS / mTLS
 
-## DEV auth stub env
+Agent gRPC config:
 
-The local frontend compatibility flow is controlled by env:
+- `AGENT_GRPC_LISTEN_ADDR`
+- `AGENT_TLS_CERT_FILE`
+- `AGENT_TLS_KEY_FILE`
+- `AGENT_TLS_CLIENT_CA_FILE`
+- `AGENT_MTLS_ENABLED`
+- `AGENT_ALLOW_INSECURE_DEV_MODE`
 
-- `HTTP_AUTH_STUB_ENABLED=true`
-- `DEV_TEST_LOGIN=admin`
-- `DEV_TEST_EMAIL=admin@example.com`
-- `DEV_TEST_PASSWORD=admin123`
-- `DEV_TEST_USER_ID=dev-user-1`
-- `DEV_TEST_ROLE=admin`
-- `COOKIE_SECURE=false`
-- `SESSION_TTL=24h`
+Rules:
 
-Behavior:
+- if `AGENT_MTLS_ENABLED=true`, server cert/key and client CA are required
+- if mTLS is disabled, missing TLS cert/key is rejected unless `AGENT_ALLOW_INSECURE_DEV_MODE=true`
+- insecure dev mode is explicit and logged on startup
 
-- when `HTTP_AUTH_STUB_ENABLED=true`, Edge API uses an in-memory session/auth stub
-- when `HTTP_AUTH_STUB_ENABLED=false`, the dev auth endpoints return `501 not_implemented`
-- login accepts either `DEV_TEST_LOGIN` or `DEV_TEST_EMAIL` as the identifier
-- returned session payload remains frontend-compatible while `/api/v1/me` continues to exist unchanged
+gRPC access logs now include:
 
-## OpenAPI docs
+- `request_id`
+- `rpc_method`
+- `peer_addr`
+- `tls_subject`
+- `tls_san`
+- `tls_fingerprint`
+- `agent_id`
+- `duration`
+- `result`
 
-The static docs are embedded into the binary and served directly by edge-api:
+## Local run
 
-- `GET /docs`
-- `GET /docs/index.html`
-- `GET /openapi.json`
-- `GET /openapi.yaml`
-
-Local URLs:
-
-- http://localhost:8080/docs
-- http://localhost:8080/docs/index.html
-- http://localhost:8080/openapi.json
-- http://localhost:8080/openapi.yaml
-
-## Run locally
-
-### Edge API only
-
-```bash
-cd edge_api
-go build ./...
-docker compose up --build nats edge-api
-```
-
-### Full local stack
+Full local stack:
 
 ```bash
 docker compose up --build
@@ -96,37 +126,48 @@ docker compose up --build
 
 This starts:
 
-- frontend on `http://localhost:3000`
-- edge-api on `http://localhost:8080`
-- nats on `nats://localhost:4222`
+- `frontend`
+- `edge-api`
+- `nats`
+- `postgres`
+- `enrollment-plane`
 
-## Smoke test
+`docker compose` now generates short-lived dev certificates automatically and starts `edge-api` with agent mTLS enabled by default.
 
-1. Start the full stack:
+Explicit insecure mode still exists through `AGENT_ALLOW_INSECURE_DEV_MODE=true`, but it is now opt-in and intended only for isolated transport debugging.
 
-```bash
-docker compose up --build
-```
+## Agent mTLS smoke path
 
-2. Open `http://localhost:3000`.
-3. Login with:
-   - login: `admin`
-   - password: `admin123`
-4. Confirm the frontend gets a session and can load authenticated pages.
-5. Confirm the frontend can call:
-   - `GET /auth/me`
-   - `PATCH /profile`
-6. Confirm Edge API liveness endpoints still work:
+The compose stack already generates a dev CA, server certificate and client certificate in the shared `edge-api-certs` volume.
+
+To exercise the live gRPC ingress against the running compose stack, execute the smoke client inside the `edge-api` container so it uses the generated client certificate set:
 
 ```bash
-curl http://localhost:8080/healthz
-curl http://localhost:8080/readyz
-curl http://localhost:8080/api/v1/me
-curl -N 'http://localhost:8080/api/v1/stream/logs?severity=error'
+docker exec dorohedoro-edge-api-1 /bin/sh -lc \
+  "FAKE_AGENT_TLS_CA_FILE=/certs/ca.crt \
+   FAKE_AGENT_TLS_CERT_FILE=/certs/agent.crt \
+   FAKE_AGENT_TLS_KEY_FILE=/certs/agent.key \
+   FAKE_AGENT_TLS_SERVER_NAME=edge-api \
+   EDGE_API_GRPC_ADDR=127.0.0.1:9090 \
+   /usr/local/bin/fake-agent"
 ```
 
-## Notes
+If you need a separate host-side cert set for manual experiments, generate one explicitly with `go run ./cmd/dev-certs` and point a standalone `edge-api` run at that directory.
 
-- `/readyz` returns success only when the NATS bridge is ready.
-- Docs are served from embedded static assets; no swagger/godoc runtime generation is required.
-- The auth compatibility layer is intentionally local-dev only and stores session state in memory.
+## Tests
+
+Useful checks:
+
+```bash
+cd edge_api
+go test ./...
+go build ./cmd/edge-api
+go build ./cmd/fake-agent
+```
+
+The default test set now covers:
+
+- config validation for agent TLS/insecure mode
+- centralized subject mapping
+- protobuf NATS envelope encoding/decoding
+- frontend auth compatibility flow

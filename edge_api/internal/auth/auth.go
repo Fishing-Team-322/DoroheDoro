@@ -16,6 +16,14 @@ import (
 type contextKey string
 
 const authContextKey contextKey = "auth-context"
+const tlsIdentityContextKey contextKey = "agent-tls-identity"
+
+type AgentTLSIdentity struct {
+	Subject     string
+	CommonName  string
+	SANs        []string
+	Fingerprint string
+}
 
 type Hooks struct{}
 
@@ -64,14 +72,22 @@ func FromHTTP(r *http.Request) model.AuthContext {
 
 func FromGRPC(ctx context.Context) (model.AuthContext, error) {
 	md, _ := metadata.FromIncomingContext(ctx)
+	tlsIdentity, _ := TLSIdentity(ctx)
 	subject := first(md.Get("x-subject"))
+	if subject == "" {
+		subject = strings.TrimSpace(tlsIdentity.Subject)
+	}
 	if subject == "" {
 		subject = "agent"
 	}
+	agentID := first(md.Get("x-agent-id"))
+	if agentID == "" {
+		agentID = tlsIdentity.AgentID()
+	}
 	return model.AuthContext{
 		Subject: subject,
-		Role:    valueOr(first(md.Get("x-role")), "stub"),
-		AgentID: first(md.Get("x-agent-id")),
+		Role:    valueOr(first(md.Get("x-role")), "agent"),
+		AgentID: agentID,
 	}, nil
 }
 
@@ -94,4 +110,23 @@ func valueOr(value, fallback string) string {
 		return fallback
 	}
 	return strings.TrimSpace(value)
+}
+
+func WithTLSIdentity(ctx context.Context, identity AgentTLSIdentity) context.Context {
+	return context.WithValue(ctx, tlsIdentityContextKey, identity)
+}
+
+func TLSIdentity(ctx context.Context) (AgentTLSIdentity, bool) {
+	identity, ok := ctx.Value(tlsIdentityContextKey).(AgentTLSIdentity)
+	return identity, ok
+}
+
+func (i AgentTLSIdentity) AgentID() string {
+	if strings.TrimSpace(i.CommonName) != "" {
+		return strings.TrimSpace(i.CommonName)
+	}
+	if len(i.SANs) > 0 {
+		return strings.TrimSpace(i.SANs[0])
+	}
+	return ""
 }

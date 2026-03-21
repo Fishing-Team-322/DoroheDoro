@@ -29,14 +29,20 @@ services:
       start_period: 10s
 
   edge-api:
+    image: dorohedoro-edge-api-dev
     build:
       context: ./edge_api
       dockerfile: Dockerfile
     environment:
       SERVICE_NAME: edge-api
+      SERVICE_VERSION: dev
       LOG_LEVEL: debug
       HTTP_LISTEN_ADDR: :8080
-      GRPC_LISTEN_ADDR: :9090
+      AGENT_GRPC_LISTEN_ADDR: :9090
+      AGENT_MTLS_ENABLED: "true"
+      AGENT_TLS_CERT_FILE: /certs/server.crt
+      AGENT_TLS_KEY_FILE: /certs/server.key
+      AGENT_TLS_CLIENT_CA_FILE: /certs/ca.crt
       NATS_URL: nats://nats:4222
       NATS_REQUEST_TIMEOUT: 3s
       HTTP_REQUEST_TIMEOUT: 15s
@@ -53,13 +59,19 @@ services:
       DEV_TEST_ROLE: admin
       COOKIE_SECURE: "false"
       SESSION_TTL: 24h
-      GRPC_MTLS_HOOK_ENABLED: "false"
       CORS_ALLOWED_ORIGINS: http://localhost:3000
     depends_on:
-      - nats
+      nats:
+        condition: service_started
+      enrollment-plane:
+        condition: service_healthy
+      edge-api-certs:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
       - "9090:9090"
+    volumes:
+      - edge-api-certs:/certs:ro
     healthcheck:
       test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8080/readyz"]
       interval: 30s
@@ -67,9 +79,62 @@ services:
       retries: 10
       start_period: 5s
 
+  edge-api-certs:
+    image: dorohedoro-edge-api-dev
+    build:
+      context: ./edge_api
+      dockerfile: Dockerfile
+    entrypoint: ["/usr/local/bin/dev-certs"]
+    environment:
+      DEV_CERTS_OUT_DIR: /certs
+    volumes:
+      - edge-api-certs:/certs
+
   nats:
     image: nats:2.11-alpine
     command: ["-m", "8222"]
     ports:
       - "4222:4222"
       - "8222:8222"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: doro
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d doro"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  enrollment-plane:
+    build:
+      context: .
+      dockerfile: ./server-rs/Dockerfile
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/doro
+      NATS_URL: nats://nats:4222
+      ENROLLMENT_HTTP_ADDR: 0.0.0.0:8081
+      ENROLLMENT_DEV_BOOTSTRAP_TOKEN: dev-bootstrap-token
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8081/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  edge-api-certs:
