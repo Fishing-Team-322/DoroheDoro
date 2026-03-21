@@ -1,6 +1,7 @@
 "use client";
 
 import { ButtonHTMLAttributes } from "react";
+import { useOptionalI18n } from "@/src/shared/lib/i18n";
 import { cn } from "@/src/shared/lib/cn";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -37,12 +38,14 @@ export function Button({
   children,
   ...props
 }: ButtonProps) {
+  const i18n = useOptionalI18n();
   const isDisabled = disabled || loading;
+  const loadingLabel = i18n?.dictionary.common.loadingButton ?? "Loading...";
 
   return (
     <button
       className={cn(
-        "inline-flex select-none items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)] disabled:cursor-not-allowed disabled:select-none disabled:opacity-50",
+        "inline-flex cursor-pointer select-none items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)] disabled:cursor-not-allowed disabled:select-none disabled:opacity-50",
         variantClasses[variant],
         sizeClasses[size],
         className
@@ -51,7 +54,7 @@ export function Button({
       aria-disabled={isDisabled}
       {...props}
     >
-      {loading ? "Loading..." : children}
+      {loading ? loadingLabel : children}
     </button>
   );
 }

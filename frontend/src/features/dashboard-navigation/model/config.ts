@@ -1,28 +1,17 @@
+export type DashboardNavItemKey =
+  | "overview"
+  | "inventory"
+  | "policies"
+  | "profile";
+
 export type DashboardNavItem = {
-  label: string;
+  key: DashboardNavItemKey;
   href: string;
-  description: string;
 };
 
 export const dashboardNavigation: DashboardNavItem[] = [
-  {
-    label: "Overview",
-    href: "/overview",
-    description: "High-level system summary",
-  },
-  {
-    label: "Inventory",
-    href: "/inventory",
-    description: "Hosts and infrastructure resources",
-  },
-  {
-    label: "Policies",
-    href: "/policies",
-    description: "Rules, controls, and policy checks",
-  },
-  {
-    label: "Profile",
-    href: "/profile",
-    description: "Current account and session settings",
-  },
+  { key: "overview", href: "/overview" },
+  { key: "inventory", href: "/inventory" },
+  { key: "policies", href: "/policies" },
+  { key: "profile", href: "/profile" },
 ] as const;

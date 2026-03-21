@@ -15,9 +15,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/src/shared/ui";
-import { environmentOptions } from "@/src/shared/constants/dashboard";
-import { formatPercent, formatRelativeLabel } from "@/src/shared/lib/dashboard";
+import { environmentValues } from "@/src/shared/constants/dashboard";
 import { cn } from "@/src/shared/lib/cn";
+import { formatPercent, formatRelativeLabel } from "@/src/shared/lib/dashboard";
+import { useI18n } from "@/src/shared/lib/i18n";
 import type { Host, HostStatus } from "@/src/shared/types/dashboard";
 
 type HostsTableProps = {
@@ -29,23 +30,37 @@ type HostsTableProps = {
 
 const CONTENT_INSET = "px-4 md:px-6";
 
-const statusOptions: Array<{ label: string; value: HostStatus | "all" }> = [
-  { label: "Все статусы", value: "all" },
-  { label: "В сети", value: "online" },
-  { label: "Недоступен", value: "offline" },
-  { label: "Снижен", value: "degraded" },
-  { label: "Подключается", value: "enrolling" },
-];
-
 export function HostsTable({
   hosts,
   loading = false,
   selectedHostId,
   onSelectHost,
 }: HostsTableProps) {
+  const { dictionary, locale } = useI18n();
+  const copy = dictionary.inventory.table;
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<HostStatus | "all">("all");
   const [environment, setEnvironment] = useState<string>("all");
+
+  const statusOptions = useMemo<Array<{ label: string; value: HostStatus | "all" }>>(
+    () => [
+      { label: copy.statusOptions.all, value: "all" },
+      { label: copy.statusOptions.online, value: "online" },
+      { label: copy.statusOptions.offline, value: "offline" },
+      { label: copy.statusOptions.degraded, value: "degraded" },
+      { label: copy.statusOptions.enrolling, value: "enrolling" },
+    ],
+    [copy.statusOptions]
+  );
+
+  const environmentOptions = useMemo(
+    () =>
+      environmentValues.map((value) => ({
+        value,
+        label: dictionary.filters.environment[value],
+      })),
+    [dictionary.filters.environment]
+  );
 
   const filteredHosts = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -72,16 +87,16 @@ export function HostsTable({
           <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0 space-y-1">
               <h3 className="text-base font-semibold text-[color:var(--foreground)]">
-                Инвентарь хостов
+                {copy.title}
               </h3>
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                Фильтруйте парк по статусу, окружению или идентификатору хоста.
+                {copy.description}
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Button type="button" variant="outline">
-                Экспорт
+                {copy.export}
               </Button>
             </div>
           </div>
@@ -90,20 +105,20 @@ export function HostsTable({
             <SearchInput
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Поиск по хосту, региону, кластеру или IP"
+              placeholder={copy.searchPlaceholder}
             />
             <Select
               value={status}
               onChange={(event) => setStatus(event.target.value as HostStatus | "all")}
               options={statusOptions}
-              placeholder="Выберите статус"
+              placeholder={copy.statusPlaceholder}
               selectSize="md"
             />
             <Select
               value={environment}
               onChange={(event) => setEnvironment(event.target.value)}
               options={environmentOptions}
-              placeholder="Выберите окружение"
+              placeholder={copy.environmentPlaceholder}
               selectSize="md"
             />
           </div>
@@ -114,14 +129,18 @@ export function HostsTable({
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="px-4 py-4 md:px-6">Хост</TableHead>
-              <TableHead className="px-4 py-4 md:px-6">Статус</TableHead>
-              <TableHead className="px-4 py-4 md:px-6">Состояние</TableHead>
-              <TableHead className="px-4 py-4 md:px-6">Окружение</TableHead>
-              <TableHead className="px-4 py-4 md:px-6">Кластер</TableHead>
-              <TableHead className="px-4 py-4 md:px-6">Нагрузка</TableHead>
-              <TableHead className="px-4 py-4 md:px-6">Последний сигнал</TableHead>
-              <TableHead className="px-4 py-4 text-right md:px-6">Действие</TableHead>
+              <TableHead className="px-4 py-4 md:px-6">{copy.headers.host}</TableHead>
+              <TableHead className="px-4 py-4 md:px-6">{copy.headers.status}</TableHead>
+              <TableHead className="px-4 py-4 md:px-6">{copy.headers.health}</TableHead>
+              <TableHead className="px-4 py-4 md:px-6">
+                {copy.headers.environment}
+              </TableHead>
+              <TableHead className="px-4 py-4 md:px-6">{copy.headers.cluster}</TableHead>
+              <TableHead className="px-4 py-4 md:px-6">{copy.headers.load}</TableHead>
+              <TableHead className="px-4 py-4 md:px-6">{copy.headers.lastSeen}</TableHead>
+              <TableHead className="px-4 py-4 text-right md:px-6">
+                {copy.headers.action}
+              </TableHead>
             </TableRow>
           </TableHeader>
 
@@ -132,7 +151,7 @@ export function HostsTable({
                   colSpan={8}
                   className="px-4 py-10 text-center text-[color:var(--muted-foreground)] md:px-6"
                 >
-                  Загрузка хостов...
+                  {copy.loading}
                 </TableCell>
               </TableRow>
             ) : filteredHosts.length === 0 ? (
@@ -140,8 +159,8 @@ export function HostsTable({
                 <TableCell colSpan={8} className="p-0">
                   <EmptyState
                     variant="flush"
-                    title="Нет хостов по выбранным фильтрам"
-                    description="Измените поисковый запрос или расширьте фильтр по статусу."
+                    title={copy.emptyTitle}
+                    description={copy.emptyDescription}
                   />
                 </TableCell>
               </TableRow>
@@ -194,7 +213,7 @@ export function HostsTable({
                   </TableCell>
 
                   <TableCell className="px-4 py-4 text-[color:var(--muted-foreground)] md:px-6">
-                    {formatRelativeLabel(host.lastSeenAt)}
+                    {formatRelativeLabel(host.lastSeenAt, locale)}
                   </TableCell>
 
                   <TableCell className="px-4 py-4 text-right md:px-6">
@@ -204,7 +223,7 @@ export function HostsTable({
                       size="sm"
                       onClick={() => onSelectHost?.(host)}
                     >
-                      Открыть
+                      {copy.open}
                     </Button>
                   </TableCell>
                 </TableRow>

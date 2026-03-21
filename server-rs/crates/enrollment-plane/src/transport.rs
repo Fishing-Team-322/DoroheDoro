@@ -3,12 +3,16 @@ use std::sync::Arc;
 use async_nats::{Client, Subject, Subscriber};
 use common::{
     nats_subjects::{
-        AGENTS_DIAGNOSTICS, AGENTS_DIAGNOSTICS_GET, AGENTS_ENROLL_REQUEST, AGENTS_HEARTBEAT,
-        AGENTS_POLICY_FETCH, AGENTS_REGISTRY_GET, AGENTS_REGISTRY_LIST, CONTROL_POLICIES_GET,
-        CONTROL_POLICIES_LIST, CONTROL_POLICIES_REVISIONS,
+        AGENTS_BOOTSTRAP_TOKEN_ISSUE, AGENTS_DIAGNOSTICS, AGENTS_DIAGNOSTICS_GET,
+        AGENTS_ENROLL_REQUEST, AGENTS_HEARTBEAT, AGENTS_POLICY_FETCH, AGENTS_REGISTRY_GET,
+        AGENTS_REGISTRY_LIST, CONTROL_POLICIES_GET, CONTROL_POLICIES_LIST,
+        CONTROL_POLICIES_REVISIONS,
     },
     proto::{
-        agent::{DiagnosticsPayload, EnrollRequest, FetchPolicyRequest, HeartbeatPayload},
+        agent::{
+            DiagnosticsPayload, EnrollRequest, FetchPolicyRequest, HeartbeatPayload,
+            IssueBootstrapTokenRequest,
+        },
         decode_message, encode_message, ok_envelope, ok_json_envelope,
     },
     AppError,
@@ -28,6 +32,9 @@ pub async fn spawn_handlers(
 ) -> anyhow::Result<Vec<JoinHandle<()>>> {
     let enroll_sub = client.subscribe(AGENTS_ENROLL_REQUEST.to_string()).await?;
     let fetch_sub = client.subscribe(AGENTS_POLICY_FETCH.to_string()).await?;
+    let issue_bootstrap_token_sub = client
+        .subscribe(AGENTS_BOOTSTRAP_TOKEN_ISSUE.to_string())
+        .await?;
     let heartbeat_sub = client.subscribe(AGENTS_HEARTBEAT.to_string()).await?;
     let diagnostics_sub = client.subscribe(AGENTS_DIAGNOSTICS.to_string()).await?;
     let agents_list_sub = client.subscribe(AGENTS_REGISTRY_LIST.to_string()).await?;
@@ -48,6 +55,12 @@ pub async fn spawn_handlers(
         )),
         tokio::spawn(run_policy_handler(
             fetch_sub,
+            client.clone(),
+            service.clone(),
+            shutdown.clone(),
+        )),
+        tokio::spawn(run_issue_bootstrap_token_handler(
+            issue_bootstrap_token_sub,
             client.clone(),
             service.clone(),
             shutdown.clone(),
@@ -119,6 +132,48 @@ struct PolicyLookupRequest {
     #[serde(default)]
     correlation_id: String,
     policy_id: String,
+}
+
+async fn run_issue_bootstrap_token_handler(
+    mut subscription: Subscriber,
+    client: Client,
+    service: Arc<EnrollmentService>,
+    shutdown: CancellationToken,
+) {
+    loop {
+        let message = select! {
+            _ = shutdown.cancelled() => break,
+            next_message = subscription.next() => next_message,
+        };
+
+        let Some(message) = message else {
+            break;
+        };
+
+        let request = match decode_message::<IssueBootstrapTokenRequest>(message.payload.as_ref()) {
+            Ok(request) => request,
+            Err(error) => {
+                send_error_reply(&client, &message.reply, error, "").await;
+                continue;
+            }
+        };
+
+        let correlation_id = request.correlation_id.clone();
+        match service.issue_bootstrap_token(request).await {
+            Ok(response) => {
+                let envelope = ok_envelope(&response, correlation_id.clone());
+                send_reply(&client, &message.reply, envelope).await;
+                info!(
+                    correlation_id,
+                    token_id = response.token_id,
+                    "handled bootstrap token issue request"
+                );
+            }
+            Err(error) => {
+                send_error_reply(&client, &message.reply, error, correlation_id).await;
+            }
+        }
+    }
 }
 
 async fn run_enroll_handler(

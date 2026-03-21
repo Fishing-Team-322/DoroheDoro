@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use common::{
     proto::agent::{
         DiagnosticsPayload, EnrollRequest, EnrollResponse, FetchPolicyRequest, FetchPolicyResponse,
-        HeartbeatPayload,
+        HeartbeatPayload, IssueBootstrapTokenRequest, IssueBootstrapTokenResponse,
     },
     AppError, AppResult,
 };
@@ -229,6 +229,64 @@ impl EnrollmentService {
             .list_policy_revisions(policy_id)
             .await
             .map_err(|error| AppError::internal(format!("list policy revisions: {error}")))
+    }
+
+    pub async fn issue_bootstrap_token(
+        &self,
+        request: IssueBootstrapTokenRequest,
+    ) -> AppResult<IssueBootstrapTokenResponse> {
+        if request.policy_id.trim().is_empty() {
+            return Err(AppError::invalid_argument("policy_id is required"));
+        }
+        if request.policy_revision_id.trim().is_empty() {
+            return Err(AppError::invalid_argument("policy_revision_id is required"));
+        }
+
+        let policy_id = Uuid::parse_str(request.policy_id.trim())
+            .map_err(|error| AppError::invalid_argument(format!("invalid policy_id: {error}")))?;
+        let policy_revision_id =
+            Uuid::parse_str(request.policy_revision_id.trim()).map_err(|error| {
+                AppError::invalid_argument(format!("invalid policy_revision_id: {error}"))
+            })?;
+
+        let matches = self
+            .repo
+            .policy_revision_matches(policy_id, policy_revision_id)
+            .await
+            .map_err(|error| AppError::internal(format!("validate policy revision: {error}")))?;
+        if !matches {
+            return Err(AppError::not_found(
+                "policy revision does not belong to the policy",
+            ));
+        }
+
+        let expires_at = timestamp_or_now(request.expires_at_unix_ms);
+        if expires_at <= Utc::now() {
+            return Err(AppError::invalid_argument(
+                "expires_at_unix_ms must be in the future",
+            ));
+        }
+
+        let raw_token = format!("bootstrap-{}", Uuid::new_v4().simple());
+        let issued = self
+            .repo
+            .issue_bootstrap_token(
+                &hash_token(&raw_token),
+                policy_id,
+                policy_revision_id,
+                expires_at,
+            )
+            .await
+            .map_err(|error| AppError::internal(format!("issue bootstrap token: {error}")))?;
+
+        Ok(IssueBootstrapTokenResponse {
+            token_id: issued.id.to_string(),
+            bootstrap_token: raw_token,
+            policy_id: issued.policy_id.to_string(),
+            policy_revision_id: issued.policy_revision_id.to_string(),
+            expires_at_unix_ms: issued.expires_at.timestamp_millis(),
+            created_at_unix_ms: issued.created_at.timestamp_millis(),
+        })
     }
 }
 

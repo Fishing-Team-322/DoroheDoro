@@ -8,7 +8,6 @@ fn main() {
         .join("edge_api")
         .join("contracts")
         .join("proto");
-
     let shared_agent_proto = shared_proto_root.join("agent.proto");
     let shared_ingest_proto = shared_proto_root.join("ingest.proto");
     let edge_proto = edge_proto_root.join("edge.proto");
@@ -24,6 +23,10 @@ fn main() {
     config.btree_map(["."]);
     config.type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]");
 
+    // TECHNICAL DEBT:
+    // `agent-rs` still needs the current Edge ingress proto from `edge_api/**` at build time.
+    // This dependency is intentionally isolated to build.rs until the shared ingress contract is
+    // moved under `contracts/**` without requiring cross-component edits in this task.
     config
         .compile_protos(
             &[shared_agent_proto, shared_ingest_proto, edge_proto],

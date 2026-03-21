@@ -71,31 +71,34 @@ impl EnrollmentRepository {
                 }
             };
 
-        let revision_exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(
-                SELECT 1
-                FROM policy_revisions
-                WHERE policy_id = $1 AND revision = $2
-            )",
+        let revision_id = match sqlx::query_scalar::<_, Uuid>(
+            "SELECT id
+             FROM policy_revisions
+             WHERE policy_id = $1 AND revision = $2
+             LIMIT 1",
         )
         .bind(policy_id)
         .bind(DEFAULT_POLICY_REVISION)
-        .fetch_one(&mut *tx)
-        .await?;
-
-        if !revision_exists {
-            sqlx::query(
-                "INSERT INTO policy_revisions (id, policy_id, revision, body_json, created_at)
-                 VALUES ($1, $2, $3, $4, $5)",
-            )
-            .bind(Uuid::new_v4())
-            .bind(policy_id)
-            .bind(DEFAULT_POLICY_REVISION)
-            .bind(policy_body_json)
-            .bind(now)
-            .execute(&mut *tx)
-            .await?;
-        }
+        .fetch_optional(&mut *tx)
+        .await?
+        {
+            Some(revision_id) => revision_id,
+            None => {
+                let revision_id = Uuid::new_v4();
+                sqlx::query(
+                    "INSERT INTO policy_revisions (id, policy_id, revision, body_json, created_at)
+                     VALUES ($1, $2, $3, $4, $5)",
+                )
+                .bind(revision_id)
+                .bind(policy_id)
+                .bind(DEFAULT_POLICY_REVISION)
+                .bind(policy_body_json)
+                .bind(now)
+                .execute(&mut *tx)
+                .await?;
+                revision_id
+            }
+        };
 
         let token_exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(
@@ -110,12 +113,22 @@ impl EnrollmentRepository {
 
         if !token_exists {
             sqlx::query(
-                "INSERT INTO enrollment_tokens (id, token_hash, policy_id, expires_at, used_at, created_at, revoked_at)
-                 VALUES ($1, $2, $3, $4, NULL, $5, NULL)",
+                "INSERT INTO enrollment_tokens (
+                    id,
+                    token_hash,
+                    policy_id,
+                    policy_revision_id,
+                    expires_at,
+                    used_at,
+                    created_at,
+                    revoked_at
+                 )
+                 VALUES ($1, $2, $3, $4, $5, NULL, $6, NULL)",
             )
             .bind(Uuid::new_v4())
             .bind(token_hash)
             .bind(policy_id)
+            .bind(revision_id)
             .bind(now + Duration::days(3650))
             .bind(now)
             .execute(&mut *tx)
@@ -132,18 +145,11 @@ impl EnrollmentRepository {
         sqlx::query_as::<_, PolicySnapshot>(
             "SELECT
                 et.policy_id AS policy_id,
-                pr.id AS policy_revision_id,
+                et.policy_revision_id AS policy_revision_id,
                 pr.revision AS policy_revision,
                 pr.body_json AS policy_body_json
              FROM enrollment_tokens et
-             JOIN policies p ON p.id = et.policy_id
-             JOIN LATERAL (
-                SELECT id, revision, body_json
-                FROM policy_revisions
-                WHERE policy_id = p.id
-                ORDER BY created_at DESC
-                LIMIT 1
-             ) pr ON TRUE
+             JOIN policy_revisions pr ON pr.id = et.policy_revision_id
              WHERE et.token_hash = $1
                AND et.revoked_at IS NULL
                AND (et.expires_at IS NULL OR et.expires_at > NOW())
@@ -170,6 +176,64 @@ impl EnrollmentRepository {
         .await?;
 
         Ok(())
+    }
+
+    pub async fn policy_revision_matches(
+        &self,
+        policy_id: Uuid,
+        policy_revision_id: Uuid,
+    ) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                SELECT 1
+                FROM policy_revisions
+                WHERE id = $1 AND policy_id = $2
+            )",
+        )
+        .bind(policy_revision_id)
+        .bind(policy_id)
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn issue_bootstrap_token(
+        &self,
+        token_hash: &str,
+        policy_id: Uuid,
+        policy_revision_id: Uuid,
+        expires_at: DateTime<Utc>,
+    ) -> Result<IssuedBootstrapToken, sqlx::Error> {
+        let created_at = Utc::now();
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO enrollment_tokens (
+                id,
+                token_hash,
+                policy_id,
+                policy_revision_id,
+                expires_at,
+                used_at,
+                created_at,
+                revoked_at
+            )
+            VALUES ($1, $2, $3, $4, $5, NULL, $6, NULL)",
+        )
+        .bind(id)
+        .bind(token_hash)
+        .bind(policy_id)
+        .bind(policy_revision_id)
+        .bind(expires_at)
+        .bind(created_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(IssuedBootstrapToken {
+            id,
+            policy_id,
+            policy_revision_id,
+            expires_at,
+            created_at,
+        })
     }
 
     pub async fn agent_exists(&self, agent_id: &str) -> Result<bool, sqlx::Error> {
@@ -502,5 +566,14 @@ pub struct PolicyRevisionRecord {
     pub policy_revision_id: Uuid,
     pub revision: String,
     pub body_json: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IssuedBootstrapToken {
+    pub id: Uuid,
+    pub policy_id: Uuid,
+    pub policy_revision_id: Uuid,
+    pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
 }
