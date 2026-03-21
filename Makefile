@@ -18,7 +18,7 @@ fmt:
 	cd $(APP_DIR) && gofmt -w $$(find . -name '*.go' -type f | sort)
 
 swagger:
-	cd $(APP_DIR) && go run github.com/swaggo/swag/cmd/swag init -g cmd/server/main.go -o docs --parseInternal
+	cd $(APP_DIR) && node scripts/render-openapi.cjs
 
 compose-config:
 	docker compose config

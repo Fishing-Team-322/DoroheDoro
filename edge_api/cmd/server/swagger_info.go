@@ -1,3 +1,5 @@
+//go:build legacy
+
 package main
 
 // @title DoroheDoro HTTP API

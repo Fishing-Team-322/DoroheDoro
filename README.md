@@ -85,9 +85,33 @@ The current integrated slice is no longer just enrollment. The local stack now h
   - `POST /api/v1/hosts`
   - `GET /api/v1/host-groups`
   - `POST /api/v1/host-groups`
+  - `POST /api/v1/host-groups/{id}/members`
 - credentials metadata:
   - `GET /api/v1/credentials`
   - `POST /api/v1/credentials`
+- clusters:
+  - `GET /api/v1/clusters`
+  - `POST /api/v1/clusters`
+  - `POST /api/v1/clusters/{id}/hosts`
+- RBAC:
+  - `GET /api/v1/roles`
+  - `POST /api/v1/roles`
+  - `GET /api/v1/roles/{id}/permissions`
+  - `PUT /api/v1/roles/{id}/permissions`
+  - `GET /api/v1/role-bindings`
+  - `POST /api/v1/role-bindings`
+- integrations:
+  - `GET /api/v1/integrations`
+  - `POST /api/v1/integrations`
+- tickets:
+  - `GET /api/v1/tickets`
+  - `POST /api/v1/tickets`
+  - `POST /api/v1/tickets/{id}/assign`
+  - `POST /api/v1/tickets/{id}/comments`
+- anomalies:
+  - `GET /api/v1/anomalies/rules`
+  - `POST /api/v1/anomalies/rules`
+  - `GET /api/v1/anomalies/instances`
 - deployments:
   - `POST /api/v1/deployments/plan`
   - `POST /api/v1/deployments`
@@ -123,6 +147,18 @@ cd edge_api
 go test ./...
 
 cargo test --manifest-path ../server-rs/Cargo.toml -p common -p enrollment-plane -p control-plane -p deployment-plane
+```
+
+OpenAPI source of truth:
+
+- generator: [`edge_api/scripts/render-openapi.cjs`](./edge_api/scripts/render-openapi.cjs)
+- rendered docs: [`edge_api/docs/openapi.json`](./edge_api/docs/openapi.json) and [`edge_api/docs/openapi.yaml`](./edge_api/docs/openapi.yaml)
+
+Refresh the embedded spec with:
+
+```bash
+make swagger
+node edge_api/scripts/render-openapi.cjs
 ```
 
 ## Agent release and delivery

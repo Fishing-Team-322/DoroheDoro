@@ -191,7 +191,7 @@ agent-rs on remote Linux host
 
 ## 5.1. Уже существующие ключевые файлы и модули
 
-- `edge_api/cmd/server/main.go`
+- `edge_api/cmd/edge-api/main.go`
 - `edge_api/cmd/fake-agent/main.go`
 - `edge_api/internal/app/app.go`
 - `edge_api/internal/grpcapi/server.go`
@@ -207,6 +207,8 @@ agent-rs on remote Linux host
 - `edge_api/internal/policy/store.go`
 - `edge_api/internal/diagnostics/store.go`
 - `edge_api/proto/ingest.proto`
+
+Legacy Go PoC entrypoints like `edge_api/cmd/server/main.go` still exist in the repository only behind `legacy` build tags and are no longer part of the active runtime path.
 
 ## 5.2. Что текущий Go PoC уже умеет
 

@@ -62,6 +62,41 @@ The active live bridge is aligned with `server-rs` on:
 - `control.credentials.list`
 - `control.credentials.get`
 - `control.credentials.create`
+- `control.clusters.list`
+- `control.clusters.get`
+- `control.clusters.create`
+- `control.clusters.update`
+- `control.clusters.add-host`
+- `control.clusters.remove-host`
+- `control.roles.list`
+- `control.roles.get`
+- `control.roles.create`
+- `control.roles.update`
+- `control.roles.permissions.get`
+- `control.roles.permissions.set`
+- `control.role-bindings.list`
+- `control.role-bindings.create`
+- `control.role-bindings.delete`
+- `control.integrations.list`
+- `control.integrations.get`
+- `control.integrations.create`
+- `control.integrations.update`
+- `control.integrations.bind`
+- `control.integrations.unbind`
+- `tickets.list`
+- `tickets.get`
+- `tickets.create`
+- `tickets.assign`
+- `tickets.unassign`
+- `tickets.comment.add`
+- `tickets.status.change`
+- `tickets.close`
+- `anomalies.rules.list`
+- `anomalies.rules.get`
+- `anomalies.rules.create`
+- `anomalies.rules.update`
+- `anomalies.instances.list`
+- `anomalies.instances.get`
 - `deployments.jobs.create`
 - `deployments.jobs.get`
 - `deployments.jobs.list`
@@ -82,6 +117,7 @@ Always available:
 - `GET /version`
 - `GET /docs`
 - `GET /openapi.json`
+- `GET /openapi.yaml`
 
 WEB boundary routes:
 
@@ -106,9 +142,46 @@ WEB boundary routes:
 - `POST /api/v1/host-groups`
 - `GET /api/v1/host-groups/{id}`
 - `PATCH /api/v1/host-groups/{id}`
+- `POST /api/v1/host-groups/{id}/members`
+- `DELETE /api/v1/host-groups/{id}/members/{hostId}`
 - `GET /api/v1/credentials`
 - `POST /api/v1/credentials`
 - `GET /api/v1/credentials/{id}`
+- `GET /api/v1/clusters`
+- `GET /api/v1/clusters/{id}`
+- `POST /api/v1/clusters`
+- `PATCH /api/v1/clusters/{id}`
+- `POST /api/v1/clusters/{id}/hosts`
+- `DELETE /api/v1/clusters/{id}/hosts/{hostId}`
+- `GET /api/v1/roles`
+- `GET /api/v1/roles/{id}`
+- `POST /api/v1/roles`
+- `PATCH /api/v1/roles/{id}`
+- `GET /api/v1/roles/{id}/permissions`
+- `PUT /api/v1/roles/{id}/permissions`
+- `GET /api/v1/role-bindings`
+- `POST /api/v1/role-bindings`
+- `DELETE /api/v1/role-bindings/{id}`
+- `GET /api/v1/integrations`
+- `GET /api/v1/integrations/{id}`
+- `POST /api/v1/integrations`
+- `PATCH /api/v1/integrations/{id}`
+- `POST /api/v1/integrations/{id}/bindings`
+- `DELETE /api/v1/integrations/{id}/bindings/{bindingId}`
+- `GET /api/v1/tickets`
+- `GET /api/v1/tickets/{id}`
+- `POST /api/v1/tickets`
+- `POST /api/v1/tickets/{id}/assign`
+- `POST /api/v1/tickets/{id}/unassign`
+- `POST /api/v1/tickets/{id}/comments`
+- `POST /api/v1/tickets/{id}/status`
+- `POST /api/v1/tickets/{id}/close`
+- `GET /api/v1/anomalies/rules`
+- `GET /api/v1/anomalies/rules/{id}`
+- `POST /api/v1/anomalies/rules`
+- `PATCH /api/v1/anomalies/rules/{id}`
+- `GET /api/v1/anomalies/instances`
+- `GET /api/v1/anomalies/instances/{id}`
 - `POST /api/v1/deployments`
 - `GET /api/v1/deployments`
 - `GET /api/v1/deployments/{id}`
@@ -131,7 +204,16 @@ Currently live against real Rust runtime:
 - policy list/detail/create/update/revisions
 - hosts list/detail/create/update
 - host-groups list/detail/create/update
+- host-group member add/remove
 - credentials metadata list/detail/create
+- clusters list/detail/create/update and host bindings
+- roles list/detail/create/update
+- role permissions get/set
+- role bindings list/create/delete
+- integrations list/detail/create/update and bindings
+- tickets list/detail/create and lifecycle actions
+- anomaly rules list/detail/create/update
+- anomaly instances list/detail
 - deployment plan/create/list/get/retry/cancel
 - deployment steps/status/targets read-side
 - deployment status/step SSE stream
@@ -141,24 +223,6 @@ Currently live against real Rust runtime:
 Still controlled `501 not_implemented` until the corresponding Rust plane exists:
 
 - query / dashboards / alerts / audit
-- future cluster / roles / permissions / integrations / tickets / anomalies domains
-
-Reserved boundary groups for upcoming product layers:
-
-- `GET|POST /api/v1/clusters`
-- `GET|PATCH /api/v1/clusters/{id}`
-- `GET|POST /api/v1/roles`
-- `GET|PATCH /api/v1/roles/{id}`
-- `GET|POST /api/v1/permissions`
-- `GET|PATCH /api/v1/permissions/{id}`
-- `GET|POST /api/v1/integrations`
-- `GET|PATCH /api/v1/integrations/{id}`
-- `GET|POST /api/v1/tickets`
-- `GET|PATCH /api/v1/tickets/{id}`
-- `GET|POST /api/v1/anomalies`
-- `GET|PATCH /api/v1/anomalies/{id}`
-
-These routes exist only to reserve stable boundary structure. They deliberately return controlled `501 not_implemented` with `X-Boundary-State: awaiting-runtime` until the matching Rust runtime domains land.
 
 Compatibility routes kept for the current frontend:
 
@@ -167,6 +231,18 @@ Compatibility routes kept for the current frontend:
 - `POST /auth/logout`
 - `GET /auth/me`
 - `PATCH /profile`
+
+OpenAPI source of truth:
+
+- spec generator: [`scripts/render-openapi.cjs`](./scripts/render-openapi.cjs)
+- rendered files: [`docs/openapi.json`](./docs/openapi.json), [`docs/openapi.yaml`](./docs/openapi.yaml)
+
+Refresh the embedded spec with:
+
+```bash
+make swagger
+node scripts/render-openapi.cjs
+```
 
 ## gRPC surface
 
@@ -288,6 +364,6 @@ The default test set now covers:
 - config validation for agent TLS/insecure mode
 - centralized subject mapping
 - protobuf NATS envelope encoding/decoding
-- JSON-wrapped NATS replies for read-side bridge flows
+- protobuf-wrapped NATS replies for control/read-side bridge flows
 - boundary metadata on controlled `not_implemented` routes
 - frontend auth compatibility flow
