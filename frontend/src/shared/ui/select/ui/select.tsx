@@ -310,7 +310,9 @@ export function Select({
   useLayoutEffect(() => {
     if (!open) return;
 
-    updatePosition();
+    const frame = requestAnimationFrame(() => {
+      updatePosition();
+    });
 
     const scrollParents = getScrollParents(buttonRef.current);
     const handleScroll = () => updatePosition();
@@ -341,6 +343,7 @@ export function Select({
     }, 150);
 
     return () => {
+      window.cancelAnimationFrame(frame);
       scrollParents.forEach((parent) => {
         parent.removeEventListener("scroll", handleScroll as EventListener);
       });
@@ -351,7 +354,14 @@ export function Select({
 
   useLayoutEffect(() => {
     if (!open) return;
-    updatePosition();
+
+    const frame = requestAnimationFrame(() => {
+      updatePosition();
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
   }, [open, search, searchable, options.length]);
 
   const dropdownAnimation =

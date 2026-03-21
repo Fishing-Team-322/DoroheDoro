@@ -201,7 +201,7 @@ export function LoginPage({ locale }: LoginPageProps) {
                         type="text"
                         inputSize="lg"
                         label={dictionary.auth.login.identifierLabel}
-                        autoComplete="username"
+                        autoComplete="off"
                         value={identifier}
                         onChange={(e) => {
                           setIdentifier(e.target.value);
@@ -231,7 +231,7 @@ export function LoginPage({ locale }: LoginPageProps) {
                     transition={stepTransition}
                     className="absolute inset-0"
                   >
-                    <form onSubmit={handlePasswordSubmit} className="space-y-5">
+                    <form onSubmit={handlePasswordSubmit} className="space-y-5" autoComplete="off">
                       <div className="space-y-3">
                         <button
                           type="button"
