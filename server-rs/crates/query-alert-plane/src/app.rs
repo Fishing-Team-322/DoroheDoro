@@ -28,6 +28,7 @@ pub async fn run(config: QueryAlertPlaneConfig) -> anyhow::Result<()> {
         nats.clone(),
         OpenSearchClient::new(config.opensearch.clone()),
         ClickHouseClient::new(config.clickhouse.clone()),
+        config.detection.clone(),
     ));
     service
         .initialize()

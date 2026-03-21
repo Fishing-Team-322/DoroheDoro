@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 
@@ -16,11 +16,13 @@ use common::{
     AppError, AppResult,
 };
 use serde_json::{json, Value};
-use tracing::warn;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
+    config::DetectionConfig,
     models::{format_ts, AlertRuleCondition, AlertRuleRecord},
+    pipeline::DetectionMode,
     repository::QueryAlertRepository,
     storage::{ClickHouseClient, OpenSearchClient},
 };
@@ -49,12 +51,35 @@ impl AuditActor {
     }
 }
 
-#[derive(Clone)]
+struct DetectionRuntime {
+    config: DetectionConfig,
+    metrics: DetectionMetrics,
+}
+
+#[derive(Default)]
+struct DetectionMetrics {
+    signals_total: AtomicU64,
+    anomalies_total: AtomicU64,
+    resolved_total: AtomicU64,
+    rejected_total: AtomicU64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DetectionStatusSnapshot {
+    pub mode: DetectionMode,
+    pub safe_mode: bool,
+    pub signals_total: u64,
+    pub anomalies_total: u64,
+    pub resolved_total: u64,
+    pub rejected_total: u64,
+}
+
 pub struct QueryAlertService {
     repo: QueryAlertRepository,
     nats: Client,
     opensearch: OpenSearchClient,
     clickhouse: ClickHouseClient,
+    detection: DetectionRuntime,
     ready: Arc<AtomicBool>,
 }
 
@@ -64,12 +89,17 @@ impl QueryAlertService {
         nats: Client,
         opensearch: OpenSearchClient,
         clickhouse: ClickHouseClient,
+        detection_config: DetectionConfig,
     ) -> Self {
         Self {
             repo,
             nats,
             opensearch,
             clickhouse,
+            detection: DetectionRuntime {
+                config: detection_config,
+                metrics: DetectionMetrics::default(),
+            },
             ready: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -84,6 +114,86 @@ impl QueryAlertService {
 
     pub fn is_ready(&self) -> bool {
         self.ready.load(Ordering::Relaxed)
+    }
+
+    pub fn detection_snapshot(&self) -> DetectionStatusSnapshot {
+        let metrics = &self.detection.metrics;
+        DetectionStatusSnapshot {
+            mode: self.detection.config.mode,
+            safe_mode: self.detection.config.safe_mode,
+            signals_total: metrics.signals_total.load(Ordering::Relaxed),
+            anomalies_total: metrics.anomalies_total.load(Ordering::Relaxed),
+            resolved_total: metrics.resolved_total.load(Ordering::Relaxed),
+            rejected_total: metrics.rejected_total.load(Ordering::Relaxed),
+        }
+    }
+
+    fn record_signal(&self) {
+        self.detection
+            .metrics
+            .signals_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_anomaly(&self) {
+        self.detection
+            .metrics
+            .anomalies_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_resolution(&self) {
+        self.detection
+            .metrics
+            .resolved_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_rejected(&self) {
+        self.detection
+            .metrics
+            .rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    async fn record_baseline(
+        &self,
+        host: &str,
+        service: &str,
+        signal_kind: &str,
+        observation: f64,
+    ) -> AppResult<()> {
+        let window = self.detection.config.medium_window_min as i32;
+        let existing = self
+            .repo
+            .get_anomaly_baseline(host, service, signal_kind, window)
+            .await
+            .map_err(map_db_error)?;
+
+        let (samples, mean, stddev) = if let Some(record) = existing {
+            let prev_samples = record.samples.max(0) as f64;
+            let new_samples = prev_samples + 1.0;
+            let new_mean = ((record.mean * prev_samples) + observation) / new_samples;
+            (new_samples as i32, new_mean, record.stddev)
+        } else {
+            (1, observation, 0.0)
+        };
+
+        self.repo
+            .upsert_anomaly_baseline(
+                host,
+                service,
+                signal_kind,
+                window,
+                samples,
+                mean,
+                stddev,
+                None,
+                &json!({ "last_observation": observation }),
+            )
+            .await
+            .map_err(map_db_error)?;
+        Ok(())
     }
 
     pub async fn search_logs(
@@ -522,6 +632,10 @@ impl QueryAlertService {
     }
 
     pub async fn handle_normalized_event(&self, event: NormalizedLogEvent) -> AppResult<()> {
+        self.record_signal();
+        let event_ts = parse_event_timestamp(&event.timestamp)?;
+        self.record_baseline(&event.host, &event.service, "logs", 1.0)
+            .await?;
         let rules = self.repo.list_active_rules().await.map_err(map_db_error)?;
         for rule in rules {
             let condition = parse_condition_value(&rule.condition_json)?;
@@ -529,8 +643,7 @@ impl QueryAlertService {
                 continue;
             }
 
-            let since = parse_event_timestamp(&event.timestamp)?
-                - Duration::minutes(condition.window_minutes as i64);
+            let since = event_ts - Duration::minutes(condition.window_minutes as i64);
             let hit_count = self
                 .clickhouse
                 .matching_count(
@@ -547,6 +660,47 @@ impl QueryAlertService {
                 continue;
             }
 
+            let detection_mode = self.detection.config.mode;
+            let correlation_key = format!(
+                "rule:{}:{}:{}:{}",
+                rule.id, event.host, event.service, event.fingerprint
+            );
+            let signal_meta = json!({
+                "signal_id": event.id,
+                "timestamp": event.timestamp,
+                "severity": event.severity,
+                "message": event.message,
+                "source_type": event.source_type,
+            });
+            let evidence_json = json!({
+                "hit_count": hit_count,
+                "threshold": condition.threshold,
+                "window_minutes": condition.window_minutes,
+                "fingerprint": event.fingerprint,
+            });
+            let score = if condition.threshold == 0 {
+                0.0
+            } else {
+                (hit_count as f64) / (condition.threshold as f64)
+            };
+
+            self.repo
+                .insert_anomaly_score(
+                    Some(rule.id),
+                    "log_burst",
+                    "logs",
+                    &event.host,
+                    &event.service,
+                    &correlation_key,
+                    detection_mode.as_str(),
+                    &event.id,
+                    score,
+                    condition.threshold as f64,
+                    &evidence_json,
+                )
+                .await
+                .map_err(map_db_error)?;
+
             let payload_json = json!({
                 "event_id": event.id,
                 "message": event.message,
@@ -558,6 +712,7 @@ impl QueryAlertService {
                 "severity": event.severity,
                 "fingerprint": event.fingerprint,
                 "timestamp": event.timestamp,
+                "detection_mode": detection_mode.as_str(),
             });
 
             if let Some(existing) = self
@@ -566,8 +721,10 @@ impl QueryAlertService {
                 .await
                 .map_err(map_db_error)?
             {
+                let merged_signals =
+                    merge_source_signals(&existing.source_signals, &signal_meta, 10);
                 self.repo
-                    .touch_alert_instance(existing.id, &payload_json)
+                    .touch_alert_instance(existing.id, &payload_json, &merged_signals)
                     .await
                     .map_err(map_db_error)?;
                 continue;
@@ -587,11 +744,15 @@ impl QueryAlertService {
                     &event.service,
                     &event.fingerprint,
                     &payload_json,
-                    parse_event_timestamp(&event.timestamp)?,
+                    event_ts,
+                    detection_mode.as_str(),
+                    &correlation_key,
+                    &json!([signal_meta]),
                 )
                 .await
                 .map_err(map_db_error)?;
 
+            self.record_anomaly();
             self.publish_alert_stream(&created).await;
             self.publish_audit_event(AuditAppendEvent {
                 event_type: "alert.instance.triggered".to_string(),
@@ -607,6 +768,195 @@ impl QueryAlertService {
             .await;
         }
 
+        Ok(())
+    }
+
+    pub async fn handle_heartbeat_signal(&self, payload: Value) -> AppResult<()> {
+        self.record_signal();
+        let host = payload
+            .get("host")
+            .and_then(Value::as_str)
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default();
+        if host.is_empty() {
+            self.record_rejected();
+            warn!("heartbeat signal missing host");
+            return Ok(());
+        }
+        let service = payload
+            .get("service")
+            .and_then(Value::as_str)
+            .map(|v| v.trim().to_string())
+            .unwrap_or_else(|| "agent".to_string());
+        let gap = payload
+            .get("heartbeat_gap_sec")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        self.record_baseline(&host, &service, "heartbeat", gap)
+            .await?;
+        let threshold = self.detection.config.cooldown_sec as f64;
+        if gap < threshold {
+            return Ok(());
+        }
+        let signal_id = payload
+            .get("signal_id")
+            .and_then(Value::as_str)
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let correlation_key = format!("heartbeat:{host}:{service}");
+        let evidence = json!({ "heartbeat_gap_sec": gap });
+        self.repo
+            .insert_anomaly_score(
+                None,
+                "heartbeat_gap",
+                "heartbeat",
+                &host,
+                &service,
+                &correlation_key,
+                self.detection.config.mode.as_str(),
+                &signal_id,
+                gap / threshold,
+                threshold,
+                &evidence,
+            )
+            .await
+            .map_err(map_db_error)?;
+        info!(
+            host = %host,
+            service = %service,
+            gap = gap,
+            "heartbeat anomaly recorded"
+        );
+        Ok(())
+    }
+
+    pub async fn handle_diagnostics_signal(&self, payload: Value) -> AppResult<()> {
+        self.record_signal();
+        let host = payload
+            .get("host")
+            .and_then(Value::as_str)
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default();
+        if host.is_empty() {
+            self.record_rejected();
+            warn!("diagnostics signal missing host");
+            return Ok(());
+        }
+        let service = payload
+            .get("service")
+            .and_then(Value::as_str)
+            .map(|v| v.trim().to_string())
+            .unwrap_or_else(|| "agent".to_string());
+        let queue_depth = payload
+            .get("queue_depth")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        self.record_baseline(&host, &service, "diagnostics", queue_depth)
+            .await?;
+        if queue_depth < 100.0 {
+            return Ok(());
+        }
+        let signal_id = payload
+            .get("signal_id")
+            .and_then(Value::as_str)
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let correlation_key = format!("diag:{host}:{service}");
+        let evidence = json!({ "queue_depth": queue_depth });
+        self.repo
+            .insert_anomaly_score(
+                None,
+                "queue_depth",
+                "diagnostics",
+                &host,
+                &service,
+                &correlation_key,
+                self.detection.config.mode.as_str(),
+                &signal_id,
+                queue_depth / 100.0,
+                100.0,
+                &evidence,
+            )
+            .await
+            .map_err(map_db_error)?;
+        info!(
+            host = %host,
+            service = %service,
+            depth = queue_depth,
+            "diagnostics anomaly recorded"
+        );
+        Ok(())
+    }
+
+    pub async fn handle_security_signal(&self, payload: Value) -> AppResult<()> {
+        self.record_signal();
+        let host = payload
+            .get("host")
+            .and_then(Value::as_str)
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default();
+        if host.is_empty() {
+            self.record_rejected();
+            warn!("security signal missing host");
+            return Ok(());
+        }
+        let service = payload
+            .get("service")
+            .and_then(Value::as_str)
+            .map(|v| v.trim().to_string())
+            .unwrap_or_else(|| "agent".to_string());
+        let findings = payload
+            .get("findings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if findings.is_empty() {
+            return Ok(());
+        }
+        let severe_count = findings
+            .iter()
+            .filter(|finding| {
+                finding
+                    .get("severity")
+                    .and_then(Value::as_str)
+                    .map(|v| matches!(v.to_ascii_lowercase().as_str(), "high" | "critical"))
+                    .unwrap_or(false)
+            })
+            .count();
+        if severe_count == 0 {
+            return Ok(());
+        }
+        self.record_baseline(&host, &service, "security_posture", severe_count as f64)
+            .await?;
+        let signal_id = payload
+            .get("report_id")
+            .and_then(Value::as_str)
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let correlation_key = format!("security:{host}:{service}");
+        let evidence = json!({ "findings": findings });
+        self.repo
+            .insert_anomaly_score(
+                None,
+                "security_finding",
+                "security_posture",
+                &host,
+                &service,
+                &correlation_key,
+                self.detection.config.mode.as_str(),
+                &signal_id,
+                severe_count as f64,
+                1.0,
+                &evidence,
+            )
+            .await
+            .map_err(map_db_error)?;
+        info!(
+            host = %host,
+            service = %service,
+            count = severe_count,
+            "security posture anomaly recorded"
+        );
         Ok(())
     }
 
@@ -645,10 +995,23 @@ impl QueryAlertService {
             });
             if let Some(resolved) = self
                 .repo
-                .resolve_alert_instance(instance.id, &payload_json)
+                .resolve_alert_instance(
+                    instance.id,
+                    &payload_json,
+                    &merge_source_signals(
+                        &instance.source_signals,
+                        &json!({
+                            "resolved_at": format_ts(Utc::now()),
+                            "reason": "threshold no longer met",
+                        }),
+                        10,
+                    ),
+                    true,
+                )
                 .await
                 .map_err(map_db_error)?
             {
+                self.record_resolution();
                 self.publish_alert_stream(&resolved).await;
                 self.publish_audit_event(AuditAppendEvent {
                     event_type: "alert.instance.resolved".to_string(),
@@ -933,6 +1296,19 @@ fn non_empty_or(value: &str, default: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn merge_source_signals(existing: &Value, new_signal: &Value, max_items: usize) -> Value {
+    let mut items = existing
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| Vec::with_capacity(1));
+    items.push(new_signal.clone());
+    if items.len() > max_items {
+        let drain = items.len().saturating_sub(max_items);
+        items.drain(0..drain);
+    }
+    Value::Array(items)
 }
 
 fn map_db_error(error: sqlx::Error) -> AppError {
