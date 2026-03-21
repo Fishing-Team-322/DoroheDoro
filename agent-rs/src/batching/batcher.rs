@@ -77,12 +77,8 @@ pub fn spawn_batcher(
                 continue;
             }
 
-            let pending_batch = build_pending_batch(
-                &buffer,
-                buffered_bytes,
-                &status.current_agent_id(),
-                &host,
-            );
+            let pending_batch =
+                build_pending_batch(&buffer, buffered_bytes, &status.current_agent_id(), &host);
             let mut batch_to_dispatch = Some(pending_batch);
 
             while let Some(batch) = batch_to_dispatch.take() {

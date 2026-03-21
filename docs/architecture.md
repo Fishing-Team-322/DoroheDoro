@@ -1329,3 +1329,21 @@ Reserved future subjects are already fixed in the shared registry:
 - `query.dashboards.overview`
 - `alerts.list|get|rules.create|rules.update`
 - `audit.list`
+## Agent Security Posture Runtime
+
+The Rust `AGENT` now contains a dedicated background security posture worker.
+
+This worker remains inside the `AGENT` service boundary and:
+
+- schedules periodic local scans on Linux hosts
+- checks listening ports, watched package versions, and coarse hardening signals
+- emits normalized `security.posture.*.v1` payloads through the existing diagnostics transport
+- persists the latest posture state in the agent SQLite database and optionally mirrors the last report JSON to local disk
+
+This preserves the current external architecture:
+
+- `WEB`
+- `SERVER`
+- `AGENT`
+
+No new public product service or extra internet-facing runtime is introduced by this slice.

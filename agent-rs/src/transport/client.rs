@@ -244,14 +244,14 @@ impl AgentTransport for EdgeGrpcTransport {
     }
 
     async fn send_diagnostics(&self, payload: agent::DiagnosticsPayload) -> AppResult<()> {
-        let diagnostics: crate::runtime::DiagnosticsSnapshot =
-            serde_json::from_str(&payload.payload_json)?;
+        let hostname = extract_diagnostics_hostname(&payload.payload_json)
+            .unwrap_or_else(|| "unknown-host".to_string());
         let _: edge::Ack = self
             .unary_json(
                 "/SendDiagnostics",
                 &edge::DiagnosticsRequest {
                     agent_id: payload.agent_id,
-                    host: diagnostics.hostname,
+                    host: hostname,
                     sent_at_unix_ms: payload.sent_at_unix_ms,
                     payload_json: payload.payload_json,
                 },
@@ -451,13 +451,25 @@ where
     Ok(serde_json::from_slice(payload)?)
 }
 
+fn extract_diagnostics_hostname(payload_json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(payload_json).ok()?;
+    value
+        .get("hostname")
+        .and_then(|value| value.as_str())
+        .or_else(|| value.get("host").and_then(|value| value.as_str()))
+        .map(ToOwned::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
 
     use crate::{config::TlsConfig, proto::edge::IngestLogsResponse, transport::EdgeGrpcTransport};
 
-    use super::{build_base_url, decode_grpc_frame, derive_server_name, prepare_endpoint};
+    use super::{
+        build_base_url, decode_grpc_frame, derive_server_name, extract_diagnostics_hostname,
+        prepare_endpoint,
+    };
 
     #[test]
     fn builds_url_from_edge_address() {
@@ -556,5 +568,17 @@ mod tests {
         assert!(error
             .to_string()
             .contains("TLS settings are configured but the gRPC endpoint uses plain HTTP"));
+    }
+
+    #[test]
+    fn extracts_hostname_from_generic_diagnostics_payload() {
+        assert_eq!(
+            extract_diagnostics_hostname(r#"{"hostname":"demo-host"}"#).as_deref(),
+            Some("demo-host")
+        );
+        assert_eq!(
+            extract_diagnostics_hostname(r#"{"host":"demo-host"}"#).as_deref(),
+            Some("demo-host")
+        );
     }
 }

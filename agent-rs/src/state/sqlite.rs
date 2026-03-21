@@ -6,7 +6,10 @@ use std::{
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::error::{AppError, AppResult};
+use crate::{
+    error::{AppError, AppResult},
+    security::{SecurityFindingSummary, SecurityScanStateRecord},
+};
 
 use super::{
     AgentIdentity, FileOffsetRecord, FileOffsetUpdate, RuntimeStatePatch, RuntimeStateRecord,
@@ -184,11 +187,126 @@ impl SqliteStateStore {
         Ok(())
     }
 
-    pub fn apply_runtime_state_patch(&self, patch: RuntimeStatePatch) -> AppResult<RuntimeStateRecord> {
+    pub fn apply_runtime_state_patch(
+        &self,
+        patch: RuntimeStatePatch,
+    ) -> AppResult<RuntimeStateRecord> {
         let mut state = self.load_runtime_state()?;
         state.apply_patch(patch);
         self.save_runtime_state(&state)?;
         Ok(state)
+    }
+
+    pub fn load_security_scan_state(&self) -> AppResult<SecurityScanStateRecord> {
+        let conn = self.open()?;
+        let record = conn
+            .query_row(
+                "SELECT last_started_at_unix_ms, last_finished_at_unix_ms,
+                        last_status, last_status_reason, last_report_id,
+                        last_delivery_status, last_delivery_error,
+                        last_rules_loaded_at_unix_ms, last_rules_digest,
+                        last_report_path, backoff_until_unix_ms,
+                        consecutive_failures,
+                        summary_total, summary_critical, summary_high,
+                        summary_medium, summary_low, summary_info,
+                        updated_at_unix_ms
+                 FROM agent_security_scan_state WHERE singleton_id = 1",
+                [],
+                |row| {
+                    Ok(SecurityScanStateRecord {
+                        last_started_at_unix_ms: row.get(0)?,
+                        last_finished_at_unix_ms: row.get(1)?,
+                        last_status: row.get(2)?,
+                        last_status_reason: row.get(3)?,
+                        last_report_id: row.get(4)?,
+                        last_delivery_status: row.get(5)?,
+                        last_delivery_error: row.get(6)?,
+                        last_rules_loaded_at_unix_ms: row.get(7)?,
+                        last_rules_digest: row.get(8)?,
+                        last_report_path: row.get(9)?,
+                        backoff_until_unix_ms: row.get(10)?,
+                        consecutive_failures: row.get::<_, u32>(11)?,
+                        summary: SecurityFindingSummary {
+                            total: row.get::<_, u32>(12)?,
+                            critical: row.get::<_, u32>(13)?,
+                            high: row.get::<_, u32>(14)?,
+                            medium: row.get::<_, u32>(15)?,
+                            low: row.get::<_, u32>(16)?,
+                            info: row.get::<_, u32>(17)?,
+                        },
+                        updated_at_unix_ms: row.get(18)?,
+                    })
+                },
+            )
+            .optional()?;
+
+        Ok(record.unwrap_or_default())
+    }
+
+    pub fn save_security_scan_state(&self, state: &SecurityScanStateRecord) -> AppResult<()> {
+        let conn = self.open()?;
+        let updated_at_unix_ms = if state.updated_at_unix_ms == 0 {
+            now_ms()
+        } else {
+            state.updated_at_unix_ms
+        };
+        conn.execute(
+            "INSERT INTO agent_security_scan_state (
+                singleton_id, last_started_at_unix_ms, last_finished_at_unix_ms,
+                last_status, last_status_reason, last_report_id,
+                last_delivery_status, last_delivery_error,
+                last_rules_loaded_at_unix_ms, last_rules_digest,
+                last_report_path, backoff_until_unix_ms,
+                consecutive_failures,
+                summary_total, summary_critical, summary_high,
+                summary_medium, summary_low, summary_info,
+                updated_at_unix_ms
+             ) VALUES (
+                1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19
+             )
+             ON CONFLICT(singleton_id) DO UPDATE SET
+                last_started_at_unix_ms = excluded.last_started_at_unix_ms,
+                last_finished_at_unix_ms = excluded.last_finished_at_unix_ms,
+                last_status = excluded.last_status,
+                last_status_reason = excluded.last_status_reason,
+                last_report_id = excluded.last_report_id,
+                last_delivery_status = excluded.last_delivery_status,
+                last_delivery_error = excluded.last_delivery_error,
+                last_rules_loaded_at_unix_ms = excluded.last_rules_loaded_at_unix_ms,
+                last_rules_digest = excluded.last_rules_digest,
+                last_report_path = excluded.last_report_path,
+                backoff_until_unix_ms = excluded.backoff_until_unix_ms,
+                consecutive_failures = excluded.consecutive_failures,
+                summary_total = excluded.summary_total,
+                summary_critical = excluded.summary_critical,
+                summary_high = excluded.summary_high,
+                summary_medium = excluded.summary_medium,
+                summary_low = excluded.summary_low,
+                summary_info = excluded.summary_info,
+                updated_at_unix_ms = excluded.updated_at_unix_ms",
+            params![
+                state.last_started_at_unix_ms,
+                state.last_finished_at_unix_ms,
+                state.last_status,
+                state.last_status_reason,
+                state.last_report_id,
+                state.last_delivery_status,
+                state.last_delivery_error,
+                state.last_rules_loaded_at_unix_ms,
+                state.last_rules_digest,
+                state.last_report_path,
+                state.backoff_until_unix_ms,
+                state.consecutive_failures,
+                state.summary.total,
+                state.summary.critical,
+                state.summary.high,
+                state.summary.medium,
+                state.summary.low,
+                state.summary.info,
+                updated_at_unix_ms,
+            ],
+        )?;
+        Ok(())
     }
 
     pub fn load_file_offset(&self, path: &Path) -> AppResult<Option<FileOffsetRecord>> {
@@ -435,6 +553,28 @@ impl SqliteStateStore {
                 consecutive_send_failures INTEGER NOT NULL DEFAULT 0,
                 updated_at_unix_ms INTEGER NOT NULL DEFAULT 0
              );
+             CREATE TABLE IF NOT EXISTS agent_security_scan_state (
+                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                last_started_at_unix_ms INTEGER NULL,
+                last_finished_at_unix_ms INTEGER NULL,
+                last_status TEXT NULL,
+                last_status_reason TEXT NULL,
+                last_report_id TEXT NULL,
+                last_delivery_status TEXT NULL,
+                last_delivery_error TEXT NULL,
+                last_rules_loaded_at_unix_ms INTEGER NULL,
+                last_rules_digest TEXT NULL,
+                last_report_path TEXT NULL,
+                backoff_until_unix_ms INTEGER NULL,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                summary_total INTEGER NOT NULL DEFAULT 0,
+                summary_critical INTEGER NOT NULL DEFAULT 0,
+                summary_high INTEGER NOT NULL DEFAULT 0,
+                summary_medium INTEGER NOT NULL DEFAULT 0,
+                summary_low INTEGER NOT NULL DEFAULT 0,
+                summary_info INTEGER NOT NULL DEFAULT 0,
+                updated_at_unix_ms INTEGER NOT NULL DEFAULT 0
+             );
              CREATE TABLE IF NOT EXISTS file_offsets (
                 path TEXT PRIMARY KEY,
                 file_key TEXT NULL,
@@ -454,6 +594,7 @@ impl SqliteStateStore {
              );",
         )?;
         self.migrate_runtime_state(&conn)?;
+        self.migrate_security_scan_state(&conn)?;
         self.migrate_file_offsets(&conn)?;
         Ok(())
     }
@@ -529,6 +670,32 @@ impl SqliteStateStore {
         Ok(())
     }
 
+    fn migrate_security_scan_state(&self, conn: &Connection) -> AppResult<()> {
+        for (column, definition) in [
+            ("last_started_at_unix_ms", "INTEGER NULL"),
+            ("last_finished_at_unix_ms", "INTEGER NULL"),
+            ("last_status", "TEXT NULL"),
+            ("last_status_reason", "TEXT NULL"),
+            ("last_report_id", "TEXT NULL"),
+            ("last_delivery_status", "TEXT NULL"),
+            ("last_delivery_error", "TEXT NULL"),
+            ("last_rules_loaded_at_unix_ms", "INTEGER NULL"),
+            ("last_rules_digest", "TEXT NULL"),
+            ("last_report_path", "TEXT NULL"),
+            ("backoff_until_unix_ms", "INTEGER NULL"),
+            ("consecutive_failures", "INTEGER NOT NULL DEFAULT 0"),
+            ("summary_total", "INTEGER NOT NULL DEFAULT 0"),
+            ("summary_critical", "INTEGER NOT NULL DEFAULT 0"),
+            ("summary_high", "INTEGER NOT NULL DEFAULT 0"),
+            ("summary_medium", "INTEGER NOT NULL DEFAULT 0"),
+            ("summary_low", "INTEGER NOT NULL DEFAULT 0"),
+            ("summary_info", "INTEGER NOT NULL DEFAULT 0"),
+        ] {
+            self.ensure_column(conn, "agent_security_scan_state", column, definition)?;
+        }
+        Ok(())
+    }
+
     fn ensure_column(
         &self,
         conn: &Connection,
@@ -550,11 +717,19 @@ impl SqliteStateStore {
     fn open(&self) -> AppResult<Connection> {
         let conn = Connection::open(&self.db_path)?;
         conn.busy_timeout(Duration::from_secs(5))?;
-        conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             PRAGMA synchronous = NORMAL;
-             PRAGMA foreign_keys = ON;",
-        )?;
+        if cfg!(target_os = "linux") {
+            conn.execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA synchronous = NORMAL;
+                 PRAGMA foreign_keys = ON;",
+            )?;
+        } else {
+            conn.execute_batch(
+                "PRAGMA journal_mode = DELETE;
+                 PRAGMA synchronous = NORMAL;
+                 PRAGMA foreign_keys = ON;",
+            )?;
+        }
         Ok(conn)
     }
 }
@@ -584,7 +759,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{RuntimeStatePatch, RuntimeStateRecord, SqliteStateStore};
-    use crate::state::{FileOffsetUpdate, SourceOffsetMarker, SpoolBatchRecord};
+    use crate::{
+        security::{SecurityFindingSummary, SecurityScanStateRecord},
+        state::{FileOffsetUpdate, SourceOffsetMarker, SpoolBatchRecord},
+    };
 
     #[test]
     fn migrates_legacy_offset_schema() {
@@ -675,7 +853,10 @@ mod tests {
         );
         assert_eq!(runtime.last_policy_fetch_at_unix_ms, Some(40));
         assert_eq!(runtime.last_policy_apply_at_unix_ms, Some(41));
-        assert_eq!(runtime.last_connect_error.as_deref(), Some("connection refused"));
+        assert_eq!(
+            runtime.last_connect_error.as_deref(),
+            Some("connection refused")
+        );
         assert_eq!(
             runtime.last_tls_error.as_deref(),
             Some("certificate verify failed")
@@ -739,5 +920,44 @@ mod tests {
         assert_eq!(loaded.source_offsets[0].offset, 50);
         assert_eq!(stats.batch_count, 1);
         assert_eq!(stats.total_bytes, 512);
+    }
+
+    #[test]
+    fn persists_security_scan_state() {
+        let dir = TempDir::new().unwrap();
+        let store = SqliteStateStore::new(dir.path()).unwrap();
+        store
+            .save_security_scan_state(&SecurityScanStateRecord {
+                last_started_at_unix_ms: Some(10),
+                last_finished_at_unix_ms: Some(20),
+                last_status: Some("completed".to_string()),
+                last_status_reason: Some("findings_detected".to_string()),
+                last_report_id: Some("report-1".to_string()),
+                last_delivery_status: Some("published".to_string()),
+                last_delivery_error: None,
+                last_rules_loaded_at_unix_ms: Some(9),
+                last_rules_digest: Some("abc123".to_string()),
+                last_report_path: Some("/tmp/report.json".to_string()),
+                backoff_until_unix_ms: Some(30),
+                consecutive_failures: 2,
+                summary: SecurityFindingSummary {
+                    total: 3,
+                    critical: 1,
+                    high: 1,
+                    medium: 1,
+                    low: 0,
+                    info: 0,
+                },
+                updated_at_unix_ms: 40,
+            })
+            .unwrap();
+
+        let loaded = store.load_security_scan_state().unwrap();
+        assert_eq!(loaded.last_status.as_deref(), Some("completed"));
+        assert_eq!(loaded.last_report_id.as_deref(), Some("report-1"));
+        assert_eq!(loaded.summary.total, 3);
+        assert_eq!(loaded.summary.critical, 1);
+        assert_eq!(loaded.last_rules_digest.as_deref(), Some("abc123"));
+        assert_eq!(loaded.backoff_until_unix_ms, Some(30));
     }
 }

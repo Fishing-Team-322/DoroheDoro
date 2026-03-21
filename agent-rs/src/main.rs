@@ -9,6 +9,7 @@ mod metadata;
 mod policy;
 mod proto;
 mod runtime;
+mod security;
 mod sources;
 mod state;
 #[cfg(test)]

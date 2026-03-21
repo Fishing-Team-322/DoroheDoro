@@ -14,13 +14,11 @@ use crate::{
     metadata::{IdentityStatusSnapshot, RuntimeMetadataContext},
     policy::parse_file_sources,
     runtime::{
-        degraded::spawn_degraded_controller,
-        diagnostics::spawn_diagnostics_worker,
-        heartbeat::spawn_heartbeat_worker,
-        sender::spawn_sender,
-        state_writer::spawn_state_writer,
+        degraded::spawn_degraded_controller, diagnostics::spawn_diagnostics_worker,
+        heartbeat::spawn_heartbeat_worker, sender::spawn_sender, state_writer::spawn_state_writer,
         ConnectivityStaticContext, RuntimePhase, RuntimeStaticContext, RuntimeStatusHandle,
     },
+    security::{spawn_security_scan_worker, SecurityPostureStatusSnapshot},
     sources::{spawn_file_source, SourceEvent},
     state::{RuntimeStatePatch, RuntimeStateRecord, SqliteStateStore},
     transport::{
@@ -167,6 +165,7 @@ impl App {
 
         let store = SqliteStateStore::new(&config.state_dir)?;
         let runtime_state = store.load_runtime_state()?;
+        let security_state = store.load_security_scan_state()?;
         let persisted_offsets = store.list_file_offsets()?;
         let persisted_identity = store.load_identity()?;
         let version = metadata.build.agent_version.clone();
@@ -208,6 +207,10 @@ impl App {
             runtime_state.last_successful_send_at_unix_ms,
         );
         status.restore_runtime_state(&runtime_state);
+        status.restore_security_posture(SecurityPostureStatusSnapshot::from_record(
+            &config.security_scan,
+            &security_state,
+        ));
 
         if runtime_state.degraded_mode {
             status.set_degraded_mode(true, Some("persisted runtime state".to_string()));
@@ -310,6 +313,16 @@ impl App {
             self.config.diagnostics.interval_sec,
         );
 
+        let security_scan = spawn_security_scan_worker(
+            self.transport.clone(),
+            self.status.clone(),
+            state_writer.clone(),
+            shutdown.clone(),
+            self.config.state_dir.clone(),
+            self.hostname.clone(),
+            self.config.security_scan.clone(),
+        );
+
         let degraded = spawn_degraded_controller(
             self.status.clone(),
             state_writer.clone(),
@@ -328,7 +341,9 @@ impl App {
             event_tx,
             shutdown.clone(),
         );
-        source_supervisor.reconcile(self.active_sources.clone()).await?;
+        source_supervisor
+            .reconcile(self.active_sources.clone())
+            .await?;
         self.status.set_runtime_phase(
             if self.status.is_degraded_mode() {
                 RuntimePhase::Degraded
@@ -357,8 +372,10 @@ impl App {
             }
         }
 
-        self.status
-            .set_runtime_phase(RuntimePhase::Stopping, Some("shutdown requested".to_string()));
+        self.status.set_runtime_phase(
+            RuntimePhase::Stopping,
+            Some("shutdown requested".to_string()),
+        );
         let _ = state_writer
             .update_runtime_state(RuntimeStatePatch {
                 runtime_status: Some(Some(RuntimePhase::Stopping.as_str().to_string())),
@@ -377,6 +394,7 @@ impl App {
         let _ = degraded.await??;
         let _ = heartbeat.await??;
         let _ = diagnostics.await??;
+        let _ = security_scan.await??;
         let _ = state_writer_handle.await??;
 
         info!("doro-agent stopped");
@@ -396,20 +414,25 @@ impl App {
             return Ok((agent_id, sources));
         }
 
-        match self.fetch_policy_candidate(agent_id.clone(), identity_status.clone()).await {
+        match self
+            .fetch_policy_candidate(agent_id.clone(), identity_status.clone())
+            .await
+        {
             Ok(fetched) => {
                 self.commit_policy_success(&fetched, true)?;
                 Ok((fetched.resolved_agent_id, fetched.sources))
             }
             Err(error) => {
-                let Some(fallback_sources) = self.load_persisted_policy_sources(&runtime_state)? else {
+                let Some(fallback_sources) = self.load_persisted_policy_sources(&runtime_state)?
+                else {
                     return Err(error);
                 };
 
                 let detail = format!("policy sync failed: {error}");
                 warn!(error = %error, "starting agent with last persisted policy after startup sync failure");
                 self.persist_policy_failure(&mut runtime_state, &error, &detail)?;
-                self.status.set_runtime_phase(RuntimePhase::Degraded, Some(detail));
+                self.status
+                    .set_runtime_phase(RuntimePhase::Degraded, Some(detail));
                 self.status
                     .set_configured_sources(&fallback_sources, &self.store.list_file_offsets()?);
                 Ok((agent_id, fallback_sources))
@@ -418,15 +441,18 @@ impl App {
     }
 
     async fn refresh_policy(&mut self, source_supervisor: &mut SourceSupervisor) -> AppResult<()> {
-        let identity_status = self.store.load_runtime_state()?.identity_status.map(|status| {
-            IdentityStatusSnapshot {
+        let identity_status = self
+            .store
+            .load_runtime_state()?
+            .identity_status
+            .map(|status| IdentityStatusSnapshot {
                 status,
                 reason: None,
-            }
-        }).unwrap_or_else(|| IdentityStatusSnapshot {
-            status: "reused".to_string(),
-            reason: Some("using current in-memory identity".to_string()),
-        });
+            })
+            .unwrap_or_else(|| IdentityStatusSnapshot {
+                status: "reused".to_string(),
+                reason: Some("using current in-memory identity".to_string()),
+            });
 
         match self
             .fetch_policy_candidate(self.agent_id.clone(), identity_status)
@@ -453,7 +479,8 @@ impl App {
                 let mut runtime_state = self.store.load_runtime_state()?;
                 let detail = format!("policy sync failed: {error}");
                 self.persist_policy_failure(&mut runtime_state, &error, &detail)?;
-                self.status.set_runtime_phase(RuntimePhase::Degraded, Some(detail));
+                self.status
+                    .set_runtime_phase(RuntimePhase::Degraded, Some(detail));
                 Ok(())
             }
         }
@@ -544,7 +571,8 @@ impl App {
                         current_revision: None,
                     })
                     .await?;
-                self.status.record_connectivity_success(Utc::now().timestamp_millis());
+                self.status
+                    .record_connectivity_success(Utc::now().timestamp_millis());
                 (reenrolled_agent_id, policy)
             }
             Err(error) => {
@@ -685,11 +713,7 @@ impl App {
         Ok(())
     }
 
-    fn persist_runtime_phase(
-        &self,
-        phase: RuntimePhase,
-        reason: Option<String>,
-    ) -> AppResult<()> {
+    fn persist_runtime_phase(&self, phase: RuntimePhase, reason: Option<String>) -> AppResult<()> {
         let mut runtime_state = self.store.load_runtime_state()?;
         runtime_state.runtime_status = Some(phase.as_str().to_string());
         runtime_state.runtime_status_reason = reason;
