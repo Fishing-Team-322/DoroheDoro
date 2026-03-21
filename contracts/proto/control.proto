@@ -1,0 +1,200 @@
+syntax = "proto3";
+
+package dorohedoro.control.v1;
+
+option go_package = "github.com/example/dorohedoro/contracts/controlproto;controlv1";
+
+message ControlReplyEnvelope {
+  string status = 1;
+  string code = 2;
+  string message = 3;
+  bytes payload = 4;
+  string correlation_id = 5;
+}
+
+// Policy contracts
+message Policy {
+  string policy_id = 1;
+  string name = 2;
+  string description = 3;
+  bool is_active = 4;
+  string latest_revision_id = 5;
+  string latest_revision = 6;
+  string policy_body_json = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message PolicyRevision {
+  string policy_revision_id = 1;
+  string policy_id = 2;
+  string revision = 3;
+  string policy_body_json = 4;
+  string created_at = 5;
+}
+
+message ListPoliciesRequest {
+  string correlation_id = 1;
+}
+
+message ListPoliciesResponse {
+  repeated Policy policies = 1;
+}
+
+message GetPolicyRequest {
+  string correlation_id = 1;
+  string policy_id = 2;
+}
+
+message CreatePolicyRequest {
+  string correlation_id = 1;
+  string name = 2;
+  string description = 3;
+  string policy_body_json = 4;
+}
+
+message UpdatePolicyRequest {
+  string correlation_id = 1;
+  string policy_id = 2;
+  string description = 3;
+  string policy_body_json = 4;
+}
+
+message GetPolicyRevisionsRequest {
+  string correlation_id = 1;
+  string policy_id = 2;
+}
+
+message GetPolicyRevisionsResponse {
+  repeated PolicyRevision revisions = 1;
+}
+
+// Inventory contracts
+message Host {
+  string host_id = 1;
+  string hostname = 2;
+  string ip = 3;
+  uint32 ssh_port = 4;
+  string remote_user = 5;
+  map<string, string> labels = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+message HostInput {
+  string hostname = 1;
+  string ip = 2;
+  uint32 ssh_port = 3;
+  string remote_user = 4;
+  map<string, string> labels = 5;
+}
+
+message ListHostsRequest {
+  string correlation_id = 1;
+}
+
+message ListHostsResponse {
+  repeated Host hosts = 1;
+}
+
+message GetHostRequest {
+  string correlation_id = 1;
+  string host_id = 2;
+}
+
+message CreateHostRequest {
+  string correlation_id = 1;
+  HostInput host = 2;
+}
+
+message UpdateHostRequest {
+  string correlation_id = 1;
+  string host_id = 2;
+  HostInput host = 3;
+}
+
+message HostGroup {
+  string host_group_id = 1;
+  string name = 2;
+  string description = 3;
+  string created_at = 4;
+  string updated_at = 5;
+  repeated HostGroupMember members = 6;
+}
+
+message HostGroupMember {
+  string host_group_member_id = 1;
+  string host_group_id = 2;
+  string host_id = 3;
+  string hostname = 4;
+}
+
+message ListHostGroupsRequest {
+  string correlation_id = 1;
+}
+
+message ListHostGroupsResponse {
+  repeated HostGroup groups = 1;
+}
+
+message GetHostGroupRequest {
+  string correlation_id = 1;
+  string host_group_id = 2;
+}
+
+message CreateHostGroupRequest {
+  string correlation_id = 1;
+  string name = 2;
+  string description = 3;
+}
+
+message UpdateHostGroupRequest {
+  string correlation_id = 1;
+  string host_group_id = 2;
+  string name = 3;
+  string description = 4;
+}
+
+message AddHostGroupMemberRequest {
+  string correlation_id = 1;
+  string host_group_id = 2;
+  string host_id = 3;
+}
+
+message RemoveHostGroupMemberRequest {
+  string correlation_id = 1;
+  string host_group_id = 2;
+  string host_id = 3;
+}
+
+// Credential metadata contracts
+message CredentialProfileMetadata {
+  string credentials_profile_id = 1;
+  string name = 2;
+  string kind = 3;
+  string description = 4;
+  string vault_ref = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+
+message ListCredentialsRequest {
+  string correlation_id = 1;
+}
+
+message ListCredentialsResponse {
+  repeated CredentialProfileMetadata profiles = 1;
+}
+
+message GetCredentialsRequest {
+  string correlation_id = 1;
+  string credentials_profile_id = 2;
+}
+
+message CreateCredentialsRequest {
+  string correlation_id = 1;
+  string name = 2;
+  string kind = 3;
+  string description = 4;
+  string vault_ref = 5;
+}

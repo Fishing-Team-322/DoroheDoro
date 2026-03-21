@@ -27,12 +27,20 @@ Normal hot path is memory-first:
 - batcher flushes by count, approximate bytes, or timer
 - sender waits for transport `ack`
 - state writer advances `acked_offset` only after successful send
+- sender drains spool fairly instead of using absolute spool-first priority
 
 Fallback spool is not the default path:
 
 - batches are written to spool only during degradation, queue pressure, or shutdown with unsent data
 - spool payloads are stored as files under `spool.dir`
 - SQLite keeps spool metadata and per-source `read_offset` / `acked_offset`
+- if spool metadata survives a crash but its payload file is already gone, startup recovery removes the broken entry
+
+Transport failure handling is explicit:
+
+- transient failures such as `TransientNetwork` stay on normal retry/backoff paths
+- permanent failures such as `Unauthorized`, `ServerRejected`, or serialization failures move the sender into `blocked_delivery`
+- blocked delivery is a hard degraded state: the agent stops tight retry loops, reports the reason in diagnostics, and keeps spooling new live batches when spool is enabled
 
 ## Config shape
 
@@ -112,11 +120,23 @@ Important tables:
 - `read_offset`: highest locally durable position, including data already durably spooled
 - `acked_offset`: highest position confirmed by the server
 
+Important semantic note:
+
+- persisted SQLite `read_offset` is durable local progress, not the in-memory live cursor
+- diagnostics expose `live_read_offset`, `durable_read_offset`, and `acked_offset` separately
+- `live_read_offset` exists only in memory and may be ahead of the persisted durable position
+
 Restart behavior:
 
 - if there is no spool backlog, readers resume from `acked_offset`
 - if there is durable spooled data, readers resume from `read_offset`
 - the agent does not write every batch to disk by default
+
+Spool cleanup and recovery:
+
+- spool cleanup deletes the payload file and then removes metadata
+- if the process crashes between those steps, the next startup or spool load pass recognizes `metadata present + payload missing` as a broken orphan and removes the stale metadata
+- the runtime does not assume partial spool cleanup is impossible
 
 ## File source behavior
 
@@ -127,6 +147,7 @@ Current file-source runtime supports:
 - copytruncate handling
 - inode rotation detection
 - reopen after rotation
+- current scaling model is one reader task per source
 
 Current non-goals for this phase:
 
@@ -158,6 +179,12 @@ To validate degraded mode and spool:
 4. confirm diagnostics report `degraded_mode=true`
 5. confirm `spool_batches` gets rows and `acked_offset` stops advancing until recovery
 
+Fair draining policy:
+
+- sender processes at most 3 spooled batches in a row
+- after that it checks the live send queue and sends one live batch if available
+- this keeps historical backlog from starving fresh traffic
+
 Useful commands:
 
 ```bash
@@ -174,6 +201,8 @@ sqlite3 /var/lib/doro-agent/state.db 'select batch_id, attempt_count, next_retry
 cd agent-rs
 cargo build --release --target x86_64-unknown-linux-gnu
 ```
+
+Release builds use `thin` LTO, `codegen-units = 1`, and symbol stripping. That keeps the binary smaller for mass deployment without changing runtime semantics.
 
 2. Copy files to the host.
 
@@ -221,3 +250,10 @@ Known limitation for this phase:
 
 - `batch.compress_threshold_bytes` is used only for local spool payload files
 - wire-level batch compression and transport-visible `batch_id` remain follow-up work because this task intentionally did not modify `edge_api/**` or `contracts/**`
+- the agent still has a build-time dependency on `../edge_api/contracts/proto/edge.proto`; this is localized in `agent-rs/build.rs` and remains explicit technical debt until the shared ingress contract is moved under `contracts/**`
+
+## Scaling note
+
+- current runtime uses one blocking file-reader task per configured source
+- this is intentionally lightweight for common deployments with tens of files, not hundreds of high-churn sources on one agent
+- the agent logs a warning when the configured source count exceeds 64 so operators notice when they are pushing beyond the intended profile

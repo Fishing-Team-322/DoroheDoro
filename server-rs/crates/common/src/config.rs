@@ -7,6 +7,7 @@ pub struct RuntimeConfig {
     pub postgres_dsn: String,
     pub nats_url: String,
     pub enrollment_http_addr: String,
+    pub control_http_addr: String,
     pub rust_log: String,
     pub enrollment_dev_bootstrap_token: String,
 }
@@ -39,6 +40,10 @@ impl RuntimeConfig {
             .get("ENROLLMENT_HTTP_ADDR")
             .cloned()
             .unwrap_or_else(|| "0.0.0.0:8081".to_string());
+        let control_http_addr = vars
+            .get("CONTROL_HTTP_ADDR")
+            .cloned()
+            .unwrap_or_else(|| "0.0.0.0:8082".to_string());
         let rust_log = vars
             .get("RUST_LOG")
             .cloned()
@@ -57,6 +62,9 @@ impl RuntimeConfig {
         if enrollment_http_addr.trim().is_empty() {
             return Err(ConfigError::Missing("ENROLLMENT_HTTP_ADDR"));
         }
+        if control_http_addr.trim().is_empty() {
+            return Err(ConfigError::Missing("CONTROL_HTTP_ADDR"));
+        }
         if enrollment_dev_bootstrap_token.trim().is_empty() {
             return Err(ConfigError::Missing("ENROLLMENT_DEV_BOOTSTRAP_TOKEN"));
         }
@@ -65,6 +73,7 @@ impl RuntimeConfig {
             postgres_dsn,
             nats_url,
             enrollment_http_addr,
+            control_http_addr,
             rust_log,
             enrollment_dev_bootstrap_token,
         })
@@ -90,6 +99,7 @@ mod tests {
         );
         assert_eq!(cfg.nats_url, "nats://localhost:4222");
         assert_eq!(cfg.enrollment_http_addr, "0.0.0.0:8081");
+        assert_eq!(cfg.control_http_addr, "0.0.0.0:8082");
         assert_eq!(cfg.rust_log, "info");
         assert_eq!(cfg.enrollment_dev_bootstrap_token, "dev-bootstrap-token");
     }
@@ -100,6 +110,7 @@ mod tests {
             ("POSTGRES_DSN", "postgres://example"),
             ("NATS_URL", "nats://example:4222"),
             ("ENROLLMENT_HTTP_ADDR", "127.0.0.1:9091"),
+            ("CONTROL_HTTP_ADDR", "127.0.0.1:9092"),
             ("RUST_LOG", "debug"),
             ("ENROLLMENT_DEV_BOOTSTRAP_TOKEN", "token-123"),
         ])
@@ -108,6 +119,7 @@ mod tests {
         assert_eq!(cfg.postgres_dsn, "postgres://example");
         assert_eq!(cfg.nats_url, "nats://example:4222");
         assert_eq!(cfg.enrollment_http_addr, "127.0.0.1:9091");
+        assert_eq!(cfg.control_http_addr, "127.0.0.1:9092");
         assert_eq!(cfg.rust_log, "debug");
         assert_eq!(cfg.enrollment_dev_bootstrap_token, "token-123");
     }

@@ -6,6 +6,7 @@ import type { FormEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { locales, type Locale } from "@/src/shared/config";
 import {
+  getLoginErrorMessage,
   getDefaultAuthenticatedPath,
   normalizeRedirectPath,
 } from "@/src/shared/lib/auth";

@@ -3,6 +3,8 @@
 /dist/
 .env
 *.log
+/.tmp/
+/cookies.txt
 */target
 /server-rs/.env
 */.env/
