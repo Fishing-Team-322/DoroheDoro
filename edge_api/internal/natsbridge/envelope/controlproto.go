@@ -224,6 +224,19 @@ func EncodeControlUpdateHostGroupRequest(correlationID, hostGroupID, name, descr
 	return out
 }
 
+func EncodeControlAddHostGroupMemberRequest(correlationID, hostGroupID, hostID string, audit AuditContext) []byte {
+	var out []byte
+	out = appendStringField(out, 1, correlationID)
+	out = appendStringField(out, 2, hostGroupID)
+	out = appendStringField(out, 3, hostID)
+	out = appendMessageField(out, 4, encodeAuditContext(audit))
+	return out
+}
+
+func EncodeControlRemoveHostGroupMemberRequest(correlationID, hostGroupID, hostID string, audit AuditContext) []byte {
+	return EncodeControlAddHostGroupMemberRequest(correlationID, hostGroupID, hostID, audit)
+}
+
 func EncodeControlListCredentialsRequest(correlationID string) []byte {
 	var out []byte
 	out = appendStringField(out, 1, correlationID)

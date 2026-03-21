@@ -53,20 +53,32 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	if registry.ControlClustersList != "control.clusters.list" {
 		t.Fatalf("unexpected clusters list subject: %s", registry.ControlClustersList)
 	}
+	if registry.ControlClustersAddHost != "control.clusters.add-host" {
+		t.Fatalf("unexpected clusters add-host subject: %s", registry.ControlClustersAddHost)
+	}
 	if registry.ControlRolesList != "control.roles.list" {
 		t.Fatalf("unexpected roles list subject: %s", registry.ControlRolesList)
 	}
-	if registry.ControlPermissionsList != "control.permissions.list" {
-		t.Fatalf("unexpected permissions list subject: %s", registry.ControlPermissionsList)
+	if registry.ControlRolesPermissionsGet != "control.roles.permissions.get" {
+		t.Fatalf("unexpected role permissions get subject: %s", registry.ControlRolesPermissionsGet)
 	}
-	if registry.IntegrationsList != "integrations.list" {
-		t.Fatalf("unexpected integrations list subject: %s", registry.IntegrationsList)
+	if registry.ControlRoleBindingsList != "control.role-bindings.list" {
+		t.Fatalf("unexpected role bindings list subject: %s", registry.ControlRoleBindingsList)
+	}
+	if registry.ControlIntegrationsList != "control.integrations.list" {
+		t.Fatalf("unexpected integrations list subject: %s", registry.ControlIntegrationsList)
 	}
 	if registry.TicketsList != "tickets.list" {
 		t.Fatalf("unexpected tickets list subject: %s", registry.TicketsList)
 	}
-	if registry.AnomaliesList != "anomalies.list" {
-		t.Fatalf("unexpected anomalies list subject: %s", registry.AnomaliesList)
+	if registry.TicketsStatusChange != "tickets.status.change" {
+		t.Fatalf("unexpected tickets status subject: %s", registry.TicketsStatusChange)
+	}
+	if registry.AnomalyRulesList != "anomalies.rules.list" {
+		t.Fatalf("unexpected anomaly rules list subject: %s", registry.AnomalyRulesList)
+	}
+	if registry.AnomalyInstancesList != "anomalies.instances.list" {
+		t.Fatalf("unexpected anomaly instances list subject: %s", registry.AnomalyInstancesList)
 	}
 	if registry.DeploymentsJobsCreate != "deployments.jobs.create" {
 		t.Fatalf("unexpected deployments create subject: %s", registry.DeploymentsJobsCreate)
