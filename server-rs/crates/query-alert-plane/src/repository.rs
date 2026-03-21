@@ -59,7 +59,10 @@ impl QueryAlertRepository {
         Ok((rows, total.max(0) as u64))
     }
 
-    pub async fn get_alert_rule(&self, alert_rule_id: Uuid) -> Result<Option<AlertRuleRecord>, sqlx::Error> {
+    pub async fn get_alert_rule(
+        &self,
+        alert_rule_id: Uuid,
+    ) -> Result<Option<AlertRuleRecord>, sqlx::Error> {
         sqlx::query_as::<_, AlertRuleRecord>(
             "SELECT id, name, description, status, severity, scope_type, scope_id,
                     condition_json, created_by, updated_by, created_at, updated_at
@@ -387,13 +390,15 @@ impl QueryAlertRepository {
         Ok(value.max(0) as u64)
     }
 
-    pub async fn count_active_hosts_since(&self, cutoff: DateTime<Utc>) -> Result<u64, sqlx::Error> {
-        let value = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM agents WHERE last_seen_at >= $1",
-        )
-        .bind(cutoff)
-        .fetch_one(&self.pool)
-        .await?;
+    pub async fn count_active_hosts_since(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> Result<u64, sqlx::Error> {
+        let value =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agents WHERE last_seen_at >= $1")
+                .bind(cutoff)
+                .fetch_one(&self.pool)
+                .await?;
         Ok(value.max(0) as u64)
     }
 
@@ -410,7 +415,10 @@ impl QueryAlertRepository {
         Ok(value.max(0) as u64)
     }
 
-    pub async fn recent_activity(&self, limit: u32) -> Result<Vec<AuditActivityRecord>, sqlx::Error> {
+    pub async fn recent_activity(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<AuditActivityRecord>, sqlx::Error> {
         sqlx::query_as::<_, AuditActivityRecord>(
             "SELECT event_type, entity_type, entity_id, reason, created_at
              FROM runtime_audit_events

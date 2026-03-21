@@ -66,8 +66,9 @@ impl IngestionService {
             .map_err(map_integration_error)?;
 
         for event in events.iter().cloned() {
-            let payload = serde_json::to_vec(&event)
-                .map_err(|error| AppError::internal(format!("serialize normalized event: {error}")))?;
+            let payload = serde_json::to_vec(&event).map_err(|error| {
+                AppError::internal(format!("serialize normalized event: {error}"))
+            })?;
             if let Err(error) = self
                 .nats
                 .publish(LOGS_INGEST_NORMALIZED.to_string(), payload.clone().into())
@@ -186,11 +187,9 @@ fn normalize_severity(value: &str) -> String {
 fn fingerprint_for(message: &str) -> String {
     static NUMBER_RE: OnceLock<Regex> = OnceLock::new();
     static HEX_RE: OnceLock<Regex> = OnceLock::new();
-    let number_re =
-        NUMBER_RE.get_or_init(|| Regex::new(r"\b\d+\b").expect("compile number regex"));
-    let hex_re = HEX_RE.get_or_init(|| {
-        Regex::new(r"\b[0-9a-fA-F]{8,}\b").expect("compile hex regex")
-    });
+    let number_re = NUMBER_RE.get_or_init(|| Regex::new(r"\b\d+\b").expect("compile number regex"));
+    let hex_re =
+        HEX_RE.get_or_init(|| Regex::new(r"\b[0-9a-fA-F]{8,}\b").expect("compile hex regex"));
 
     let normalized = number_re.replace_all(message, "<n>");
     let normalized = hex_re.replace_all(&normalized, "<hex>");

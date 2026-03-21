@@ -10,8 +10,7 @@ use common::{
     json::{AlertStreamEvent, AuditAppendEvent, NormalizedLogEvent},
     nats_subjects::{AUDIT_EVENTS_APPEND, UI_STREAM_ALERTS},
     proto::{
-        alerts,
-        query,
+        alerts, query,
         runtime::{AuditContext, PagingRequest, PagingResponse},
     },
     AppError, AppResult,
@@ -35,7 +34,11 @@ pub struct AuditActor {
 }
 
 impl AuditActor {
-    pub fn from_proto(correlation_id: &str, audit: Option<AuditContext>, default_reason: &str) -> Self {
+    pub fn from_proto(
+        correlation_id: &str,
+        audit: Option<AuditContext>,
+        default_reason: &str,
+    ) -> Self {
         let audit = audit.unwrap_or_default();
         Self {
             actor_id: non_empty_or(&audit.actor_id, "system"),
@@ -227,7 +230,10 @@ impl QueryAlertService {
             .map_err(map_db_error)?;
 
         Ok(query::ListLogAnomaliesResponse {
-            items: items.into_iter().map(|item| item.into_log_projection()).collect(),
+            items: items
+                .into_iter()
+                .map(|item| item.into_log_projection())
+                .collect(),
             total,
             limit,
             offset: request.offset,
@@ -330,7 +336,11 @@ impl QueryAlertService {
 
         Ok(alerts::ListAlertInstancesResponse {
             items: items.into_iter().map(|item| item.into_proto()).collect(),
-            paging: Some(PagingResponse { limit, offset, total }),
+            paging: Some(PagingResponse {
+                limit,
+                offset,
+                total,
+            }),
         })
     }
 
@@ -344,7 +354,9 @@ impl QueryAlertService {
             .get_alert_instance(alert_instance_id)
             .await
             .map_err(map_db_error)?
-            .ok_or_else(|| AppError::not_found(format!("alert instance {alert_instance_id} not found")))?;
+            .ok_or_else(|| {
+                AppError::not_found(format!("alert instance {alert_instance_id} not found"))
+            })?;
         Ok(alerts::GetAlertInstanceResponse {
             item: Some(item.into_proto()),
         })
@@ -368,7 +380,11 @@ impl QueryAlertService {
 
         Ok(alerts::ListAlertRulesResponse {
             items: items.into_iter().map(|item| item.into_proto()).collect(),
-            paging: Some(PagingResponse { limit, offset, total }),
+            paging: Some(PagingResponse {
+                limit,
+                offset,
+                total,
+            }),
         })
     }
 
@@ -392,7 +408,8 @@ impl QueryAlertService {
         &self,
         request: alerts::CreateAlertRuleRequest,
     ) -> AppResult<alerts::AlertRuleMutationResponse> {
-        let audit = AuditActor::from_proto(&request.correlation_id, request.audit, "alert rule created");
+        let audit =
+            AuditActor::from_proto(&request.correlation_id, request.audit, "alert rule created");
         let condition = parse_condition_json(&request.condition_json)?;
         validate_alert_rule_input(
             &request.name,
@@ -447,7 +464,8 @@ impl QueryAlertService {
         &self,
         request: alerts::UpdateAlertRuleRequest,
     ) -> AppResult<alerts::AlertRuleMutationResponse> {
-        let audit = AuditActor::from_proto(&request.correlation_id, request.audit, "alert rule updated");
+        let audit =
+            AuditActor::from_proto(&request.correlation_id, request.audit, "alert rule updated");
         let alert_rule_id = parse_uuid("alert_rule_id", &request.alert_rule_id)?;
         let condition = parse_condition_json(&request.condition_json)?;
         validate_alert_rule_input(
@@ -511,7 +529,8 @@ impl QueryAlertService {
                 continue;
             }
 
-            let since = parse_event_timestamp(&event.timestamp)? - Duration::minutes(condition.window_minutes as i64);
+            let since = parse_event_timestamp(&event.timestamp)?
+                - Duration::minutes(condition.window_minutes as i64);
             let hit_count = self
                 .clickhouse
                 .matching_count(
@@ -671,7 +690,9 @@ impl QueryAlertService {
                     warn!(error = %error, alert_instance_id = %instance.id, "failed to publish alert stream event");
                 }
             }
-            Err(error) => warn!(error = %error, alert_instance_id = %instance.id, "failed to encode alert stream event"),
+            Err(error) => {
+                warn!(error = %error, alert_instance_id = %instance.id, "failed to encode alert stream event")
+            }
         }
     }
 
@@ -686,7 +707,9 @@ impl QueryAlertService {
                     warn!(error = %error, entity_type = %event.entity_type, entity_id = %event.entity_id, "failed to publish audit append event");
                 }
             }
-            Err(error) => warn!(error = %error, entity_type = %event.entity_type, entity_id = %event.entity_id, "failed to encode audit append event"),
+            Err(error) => {
+                warn!(error = %error, entity_type = %event.entity_type, entity_id = %event.entity_id, "failed to encode audit append event")
+            }
         }
     }
 }
@@ -725,7 +748,9 @@ fn parse_time_window(from: &str, to: &str) -> AppResult<(DateTime<Utc>, DateTime
     };
     let start = if let Some(value) = optional_trimmed(from) {
         DateTime::parse_from_rfc3339(value)
-            .map_err(|error| AppError::invalid_argument(format!("invalid from timestamp: {error}")))?
+            .map_err(|error| {
+                AppError::invalid_argument(format!("invalid from timestamp: {error}"))
+            })?
             .with_timezone(&Utc)
     } else {
         end - Duration::hours(24)
@@ -742,14 +767,17 @@ fn parse_condition_json(payload: &str) -> AppResult<AlertRuleCondition> {
     if payload.trim().is_empty() {
         return Ok(AlertRuleCondition::default());
     }
-    let value: Value = serde_json::from_str(payload)
-        .map_err(|error| AppError::invalid_argument(format!("condition_json must be valid JSON: {error}")))?;
+    let value: Value = serde_json::from_str(payload).map_err(|error| {
+        AppError::invalid_argument(format!("condition_json must be valid JSON: {error}"))
+    })?;
     parse_condition_value(&value)
 }
 
 fn parse_condition_value(value: &Value) -> AppResult<AlertRuleCondition> {
     if !value.is_object() {
-        return Err(AppError::invalid_argument("condition_json must be a JSON object"));
+        return Err(AppError::invalid_argument(
+            "condition_json must be a JSON object",
+        ));
     }
     serde_json::from_value::<AlertRuleCondition>(value.clone())
         .map_err(|error| AppError::invalid_argument(format!("invalid alert condition: {error}")))
@@ -766,7 +794,10 @@ fn validate_alert_rule_input(
         return Err(AppError::invalid_argument("name is required"));
     }
     let severity = normalize_severity(severity);
-    if !matches!(severity.as_str(), "info" | "low" | "medium" | "high" | "critical") {
+    if !matches!(
+        severity.as_str(),
+        "info" | "low" | "medium" | "high" | "critical"
+    ) {
         return Err(AppError::invalid_argument("unsupported alert severity"));
     }
     let scope_type = normalize_scope_type(scope_type);
@@ -774,16 +805,22 @@ fn validate_alert_rule_input(
         "global" => {}
         "host" | "service" => {
             if scope_id.is_none() {
-                return Err(AppError::invalid_argument("scope_id is required for scoped alert rules"));
+                return Err(AppError::invalid_argument(
+                    "scope_id is required for scoped alert rules",
+                ));
             }
         }
         _ => return Err(AppError::invalid_argument("unsupported scope_type")),
     }
     if condition.threshold == 0 {
-        return Err(AppError::invalid_argument("condition threshold must be greater than 0"));
+        return Err(AppError::invalid_argument(
+            "condition threshold must be greater than 0",
+        ));
     }
     if condition.window_minutes == 0 || condition.window_minutes > 24 * 60 {
-        return Err(AppError::invalid_argument("condition window_minutes must be between 1 and 1440"));
+        return Err(AppError::invalid_argument(
+            "condition window_minutes must be between 1 and 1440",
+        ));
     }
     Ok(())
 }
@@ -816,7 +853,11 @@ fn normalize_severity(value: &str) -> String {
     }
 }
 
-fn event_matches_rule(rule: &AlertRuleRecord, condition: &AlertRuleCondition, event: &NormalizedLogEvent) -> bool {
+fn event_matches_rule(
+    rule: &AlertRuleRecord,
+    condition: &AlertRuleCondition,
+    event: &NormalizedLogEvent,
+) -> bool {
     match rule.scope_type.as_str() {
         "global" => {}
         "host" => {
@@ -899,7 +940,10 @@ fn map_db_error(error: sqlx::Error) -> AppError {
         sqlx::Error::Database(db_error) => {
             if let Some(code) = db_error.code() {
                 if code.as_ref() == "23505" {
-                    return AppError::invalid_argument(format!("constraint violation: {}", db_error.message()));
+                    return AppError::invalid_argument(format!(
+                        "constraint violation: {}",
+                        db_error.message()
+                    ));
                 }
             }
             AppError::internal(format!("database error: {db_error}"))

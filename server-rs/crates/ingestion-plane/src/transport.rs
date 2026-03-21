@@ -34,13 +34,14 @@ async fn run_ingest_handler(
             }
         };
 
-        let request = match serde_json::from_slice::<edge::IngestLogsRequest>(message.payload.as_ref()) {
-            Ok(request) => request,
-            Err(error) => {
-                warn!(error = %error, "failed to decode logs.ingest.raw payload");
-                continue;
-            }
-        };
+        let request =
+            match serde_json::from_slice::<edge::IngestLogsRequest>(message.payload.as_ref()) {
+                Ok(request) => request,
+                Err(error) => {
+                    warn!(error = %error, "failed to decode logs.ingest.raw payload");
+                    continue;
+                }
+            };
 
         if let Err(error) = service.ingest_batch(request).await {
             error!(error_code = error.code().as_str(), error = %error, "failed to ingest log batch");
