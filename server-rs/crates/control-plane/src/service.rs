@@ -10,11 +10,11 @@ use uuid::Uuid;
 
 use crate::{
     models::{
-        paging_response, AnomalyInstanceModel, AnomalyRuleModel, AuditEventModel, ClusterDetailsModel, ClusterModel,
-        CredentialProfileModel, HostGroupMemberModel, HostGroupModel, HostModel,
-        IntegrationBindingModel, IntegrationModel, PermissionModel, PolicyModel,
-        PolicyRevisionModel, RoleBindingModel, RoleModel, TicketCommentModel, TicketDetailsModel,
-        TicketModel,
+        paging_response, AnomalyInstanceModel, AnomalyRuleModel, AuditEventModel,
+        ClusterDetailsModel, ClusterModel, CredentialProfileModel, HostGroupMemberModel,
+        HostGroupModel, HostModel, IntegrationBindingModel, IntegrationModel, PermissionModel,
+        PolicyModel, PolicyRevisionModel, RoleBindingModel, RoleModel, TicketCommentModel,
+        TicketDetailsModel, TicketModel,
     },
     repository::{ControlRepository, PermissionDefinition},
 };

@@ -8,11 +8,11 @@ use uuid::Uuid;
 
 use crate::{
     models::{
-        AnomalyInstanceModel, AnomalyRuleModel, AuditEventModel, ClusterAgentBindingModel, ClusterDetailsModel,
-        ClusterHostBindingModel, ClusterModel, CredentialProfileModel, HostGroupMemberModel,
-        HostGroupModel, HostModel, IntegrationBindingModel, IntegrationModel, PermissionModel,
-        PolicyModel, PolicyRevisionModel, RoleBindingModel, RoleModel, TicketCommentModel,
-        TicketDetailsModel, TicketEventModel, TicketModel,
+        AnomalyInstanceModel, AnomalyRuleModel, AuditEventModel, ClusterAgentBindingModel,
+        ClusterDetailsModel, ClusterHostBindingModel, ClusterModel, CredentialProfileModel,
+        HostGroupMemberModel, HostGroupModel, HostModel, IntegrationBindingModel, IntegrationModel,
+        PermissionModel, PolicyModel, PolicyRevisionModel, RoleBindingModel, RoleModel,
+        TicketCommentModel, TicketDetailsModel, TicketEventModel, TicketModel,
     },
     service::AuditInfo,
 };

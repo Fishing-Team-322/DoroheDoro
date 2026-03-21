@@ -506,10 +506,7 @@ fn sql_string(value: &str) -> String {
 }
 
 fn clickhouse_timestamp_expr(value: &str) -> String {
-    format!(
-        "parseDateTime64BestEffort({}, 3, 'UTC')",
-        sql_string(value)
-    )
+    format!("parseDateTime64BestEffort({}, 3, 'UTC')", sql_string(value))
 }
 
 fn as_u64(value: &Value) -> u64 {

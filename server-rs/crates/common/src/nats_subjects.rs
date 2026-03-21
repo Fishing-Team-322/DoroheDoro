@@ -2,6 +2,7 @@ pub const AGENTS_ENROLL_REQUEST: &str = "agents.enroll.request";
 pub const AGENTS_POLICY_FETCH: &str = "agents.policy.fetch";
 pub const AGENTS_HEARTBEAT: &str = "agents.heartbeat";
 pub const AGENTS_DIAGNOSTICS: &str = "agents.diagnostics";
+pub const SECURITY_POSTURE_REPORTS: &str = "security.posture.reports";
 pub const AGENTS_LIST: &str = "agents.list";
 pub const AGENTS_GET: &str = "agents.get";
 pub const AGENTS_DIAGNOSTICS_GET: &str = "agents.diagnostics.get";
@@ -110,6 +111,7 @@ mod tests {
         assert_eq!(AGENTS_POLICY_FETCH, "agents.policy.fetch");
         assert_eq!(AGENTS_HEARTBEAT, "agents.heartbeat");
         assert_eq!(AGENTS_DIAGNOSTICS, "agents.diagnostics");
+        assert_eq!(SECURITY_POSTURE_REPORTS, "security.posture.reports");
         assert_eq!(AGENTS_LIST, "agents.list");
         assert_eq!(AGENTS_GET, "agents.get");
         assert_eq!(AGENTS_DIAGNOSTICS_GET, "agents.diagnostics.get");

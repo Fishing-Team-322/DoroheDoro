@@ -4,11 +4,14 @@ use async_nats::{Client, Subject, Subscriber};
 use common::{
     json::NormalizedLogEvent,
     nats_subjects::*,
-    proto::{alerts, decode_message, encode_message, ok_envelope, ok_json_envelope, query, runtime},
-    AppError,
+    proto::{
+        alerts, decode_message, encode_message, ok_envelope, ok_json_envelope, query, runtime,
+    },
+    AppError, AppResult,
 };
 use futures::StreamExt;
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
 use tokio::{select, task::JoinHandle, time::interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -100,7 +103,9 @@ pub async fn spawn_handlers(
         _,
         _,
     >(
-        client.subscribe(QUERY_LOGS_TOP_SERVICES.to_string()).await?,
+        client
+            .subscribe(QUERY_LOGS_TOP_SERVICES.to_string())
+            .await?,
         client.clone(),
         service.clone(),
         shutdown.clone(),
@@ -124,7 +129,9 @@ pub async fn spawn_handlers(
         _,
         _,
     >(
-        client.subscribe(QUERY_LOGS_TOP_PATTERNS.to_string()).await?,
+        client
+            .subscribe(QUERY_LOGS_TOP_PATTERNS.to_string())
+            .await?,
         client.clone(),
         service.clone(),
         shutdown.clone(),
@@ -234,6 +241,23 @@ pub async fn spawn_handlers(
         service.clone(),
         shutdown.clone(),
     )));
+    tasks.push(tokio::spawn(run_agent_heartbeat_consumer(
+        client.subscribe(AGENTS_HEARTBEAT.to_string()).await?,
+        service.clone(),
+        shutdown.clone(),
+    )));
+    tasks.push(tokio::spawn(run_agent_diagnostics_consumer(
+        client.subscribe(AGENTS_DIAGNOSTICS.to_string()).await?,
+        service.clone(),
+        shutdown.clone(),
+    )));
+    tasks.push(tokio::spawn(run_security_posture_consumer(
+        client
+            .subscribe(SECURITY_POSTURE_REPORTS.to_string())
+            .await?,
+        service.clone(),
+        shutdown.clone(),
+    )));
     tasks.push(tokio::spawn(run_alert_resolution_loop(service, shutdown)));
 
     Ok(tasks)
@@ -317,6 +341,80 @@ async fn run_normalized_log_consumer(
 
         if let Err(error) = service.handle_normalized_event(event).await {
             error!(error_code = error.code().as_str(), error = %error, "failed to evaluate alert rules");
+        }
+    }
+}
+
+async fn run_agent_heartbeat_consumer(
+    subscription: Subscriber,
+    service: Arc<QueryAlertService>,
+    shutdown: CancellationToken,
+) {
+    consume_json_stream(
+        subscription,
+        service,
+        shutdown,
+        |service, payload| async move { service.handle_heartbeat_signal(payload).await },
+    )
+    .await;
+}
+
+async fn run_agent_diagnostics_consumer(
+    subscription: Subscriber,
+    service: Arc<QueryAlertService>,
+    shutdown: CancellationToken,
+) {
+    consume_json_stream(
+        subscription,
+        service,
+        shutdown,
+        |service, payload| async move { service.handle_diagnostics_signal(payload).await },
+    )
+    .await;
+}
+
+async fn run_security_posture_consumer(
+    subscription: Subscriber,
+    service: Arc<QueryAlertService>,
+    shutdown: CancellationToken,
+) {
+    consume_json_stream(
+        subscription,
+        service,
+        shutdown,
+        |service, payload| async move { service.handle_security_signal(payload).await },
+    )
+    .await;
+}
+
+async fn consume_json_stream<F, Fut>(
+    mut subscription: Subscriber,
+    service: Arc<QueryAlertService>,
+    shutdown: CancellationToken,
+    handler: F,
+) where
+    F: Fn(Arc<QueryAlertService>, Value) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = AppResult<()>> + Send,
+{
+    loop {
+        let message = select! {
+            _ = shutdown.cancelled() => break,
+            next = subscription.next() => {
+                let Some(message) = next else { break; };
+                message
+            }
+        };
+
+        let payload = match serde_json::from_slice::<Value>(message.payload.as_ref()) {
+            Ok(payload) => payload,
+            Err(error) => {
+                warn!(error = %error, "failed to decode signal payload");
+                continue;
+            }
+        };
+
+        if let Err(error) = handler(service.clone(), payload).await {
+            error!(error_code = error.code().as_str(), error = %error, "failed to process signal");
         }
     }
 }
