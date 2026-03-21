@@ -2,6 +2,7 @@ pub const AGENTS_ENROLL_REQUEST: &str = "agents.enroll.request";
 pub const AGENTS_POLICY_FETCH: &str = "agents.policy.fetch";
 pub const AGENTS_HEARTBEAT: &str = "agents.heartbeat";
 pub const AGENTS_DIAGNOSTICS: &str = "agents.diagnostics";
+pub const AGENTS_BOOTSTRAP_TOKEN_ISSUE: &str = "agents.bootstrap-token.issue";
 pub const CONTROL_POLICIES_LIST: &str = "control.policies.list";
 pub const CONTROL_POLICIES_GET: &str = "control.policies.get";
 pub const CONTROL_POLICIES_CREATE: &str = "control.policies.create";
@@ -20,6 +21,14 @@ pub const CONTROL_HOST_GROUPS_REMOVE_MEMBER: &str = "control.host-groups.remove-
 pub const CONTROL_CREDENTIALS_LIST: &str = "control.credentials.list";
 pub const CONTROL_CREDENTIALS_GET: &str = "control.credentials.get";
 pub const CONTROL_CREDENTIALS_CREATE: &str = "control.credentials.create";
+pub const DEPLOYMENTS_JOBS_CREATE: &str = "deployments.jobs.create";
+pub const DEPLOYMENTS_JOBS_GET: &str = "deployments.jobs.get";
+pub const DEPLOYMENTS_JOBS_LIST: &str = "deployments.jobs.list";
+pub const DEPLOYMENTS_JOBS_RETRY: &str = "deployments.jobs.retry";
+pub const DEPLOYMENTS_JOBS_CANCEL: &str = "deployments.jobs.cancel";
+pub const DEPLOYMENTS_JOBS_STATUS: &str = "deployments.jobs.status";
+pub const DEPLOYMENTS_JOBS_STEP: &str = "deployments.jobs.step";
+pub const DEPLOYMENTS_PLAN_CREATE: &str = "deployments.plan.create";
 
 #[cfg(test)]
 mod tests {
@@ -31,6 +40,7 @@ mod tests {
         assert_eq!(AGENTS_POLICY_FETCH, "agents.policy.fetch");
         assert_eq!(AGENTS_HEARTBEAT, "agents.heartbeat");
         assert_eq!(AGENTS_DIAGNOSTICS, "agents.diagnostics");
+        assert_eq!(AGENTS_BOOTSTRAP_TOKEN_ISSUE, "agents.bootstrap-token.issue");
         assert_eq!(CONTROL_POLICIES_LIST, "control.policies.list");
         assert_eq!(CONTROL_POLICIES_GET, "control.policies.get");
         assert_eq!(CONTROL_POLICIES_CREATE, "control.policies.create");
@@ -55,5 +65,13 @@ mod tests {
         assert_eq!(CONTROL_CREDENTIALS_LIST, "control.credentials.list");
         assert_eq!(CONTROL_CREDENTIALS_GET, "control.credentials.get");
         assert_eq!(CONTROL_CREDENTIALS_CREATE, "control.credentials.create");
+        assert_eq!(DEPLOYMENTS_JOBS_CREATE, "deployments.jobs.create");
+        assert_eq!(DEPLOYMENTS_JOBS_GET, "deployments.jobs.get");
+        assert_eq!(DEPLOYMENTS_JOBS_LIST, "deployments.jobs.list");
+        assert_eq!(DEPLOYMENTS_JOBS_RETRY, "deployments.jobs.retry");
+        assert_eq!(DEPLOYMENTS_JOBS_CANCEL, "deployments.jobs.cancel");
+        assert_eq!(DEPLOYMENTS_JOBS_STATUS, "deployments.jobs.status");
+        assert_eq!(DEPLOYMENTS_JOBS_STEP, "deployments.jobs.step");
+        assert_eq!(DEPLOYMENTS_PLAN_CREATE, "deployments.plan.create");
     }
 }

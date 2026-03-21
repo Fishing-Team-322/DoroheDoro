@@ -14,7 +14,13 @@ pub mod control {
     include!(concat!(env!("OUT_DIR"), "/dorohedoro.control.v1.rs"));
 }
 
-use self::{agent::AgentReplyEnvelope, control::ControlReplyEnvelope};
+pub mod deployment {
+    include!(concat!(env!("OUT_DIR"), "/dorohedoro.deployment.v1.rs"));
+}
+
+use self::{
+    agent::AgentReplyEnvelope, control::ControlReplyEnvelope, deployment::DeploymentReplyEnvelope,
+};
 
 pub fn encode_message<T>(message: &T) -> Vec<u8>
 where
@@ -60,10 +66,27 @@ where
     }
 }
 
+pub fn deployment_ok_envelope<T>(
+    payload: &T,
+    correlation_id: impl Into<String>,
+) -> DeploymentReplyEnvelope
+where
+    T: Message,
+{
+    DeploymentReplyEnvelope {
+        status: "ok".to_string(),
+        code: "ok".to_string(),
+        message: String::new(),
+        payload: encode_message(payload),
+        correlation_id: correlation_id.into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        agent::FetchPolicyRequest, control::ListHostsResponse, control_ok_envelope, decode_message,
+        agent::FetchPolicyRequest, control::Host, control::ListHostsResponse, control_ok_envelope,
+        decode_message, deployment::ListDeploymentJobsResponse, deployment_ok_envelope,
         encode_message, ok_envelope,
     };
 
@@ -97,11 +120,37 @@ mod tests {
 
     #[test]
     fn wraps_control_ok_envelope() {
-        let payload = ListHostsResponse { hosts: Vec::new() };
+        let payload = ListHostsResponse {
+            hosts: vec![Host {
+                host_id: "host-1".to_string(),
+                hostname: "srv-1".to_string(),
+                ip: "10.0.0.1".to_string(),
+                ssh_port: 22,
+                remote_user: "root".to_string(),
+                labels: Default::default(),
+                created_at: "2026-03-21T00:00:00Z".to_string(),
+                updated_at: "2026-03-21T00:00:00Z".to_string(),
+            }],
+        };
         let envelope = control_ok_envelope(&payload, "corr-3");
         assert_eq!(envelope.status, "ok");
         assert_eq!(envelope.code, "ok");
         assert_eq!(envelope.correlation_id, "corr-3");
+        assert!(!envelope.payload.is_empty());
+    }
+
+    #[test]
+    fn wraps_deployment_ok_envelope() {
+        let payload = ListDeploymentJobsResponse {
+            jobs: Vec::new(),
+            limit: 10,
+            offset: 0,
+            total: 0,
+        };
+        let envelope = deployment_ok_envelope(&payload, "corr-4");
+        assert_eq!(envelope.status, "ok");
+        assert_eq!(envelope.code, "ok");
+        assert_eq!(envelope.correlation_id, "corr-4");
         assert!(!envelope.payload.is_empty());
     }
 }

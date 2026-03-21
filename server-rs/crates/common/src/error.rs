@@ -1,6 +1,8 @@
 use thiserror::Error;
 
-use crate::proto::{agent::AgentReplyEnvelope, control::ControlReplyEnvelope};
+use crate::proto::{
+    agent::AgentReplyEnvelope, control::ControlReplyEnvelope, deployment::DeploymentReplyEnvelope,
+};
 
 pub type AppResult<T> = Result<T, AppError>;
 
@@ -89,6 +91,19 @@ impl AppError {
             correlation_id: correlation_id.into(),
         }
     }
+
+    pub fn to_deployment_envelope(
+        &self,
+        correlation_id: impl Into<String>,
+    ) -> DeploymentReplyEnvelope {
+        DeploymentReplyEnvelope {
+            status: "error".to_string(),
+            code: self.code().as_str().to_string(),
+            message: self.message().to_string(),
+            payload: Vec::new(),
+            correlation_id: correlation_id.into(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -112,6 +127,16 @@ mod tests {
         assert_eq!(envelope.code, "internal");
         assert_eq!(envelope.message, "boom");
         assert_eq!(envelope.correlation_id, "corr-456");
+        assert!(envelope.payload.is_empty());
+    }
+
+    #[test]
+    fn maps_error_to_deployment_envelope() {
+        let envelope = AppError::invalid_argument("bad job").to_deployment_envelope("corr-789");
+        assert_eq!(envelope.status, "error");
+        assert_eq!(envelope.code, "invalid_argument");
+        assert_eq!(envelope.message, "bad job");
+        assert_eq!(envelope.correlation_id, "corr-789");
         assert!(envelope.payload.is_empty());
     }
 }
