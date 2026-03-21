@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package dorohedoro.edge.v1;
+
+option go_package = "github.com/example/dorohedoro/contracts/proto;edgev1";
+
+message AgentLog {
+  int64 timestamp_unix_ms = 1;
+  string service = 2;
+  string severity = 3;
+  string message = 4;
+  map<string, string> labels = 5;
+}
+
+message EnrollRequest {
+  string enrollment_token = 1;
+  string host = 2;
+  map<string, string> labels = 3;
+}
+
+message EnrollResponse {
+  string agent_id = 1;
+  string status = 2;
+  int64 issued_at_unix_ms = 3;
+  string request_id = 4;
+}
+
+message FetchPolicyRequest {
+  string agent_id = 1;
+  string current_revision = 2;
+}
+
+message PolicyPayload {
+  string policy_id = 1;
+  string revision = 2;
+  string body_json = 3;
+}
+
+message FetchPolicyResponse {
+  PolicyPayload policy = 1;
+  bool changed = 2;
+  string request_id = 3;
+}
+
+message HeartbeatRequest {
+  string agent_id = 1;
+  string host = 2;
+  int64 sent_at_unix_ms = 3;
+  string status = 4;
+}
+
+message DiagnosticsRequest {
+  string agent_id = 1;
+  string host = 2;
+  int64 sent_at_unix_ms = 3;
+  string payload_json = 4;
+}
+
+message IngestLogsRequest {
+  string agent_id = 1;
+  string host = 2;
+  int64 sent_at_unix_ms = 3;
+  repeated AgentLog events = 4;
+}
+
+message Ack {
+  bool accepted = 1;
+  string request_id = 2;
+  string message = 3;
+}
+
+message IngestLogsResponse {
+  bool accepted = 1;
+  int32 accepted_count = 2;
+  string request_id = 3;
+}
+
+service AgentIngressService {
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  rpc FetchPolicy(FetchPolicyRequest) returns (FetchPolicyResponse);
+  rpc SendHeartbeat(HeartbeatRequest) returns (Ack);
+  rpc SendDiagnostics(DiagnosticsRequest) returns (Ack);
+  rpc IngestLogs(IngestLogsRequest) returns (IngestLogsResponse);
+}

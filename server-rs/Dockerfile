@@ -8,6 +8,7 @@ COPY server-rs/Cargo.toml server-rs/Cargo.lock ./
 COPY server-rs/crates ./crates
 COPY server-rs/migrations ./migrations
 COPY contracts /src/contracts
+COPY deployments /src/deployments
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
@@ -17,10 +18,21 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    openssh-client \
+    python3 \
+    python3-pip \
+    sshpass && \
+    pip3 install --break-system-packages --no-cache-dir \
+      ansible-core==2.17.7 \
+      ansible-runner==2.4.0 && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY --from=build /tmp/server-runtime /usr/local/bin/server-runtime
+COPY --from=build /src/deployments /app/deployments
 
 ENTRYPOINT ["/usr/local/bin/server-runtime"]

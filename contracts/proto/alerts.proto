@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package dorohedoro.alerts.v1;
+
+option go_package = "github.com/example/dorohedoro/contracts/alertsproto;alertsv1";
+
+import "runtime.proto";
+
+message AlertRule {
+  string alert_rule_id = 1;
+  string name = 2;
+  string description = 3;
+  string status = 4;
+  string severity = 5;
+  string scope_type = 6;
+  string scope_id = 7;
+  string condition_json = 8;
+  string created_at = 9;
+  string updated_at = 10;
+  string created_by = 11;
+  string updated_by = 12;
+}
+
+message AlertInstance {
+  string alert_instance_id = 1;
+  string alert_rule_id = 2;
+  string title = 3;
+  string status = 4;
+  string severity = 5;
+  string triggered_at = 6;
+  string acknowledged_at = 7;
+  string resolved_at = 8;
+  string host = 9;
+  string service = 10;
+  string fingerprint = 11;
+  string payload_json = 12;
+}
+
+message ListAlertInstancesRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+  string status = 3;
+  string severity = 4;
+  string host = 5;
+  string service = 6;
+}
+
+message ListAlertInstancesResponse {
+  repeated AlertInstance items = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message GetAlertInstanceRequest {
+  string correlation_id = 1;
+  string alert_instance_id = 2;
+}
+
+message GetAlertInstanceResponse {
+  AlertInstance item = 1;
+}
+
+message ListAlertRulesRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+  string query = 3;
+  string status = 4;
+}
+
+message ListAlertRulesResponse {
+  repeated AlertRule items = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message GetAlertRuleRequest {
+  string correlation_id = 1;
+  string alert_rule_id = 2;
+}
+
+message GetAlertRuleResponse {
+  AlertRule item = 1;
+}
+
+message CreateAlertRuleRequest {
+  string correlation_id = 1;
+  string name = 2;
+  string description = 3;
+  string severity = 4;
+  string scope_type = 5;
+  string scope_id = 6;
+  string condition_json = 7;
+  dorohedoro.runtime.v1.AuditContext audit = 8;
+}
+
+message UpdateAlertRuleRequest {
+  string correlation_id = 1;
+  string alert_rule_id = 2;
+  string name = 3;
+  string description = 4;
+  string status = 5;
+  string severity = 6;
+  string scope_type = 7;
+  string scope_id = 8;
+  string condition_json = 9;
+  dorohedoro.runtime.v1.AuditContext audit = 10;
+}
+
+message AlertRuleMutationResponse {
+  AlertRule item = 1;
+}

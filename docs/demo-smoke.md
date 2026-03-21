@@ -1,6 +1,6 @@
 # Demo Smoke Flow
 
-Current honest end-to-end demo for the integrated slice that exists in this repository today.
+Current honest smoke for the integrated slice that exists in this repository today.
 
 ## 1. Start the local full stack
 
@@ -8,27 +8,28 @@ Current honest end-to-end demo for the integrated slice that exists in this repo
 docker compose up --build
 ```
 
-For the stack overview and server-mode variant, see [`docs/demo-stack.md`](./demo-stack.md).
-
-Services that should come up healthy:
+Healthy services should include:
 
 - `frontend`
 - `edge-api`
+- `agent-artifacts`
 - `nats`
 - `postgres`
+- `vault`
+- `vault-init`
+- `opensearch`
+- `clickhouse`
 - `enrollment-plane`
 - `control-plane`
 - `deployment-plane`
+- `ingestion-plane`
+- `query-alert-plane`
 
 ## 2. Open WEB
 
 - URL: `http://localhost:3000`
 - login: `admin`
 - password: `admin123`
-
-The WEB auth flow goes through:
-
-`browser -> frontend -> /api/edge/* -> edge-api`
 
 ## 3. Check boundary readiness
 
@@ -42,83 +43,76 @@ Expected:
 {"status":"ready"}
 ```
 
-## 4. Inspect live boundary endpoints
+## 4. Replace the placeholder Vault SSH secret before real deployment
 
-Direct HTTP:
-
-```bash
-curl http://localhost:8080/api/v1/policies
-curl http://localhost:8080/api/v1/hosts
-curl http://localhost:8080/api/v1/credentials
-curl http://localhost:8080/api/v1/deployments
-```
-
-Same-origin path through the frontend proxy:
+The compose stack seeds `secret/data/ssh/dev` with a placeholder value. Replace it before creating a real deployment job:
 
 ```bash
-curl http://localhost:3000/api/edge/api/v1/policies
-curl http://localhost:3000/api/edge/api/v1/hosts
+docker compose exec vault \
+  vault kv put secret/ssh/dev \
+  ssh_user=root \
+  ssh_private_key=@/path/to/real/id_ed25519
 ```
 
-These should return live data through:
-
-`edge-api -> NATS -> control-plane / deployment-plane`
-
-## 5. Create a deployment-friendly policy, host and credentials metadata
+## 5. Create policy, host, host group and credentials metadata
 
 Example payloads:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/policies \
   -H "Content-Type: application/json" \
-  -d '{"name":"deploy-demo-policy","description":"policy for deployment smoke","policy_body_json":{"paths":["/var/log/syslog"],"labels":{"env":"demo","plane":"data"},"revision":"deploy-rev-1","source_type":"file"}}'
+  -d '{"name":"deploy-demo-policy","description":"policy for deployment smoke","policy_body_json":{"sources":[{"type":"file","path":"/var/log/syslog","service":"host","severity_hint":"info"}],"labels":{"env":"demo","plane":"data"}}}'
 
 curl -X POST http://localhost:8080/api/v1/hosts \
   -H "Content-Type: application/json" \
-  -d '{"hostname":"demo-host-1","ip":"10.10.0.11","ssh_port":22,"remote_user":"root","labels":{"env":"demo","role":"web"}}'
+  -d '{"hostname":"demo-host-1","ip":"10.10.0.11","ssh_port":22,"remote_user":"root","labels":{"env":"demo","arch":"amd64","distro_family":"debian"}}'
+
+curl -X POST http://localhost:8080/api/v1/host-groups \
+  -H "Content-Type: application/json" \
+  -d '{"name":"demo-linux","description":"practical run hosts"}'
 
 curl -X POST http://localhost:8080/api/v1/credentials \
   -H "Content-Type: application/json" \
-  -d '{"name":"ssh-default","kind":"ssh_key","description":"Default SSH key","vault_ref":"secret/data/ssh/default"}'
+  -d '{"name":"ssh-dev","kind":"ssh_key","description":"Vault-backed SSH key","vault_ref":"secret/data/ssh/dev"}'
 ```
 
-## 6. Create a deployment plan and job
+Add the host to the group:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/host-groups/<group_id>/members \
+  -H "Content-Type: application/json" \
+  -d '{"host_id":"<host_id>"}'
+```
+
+## 6. Create deployment plan and job
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/deployments/plan \
   -H "Content-Type: application/json" \
-  -d '{"job_type":"install","policy_id":"<policy_id>","target_host_ids":["<host_id>"],"credential_profile_id":"<credentials_profile_id>","requested_by":"demo-user"}'
+  -d '{"job_type":"install","policy_id":"<policy_id>","target_host_group_ids":["<group_id>"],"credential_profile_id":"<credentials_profile_id>","requested_by":"demo-user"}'
 
 curl -X POST http://localhost:8080/api/v1/deployments \
   -H "Content-Type: application/json" \
-  -d '{"job_type":"install","policy_id":"<policy_id>","target_host_ids":["<host_id>"],"credential_profile_id":"<credentials_profile_id>","requested_by":"demo-user"}'
+  -d '{"job_type":"install","policy_id":"<policy_id>","target_host_group_ids":["<group_id>"],"credential_profile_id":"<credentials_profile_id>","requested_by":"demo-user"}'
+```
 
+Inspect:
+
+```bash
 curl http://localhost:8080/api/v1/deployments/<job_id>
 curl http://localhost:8080/api/v1/deployments/<job_id>/steps
 curl http://localhost:8080/api/v1/deployments/<job_id>/targets
 ```
 
-The deployment should progress and end in `succeeded` with non-empty steps/targets.
-
-## 7. Verify the deployment SSE gateway
-
-Open the stream:
+## 7. Verify deployment SSE
 
 ```bash
 curl -N http://localhost:8080/api/v1/stream/deployments
 ```
 
-Create another deployment job while the stream is open. The SSE client should receive:
+Create another deployment job while the stream is open. You should receive `ready`, `status` and `step` events.
 
-- `event: ready`
-- `event: status`
-- `event: step`
-
-This verifies:
-
-`deployment-plane -> NATS -> edge-api SSE -> WEB client`
-
-## 8. Enroll a demo agent over gRPC + mTLS
+## 8. Enroll an agent over gRPC + mTLS
 
 Run the smoke client inside the live `edge-api` container:
 
@@ -140,65 +134,34 @@ Expected:
 - `SendDiagnostics` succeeds
 - `IngestLogs` succeeds
 
-If you need a standalone cert set outside compose, use the scripts documented in [`docs/dev-pki.md`](./dev-pki.md).
-
-## 9. Inspect enrolled agents through the boundary
+## 9. Inspect agents, logs, alerts and audit
 
 ```bash
 curl http://localhost:8080/api/v1/agents
-curl http://localhost:8080/api/v1/agents/<agent_id>
-curl http://localhost:8080/api/v1/agents/<agent_id>/diagnostics
-curl http://localhost:8080/api/v1/agents/<agent_id>/policy
+curl http://localhost:8080/api/v1/logs/search -H "Content-Type: application/json" -d '{"query":"","limit":20,"offset":0}'
+curl http://localhost:8080/api/v1/dashboards/overview
+curl http://localhost:8080/api/v1/alerts
+curl http://localhost:8080/api/v1/audit
 ```
 
-After the fake agent has enrolled, these should return real PostgreSQL-backed data via:
+This verifies:
 
-`edge-api -> NATS -> enrollment-plane`
+- `edge-api -> NATS -> enrollment-plane`
+- `edge-api -> NATS -> ingestion-plane`
+- `edge-api -> NATS -> query-alert-plane`
+- `edge-api -> NATS -> control-plane` audit read-side
 
-## 10. Prepare a practical 3-host rollout
+## 10. Prepare the 3-host practical run
 
-Example inventory:
+Use:
 
-- [`deployments/ansible/inventories/three-hosts.example.ini`](../deployments/ansible/inventories/three-hosts.example.ini)
-- [`deployments/ansible/group_vars/agents.example.yml`](../deployments/ansible/group_vars/agents.example.yml)
+- [`../deployments/ansible/inventories/three-hosts.example.ini`](../deployments/ansible/inventories/three-hosts.example.ini)
+- [`../deployments/ansible/group_vars/agents.example.yml`](../deployments/ansible/group_vars/agents.example.yml)
 
-Expected practical shape for the first real test:
+Practical target shape:
 
-- one public boundary host: `https://fishingteam.su`
-- three remote Linux hosts in the `agents` inventory
-- artifact manifest served from the release bundle
-- per-host agent install via Ansible
-
-Run:
-
-```bash
-ansible-playbook \
-  -i deployments/ansible/inventories/three-hosts.example.ini \
-  deployments/ansible/playbooks/install-agent.yml \
-  -e @deployments/ansible/group_vars/agents.example.yml
-```
-
-For the current repo state, this rollout is honest in two parts:
-
-- real `agent-rs` hosts can already be pointed at `https://fishingteam.su` and `fishingteam.su:443`
-- transport-level client-certificate mTLS is already validated at the boundary with `fake-agent`
-
-The remaining gap is in `agent-rs` client-cert configuration, not in `edge_api`. Until that lands, treat the real 3-host rollout as:
-
-- real domain/TLS/boundary path for deployed agents
-- separate boundary mTLS validation with `fake-agent`
-
-## 11. What is intentionally still unavailable
-
-The current repo still does not contain live Rust runtime crates for:
-
-- query / dashboard runtime
-- alerts runtime
-- audit runtime
-
-So these route groups still return controlled `501 not_implemented` with boundary metadata instead of fake Go business logic:
-
-- logs search/analytics
-- dashboards
-- alerts
-- audit
+- one public boundary host under a domain
+- three Linux hosts reachable by Ansible
+- Vault-backed SSH credentials
+- deployment launched from WEB or the same HTTP API
+- agent enrollment, heartbeat, diagnostics, logs, alerts and audit all visible afterwards

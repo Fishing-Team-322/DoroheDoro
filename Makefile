@@ -1,4 +1,4 @@
-.PHONY: build run test tidy fmt compose-config stack-up stack-down stack-logs edge-config edge-up edge-down swagger agent-release agent-manifest pki-dev-ca pki-edge-cert pki-agent-cert
+.PHONY: build run test tidy fmt compose-config stack-up stack-down stack-logs edge-config edge-up edge-down swagger swagger-check agent-release agent-manifest pki-dev-ca pki-edge-cert pki-agent-cert
 
 APP_DIR := edge_api
 
@@ -19,6 +19,9 @@ fmt:
 
 swagger:
 	cd $(APP_DIR) && node scripts/render-openapi.cjs
+
+swagger-check:
+	cd $(APP_DIR) && node scripts/render-openapi.cjs --check
 
 compose-config:
 	docker compose config

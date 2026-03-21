@@ -25,7 +25,6 @@ doro_agent_sources:
     service: host
     severity_hint: info
 
-# Current boundary side is mTLS-ready and validated with fake-agent.
-# The real agent runtime currently uses TLS to the public domain but does not yet expose
-# client certificate configuration through this install contract. Keep this rollout on the
-# public TLS path until agent-rs adds explicit client-cert support.
+# deployment-plane can now inject CA/cert/key material through the ansible install contract
+# when Vault refs are configured on the SERVER side. For manual ansible runs you can still
+# keep the public TLS path and omit client identity files until mTLS material is available.

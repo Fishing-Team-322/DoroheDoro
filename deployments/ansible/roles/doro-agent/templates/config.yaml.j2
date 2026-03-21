@@ -7,6 +7,20 @@ log_level: "{{ doro_agent_log_level }}"
 transport:
   mode: "{{ doro_agent_transport_mode }}"
 
+{% if doro_agent_tls_server_name | trim != '' or doro_agent_tls_ca_src_path | trim != '' or doro_agent_tls_cert_src_path | trim != '' or doro_agent_tls_key_src_path | trim != '' %}
+tls:
+{% if doro_agent_tls_ca_src_path | trim != '' %}
+  ca_path: "{{ doro_agent_tls_ca_path }}"
+{% endif %}
+{% if doro_agent_tls_cert_src_path | trim != '' and doro_agent_tls_key_src_path | trim != '' %}
+  cert_path: "{{ doro_agent_tls_cert_path }}"
+  key_path: "{{ doro_agent_tls_key_path }}"
+{% endif %}
+{% if doro_agent_tls_server_name | trim != '' %}
+  server_name: "{{ doro_agent_tls_server_name }}"
+{% endif %}
+{% endif %}
+
 heartbeat:
   interval_sec: {{ doro_agent_heartbeat_interval_sec }}
 

@@ -1,5 +1,5 @@
-import { DashboardPlaceholderPage } from "@/src/page-modules/dashboard-placeholder";
+import { PoliciesPage as PoliciesPageView } from "@/src/page-modules/policies";
 
 export default function PoliciesPage() {
-  return <DashboardPlaceholderPage />;
+  return <PoliciesPageView />;
 }

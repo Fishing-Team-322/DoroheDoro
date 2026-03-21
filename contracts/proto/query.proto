@@ -1,0 +1,176 @@
+syntax = "proto3";
+
+package dorohedoro.query.v1;
+
+option go_package = "github.com/example/dorohedoro/contracts/queryproto;queryv1";
+
+import "runtime.proto";
+
+message LogQueryFilter {
+  string query = 1;
+  string from = 2;
+  string to = 3;
+  string host = 4;
+  string service = 5;
+  string severity = 6;
+}
+
+message LogEvent {
+  string id = 1;
+  string timestamp = 2;
+  string host = 3;
+  string agent_id = 4;
+  string source_type = 5;
+  string source = 6;
+  string service = 7;
+  string severity = 8;
+  string message = 9;
+  string fingerprint = 10;
+  map<string, string> labels = 11;
+  string fields_json = 12;
+  string raw = 13;
+}
+
+message SearchLogsRequest {
+  string correlation_id = 1;
+  LogQueryFilter filter = 2;
+  uint32 limit = 3;
+  uint64 offset = 4;
+}
+
+message SearchLogsResponse {
+  repeated LogEvent items = 1;
+  uint64 total = 2;
+  uint32 limit = 3;
+  uint64 offset = 4;
+  uint32 took_ms = 5;
+}
+
+message GetLogEventRequest {
+  string correlation_id = 1;
+  string event_id = 2;
+}
+
+message GetLogEventResponse {
+  LogEvent item = 1;
+  uint32 took_ms = 2;
+}
+
+message GetLogContextRequest {
+  string correlation_id = 1;
+  string event_id = 2;
+  uint32 before = 3;
+  uint32 after = 4;
+}
+
+message GetLogContextResponse {
+  LogEvent anchor = 1;
+  repeated LogEvent before = 2;
+  repeated LogEvent after = 3;
+  uint32 took_ms = 4;
+}
+
+message CountBucket {
+  string key = 1;
+  uint64 count = 2;
+}
+
+message HistogramBucket {
+  string bucket = 1;
+  uint64 count = 2;
+}
+
+message HeatmapBucket {
+  string bucket = 1;
+  string severity = 2;
+  uint64 count = 3;
+}
+
+message PatternBucket {
+  string fingerprint = 1;
+  string sample_message = 2;
+  uint64 count = 3;
+}
+
+message LogAnalyticsRequest {
+  string correlation_id = 1;
+  LogQueryFilter filter = 2;
+  uint32 limit = 3;
+}
+
+message HistogramResponse {
+  repeated HistogramBucket items = 1;
+}
+
+message CountBucketsResponse {
+  repeated CountBucket items = 1;
+}
+
+message HeatmapResponse {
+  repeated HeatmapBucket items = 1;
+}
+
+message TopPatternsResponse {
+  repeated PatternBucket items = 1;
+}
+
+message LogAnomalyProjection {
+  string alert_instance_id = 1;
+  string alert_rule_id = 2;
+  string status = 3;
+  string severity = 4;
+  string title = 5;
+  string fingerprint = 6;
+  string host = 7;
+  string service = 8;
+  string triggered_at = 9;
+  string payload_json = 10;
+}
+
+message ListLogAnomaliesRequest {
+  string correlation_id = 1;
+  LogQueryFilter filter = 2;
+  uint32 limit = 3;
+  uint64 offset = 4;
+}
+
+message ListLogAnomaliesResponse {
+  repeated LogAnomalyProjection items = 1;
+  uint64 total = 2;
+  uint32 limit = 3;
+  uint64 offset = 4;
+}
+
+message DashboardMetric {
+  string key = 1;
+  string label = 2;
+  string value = 3;
+  double change = 4;
+  string trend = 5;
+  string description = 6;
+}
+
+message DashboardActivityItem {
+  string kind = 1;
+  string title = 2;
+  string description = 3;
+  string timestamp = 4;
+}
+
+message DashboardOverviewRequest {
+  string correlation_id = 1;
+  string from = 2;
+  string to = 3;
+}
+
+message DashboardOverviewResponse {
+  repeated DashboardMetric metrics = 1;
+  uint64 active_hosts = 2;
+  uint64 open_alerts = 3;
+  uint64 deployment_jobs = 4;
+  uint64 ingested_events = 5;
+  repeated DashboardActivityItem recent_activity = 6;
+  repeated HistogramBucket log_histogram = 7;
+  repeated CountBucket top_services = 8;
+  repeated CountBucket top_hosts = 9;
+}

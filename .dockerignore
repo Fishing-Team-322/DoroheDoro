@@ -1,6 +1,12 @@
 **
 !.dockerignore
+!agent-rs/
+!agent-rs/**
 !contracts/
 !contracts/**
+!deployments/
+!deployments/**
+!scripts/
+!scripts/**
 !server-rs/
 !server-rs/**

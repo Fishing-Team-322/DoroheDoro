@@ -18,8 +18,14 @@ import { ConsolePage } from "@/src/shared/ui";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  ActivityIcon,
+  BellIcon,
+  GridIcon,
   HomeIcon,
+  LogsIcon,
   MenuIcon,
+  PulseIcon,
+  RocketIcon,
   ServerIcon,
   SettingsIcon,
   ShieldIcon,
@@ -173,13 +179,19 @@ export function DashboardSidebar({
                 const isActive =
                   pathname === href || pathname.startsWith(`${href}/`);
                 const Icon = item.icon;
-                const navItem = dictionary.navigation[item.key];
+                const navItem =
+                  (
+                    dictionary.navigation as Record<
+                      string,
+                      { label?: string; description?: string } | undefined
+                    >
+                  )[item.key] ?? {};
 
                 return (
                   <SidebarNavItem
                     key={item.href}
                     href={href}
-                    label={navItem.label}
+                    label={navItem.label ?? item.fallbackLabel}
                     Icon={Icon}
                     isActive={isActive}
                     collapsed={collapsed}
@@ -395,6 +407,18 @@ function getSidebarIcon(item: Pick<NavItem, "key">) {
       return ServerIcon;
     case "policies":
       return ShieldIcon;
+    case "credentials":
+      return GridIcon;
+    case "deployments":
+      return RocketIcon;
+    case "agents":
+      return PulseIcon;
+    case "logs":
+      return LogsIcon;
+    case "alerts":
+      return BellIcon;
+    case "audit":
+      return ActivityIcon;
     case "profile":
       return SettingsIcon;
     default:

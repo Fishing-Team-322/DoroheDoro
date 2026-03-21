@@ -113,6 +113,8 @@ impl DeploymentRepository {
                 "expires_at": target.bootstrap.expires_at,
                 "bootstrap_yaml": target.bootstrap.bootstrap_yaml,
             });
+            let artifact_payload =
+                serde_json::to_value(&target.artifact).unwrap_or_else(|_| json!({}));
 
             sqlx::query(
                 "INSERT INTO deployment_targets (
@@ -123,6 +125,7 @@ impl DeploymentRepository {
                     hostname_snapshot,
                     status,
                     bootstrap_payload_json,
+                    artifact_payload_json,
                     rendered_vars_json,
                     error_message,
                     created_at,
@@ -130,7 +133,7 @@ impl DeploymentRepository {
                     finished_at,
                     updated_at
                  )
-                 VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, '', $8, NULL, NULL, $8)",
+                 VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, '', $9, NULL, NULL, $9)",
             )
             .bind(target_id)
             .bind(job_id)
@@ -138,6 +141,7 @@ impl DeploymentRepository {
             .bind(target.host.host_id)
             .bind(&target.host.hostname)
             .bind(&bootstrap_payload)
+            .bind(&artifact_payload)
             .bind(&target.rendered_vars)
             .bind(now)
             .execute(&mut *tx)
@@ -151,6 +155,7 @@ impl DeploymentRepository {
                 hostname_snapshot: target.host.hostname.clone(),
                 status: DeploymentTargetStatus::Pending,
                 bootstrap_payload_json: bootstrap_payload,
+                artifact_payload_json: artifact_payload,
                 rendered_vars_json: target.rendered_vars.clone(),
                 error_message: String::new(),
                 created_at: now,
@@ -258,6 +263,8 @@ impl DeploymentRepository {
                 "expires_at": target.bootstrap.expires_at,
                 "bootstrap_yaml": target.bootstrap.bootstrap_yaml,
             });
+            let artifact_payload =
+                serde_json::to_value(&target.artifact).unwrap_or_else(|_| json!({}));
 
             sqlx::query(
                 "INSERT INTO deployment_targets (
@@ -268,6 +275,7 @@ impl DeploymentRepository {
                     hostname_snapshot,
                     status,
                     bootstrap_payload_json,
+                    artifact_payload_json,
                     rendered_vars_json,
                     error_message,
                     created_at,
@@ -275,7 +283,7 @@ impl DeploymentRepository {
                     finished_at,
                     updated_at
                  )
-                 VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, '', $8, NULL, NULL, $8)",
+                 VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8, '', $9, NULL, NULL, $9)",
             )
             .bind(target_id)
             .bind(job_id)
@@ -283,6 +291,7 @@ impl DeploymentRepository {
             .bind(target.host.host_id)
             .bind(&target.host.hostname)
             .bind(&bootstrap_payload)
+            .bind(&artifact_payload)
             .bind(&target.rendered_vars)
             .bind(now)
             .execute(&mut *tx)
@@ -296,6 +305,7 @@ impl DeploymentRepository {
                 hostname_snapshot: target.host.hostname.clone(),
                 status: DeploymentTargetStatus::Pending,
                 bootstrap_payload_json: bootstrap_payload,
+                artifact_payload_json: artifact_payload,
                 rendered_vars_json: target.rendered_vars.clone(),
                 error_message: String::new(),
                 created_at: now,
@@ -475,6 +485,7 @@ impl DeploymentRepository {
                 hostname_snapshot,
                 status,
                 bootstrap_payload_json,
+                artifact_payload_json,
                 rendered_vars_json,
                 error_message,
                 created_at,
@@ -1100,6 +1111,7 @@ fn target_from_row(row: PgRow) -> DeploymentTargetRecord {
         status: DeploymentTargetStatus::from_str(row.get::<String, _>("status").as_str())
             .expect("valid target status"),
         bootstrap_payload_json: row.get("bootstrap_payload_json"),
+        artifact_payload_json: row.get("artifact_payload_json"),
         rendered_vars_json: row.get("rendered_vars_json"),
         error_message: row.get("error_message"),
         created_at: row.get("created_at"),

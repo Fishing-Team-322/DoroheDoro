@@ -95,12 +95,16 @@ type Registry struct {
 
 	AlertsList        string
 	AlertsGet         string
+	AlertsRulesList   string
+	AlertsRulesGet    string
 	AlertsRulesCreate string
 	AlertsRulesUpdate string
 
-	AuditList string
+	AuditList         string
+	AuditEventsAppend string
 
-	LogsIngestRaw string
+	LogsIngestRaw        string
+	LogsIngestNormalized string
 
 	StreamLogs        string
 	StreamDeployments string
@@ -207,12 +211,16 @@ func Defaults() Registry {
 
 		AlertsList:        "alerts.list",
 		AlertsGet:         "alerts.get",
+		AlertsRulesList:   "alerts.rules.list",
+		AlertsRulesGet:    "alerts.rules.get",
 		AlertsRulesCreate: "alerts.rules.create",
 		AlertsRulesUpdate: "alerts.rules.update",
 
-		AuditList: "audit.list",
+		AuditList:         "audit.list",
+		AuditEventsAppend: "audit.events.append",
 
-		LogsIngestRaw: "logs.ingest.raw",
+		LogsIngestRaw:        "logs.ingest.raw",
+		LogsIngestNormalized: "logs.ingest.normalized",
 
 		StreamLogs:        "ui.stream.logs",
 		StreamDeployments: "ui.stream.deployments",

@@ -2,7 +2,11 @@ use std::{collections::HashMap, sync::Arc};
 
 use async_nats::Client;
 use common::{
-    nats_subjects::{AGENTS_BOOTSTRAP_TOKEN_ISSUE, DEPLOYMENTS_JOBS_STATUS, DEPLOYMENTS_JOBS_STEP},
+    json::AuditAppendEvent,
+    nats_subjects::{
+        AGENTS_BOOTSTRAP_TOKEN_ISSUE, AUDIT_EVENTS_APPEND, DEPLOYMENTS_JOBS_STATUS,
+        DEPLOYMENTS_JOBS_STEP,
+    },
     proto::{
         agent::{IssueBootstrapTokenRequest, IssueBootstrapTokenResponse},
         decode_message, deployment, encode_message, runtime,
@@ -15,6 +19,8 @@ use tracing::{error, warn};
 use uuid::Uuid;
 
 use crate::{
+    artifacts,
+    config::{AgentTlsMaterialConfig, ArtifactResolverConfig},
     credentials::resolver::CredentialsResolver,
     executor::DynDeploymentExecutor,
     inventory::resolver::InventoryResolver,
@@ -23,6 +29,7 @@ use crate::{
         DeploymentJobStatus, DeploymentPlan, DeploymentSnapshot, DeploymentStepStatus,
         DeploymentTargetRecord, DeploymentTargetStatus, ExecutionAuditContext, ExecutionResult,
         ExecutionSnapshot, ExecutionTarget, ListJobsFilter, RetryStrategy, RunningAttempt,
+        TlsConfigYaml,
     },
     policy::resolver::PolicyResolver,
     render::{
@@ -44,6 +51,8 @@ pub struct DeploymentService {
     edge_public_url: String,
     edge_grpc_addr: String,
     agent_state_dir_default: String,
+    artifact_config: Option<ArtifactResolverConfig>,
+    agent_tls_material: AgentTlsMaterialConfig,
     execution_handles: Arc<Mutex<HashMap<Uuid, CancellationToken>>>,
 }
 
@@ -55,6 +64,8 @@ impl DeploymentService {
         edge_public_url: String,
         edge_grpc_addr: String,
         agent_state_dir_default: String,
+        artifact_config: Option<ArtifactResolverConfig>,
+        agent_tls_material: AgentTlsMaterialConfig,
     ) -> Self {
         Self {
             repo,
@@ -66,6 +77,8 @@ impl DeploymentService {
             edge_public_url,
             edge_grpc_addr,
             agent_state_dir_default,
+            artifact_config,
+            agent_tls_material,
             execution_handles: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -130,6 +143,22 @@ impl DeploymentService {
             .map_err(map_db_error)?;
         let job_id = running.job.id;
         self.publish_status(&running.job).await;
+        self.publish_audit_event(
+            "deployment.job.created",
+            "deployment_job",
+            job_id,
+            &running.job.requested_by,
+            "user",
+            running.attempt.id.to_string(),
+            "deployment job created",
+            serde_json::json!({
+                "job_type": running.job.job_type.as_str(),
+                "status": running.job.status.as_str(),
+                "policy_id": running.job.policy_id,
+                "credential_profile_id": running.job.credential_profile_id,
+            }),
+        )
+        .await;
         self.spawn_execution(running).await;
 
         Ok(deployment::CreateDeploymentJobResponse {
@@ -266,6 +295,21 @@ impl DeploymentService {
             .await
             .map_err(map_db_error)?;
         self.publish_status(&running.job).await;
+        self.publish_audit_event(
+            "deployment.job.retry",
+            "deployment_job",
+            job_id,
+            &running.attempt.triggered_by,
+            "user",
+            running.attempt.id.to_string(),
+            &running.attempt.reason,
+            serde_json::json!({
+                "attempt_no": running.attempt.attempt_no,
+                "strategy": retry_strategy_str(strategy),
+                "status": running.job.status.as_str(),
+            }),
+        )
+        .await;
         self.spawn_execution(running).await;
 
         Ok(deployment::RetryDeploymentJobResponse {
@@ -367,9 +411,29 @@ impl DeploymentService {
         } else {
             policy_to_source_paths_preview(&policy.policy_body_json)?
         };
+        let tls_config = build_agent_tls_config(
+            &self.edge_public_url,
+            &self.edge_grpc_addr,
+            &self.agent_tls_material,
+        )?;
+        let manifest = match &self.artifact_config {
+            Some(config) => Some(artifacts::load_manifest(config).await?),
+            None => None,
+        };
 
+        let mut warnings = warnings;
         let mut targets = Vec::new();
         for host in hosts {
+            let artifact_resolution = match (&self.artifact_config, &manifest) {
+                (Some(config), Some(manifest)) => {
+                    artifacts::resolve_for_host(manifest, config, &host)?
+                }
+                _ => artifacts::HostArtifactResolution {
+                    artifact: artifacts::unresolved_artifact(),
+                    warnings: Vec::new(),
+                },
+            };
+            warnings.extend(artifact_resolution.warnings.clone());
             let (token_id, bootstrap_token, expires_at) = if issue_real_tokens {
                 let issued = self
                     .issue_bootstrap_token(
@@ -399,10 +463,16 @@ impl DeploymentService {
                 &self.agent_state_dir_default,
                 "info",
                 &source_paths,
+                tls_config.clone(),
             );
             let bootstrap_yaml = render_bootstrap_yaml(&bootstrap_config)?;
-            let rendered_vars =
-                render_target_vars(&host, spec.job_type.as_str(), "/etc/doro-agent/config.yaml");
+            let rendered_vars = render_target_vars(
+                &host,
+                spec.job_type,
+                &self.agent_state_dir_default,
+                &bootstrap_config,
+                &artifact_resolution.artifact,
+            );
 
             targets.push(crate::models::DeploymentTargetSnapshot {
                 host,
@@ -412,6 +482,7 @@ impl DeploymentService {
                     expires_at,
                     bootstrap_yaml,
                 },
+                artifact: artifact_resolution.artifact,
                 rendered_vars,
             });
         }
@@ -563,6 +634,20 @@ impl DeploymentService {
             .await
             .map_err(map_db_error)?;
         self.publish_status(&job).await;
+        self.publish_audit_event(
+            "deployment.job.started",
+            "deployment_job",
+            job_id,
+            &running.attempt.triggered_by,
+            "user",
+            attempt_id.to_string(),
+            "deployment attempt started",
+            serde_json::json!({
+                "attempt_no": running.attempt.attempt_no,
+                "executor_kind": self.executor.kind().as_str(),
+            }),
+        )
+        .await;
 
         let execution_result = match self
             .executor
@@ -670,6 +755,24 @@ impl DeploymentService {
             .await
             .map_err(map_db_error)?;
         self.publish_status(&job).await;
+        self.publish_audit_event(
+            "deployment.job.finished",
+            "deployment_job",
+            job_id,
+            &running.attempt.triggered_by,
+            "user",
+            attempt_id.to_string(),
+            &execution_result.current_phase,
+            serde_json::json!({
+                "attempt_no": running.attempt.attempt_no,
+                "final_status": job.status.as_str(),
+                "current_phase": execution_result.current_phase,
+                "succeeded_targets": job.summary_data().succeeded_targets,
+                "failed_targets": job.summary_data().failed_targets,
+                "cancelled_targets": job.summary_data().cancelled_targets,
+            }),
+        )
+        .await;
 
         Ok(())
     }
@@ -733,6 +836,45 @@ impl DeploymentService {
             warn!(error = %error, job_id = %job_id, step_id = %step.id, "failed to publish deployment step event");
         }
     }
+
+    async fn publish_audit_event(
+        &self,
+        event_type: &str,
+        entity_type: &str,
+        entity_id: Uuid,
+        actor_id: &str,
+        actor_type: &str,
+        request_id: String,
+        reason: &str,
+        payload_json: serde_json::Value,
+    ) {
+        let event = AuditAppendEvent {
+            event_type: event_type.to_string(),
+            entity_type: entity_type.to_string(),
+            entity_id: entity_id.to_string(),
+            actor_id: non_empty_or(actor_id, "system"),
+            actor_type: non_empty_or(actor_type, "system"),
+            request_id,
+            reason: non_empty_or(reason, event_type),
+            payload_json,
+            created_at: None,
+        };
+
+        match serde_json::to_vec(&event) {
+            Ok(payload) => {
+                if let Err(error) = self
+                    .nats
+                    .publish(AUDIT_EVENTS_APPEND.to_string(), payload.into())
+                    .await
+                {
+                    warn!(error = %error, entity_type, entity_id = %entity_id, "failed to publish deployment audit event");
+                }
+            }
+            Err(error) => {
+                warn!(error = %error, entity_type, entity_id = %entity_id, "failed to encode deployment audit event");
+            }
+        }
+    }
 }
 
 fn build_execution_snapshot(running: &RunningAttempt) -> AppResult<ExecutionSnapshot> {
@@ -754,6 +896,7 @@ fn build_execution_snapshot(running: &RunningAttempt) -> AppResult<ExecutionSnap
                 deployment_target_id: target.id,
                 host: snapshot_target.host.clone(),
                 bootstrap: snapshot_target.bootstrap.clone(),
+                artifact: snapshot_target.artifact.clone(),
                 rendered_vars: snapshot_target.rendered_vars.clone(),
             })
         })
@@ -863,6 +1006,13 @@ fn non_empty_or(value: &str, default: &str) -> String {
     }
 }
 
+fn retry_strategy_str(value: RetryStrategy) -> &'static str {
+    match value {
+        RetryStrategy::All => "all",
+        RetryStrategy::FailedOnly => "failed_only",
+    }
+}
+
 fn derive_final_job_status(targets: &[DeploymentTargetRecord]) -> DeploymentJobStatus {
     let total = targets.len();
     let succeeded = targets
@@ -924,6 +1074,71 @@ fn map_db_error(error: sqlx::Error) -> AppError {
     }
 }
 
+fn build_agent_tls_config(
+    edge_public_url: &str,
+    edge_grpc_addr: &str,
+    material: &AgentTlsMaterialConfig,
+) -> AppResult<Option<TlsConfigYaml>> {
+    if !grpc_endpoint_uses_tls(edge_public_url, edge_grpc_addr)? {
+        return Ok(None);
+    }
+
+    Ok(Some(TlsConfigYaml {
+        ca_path: material
+            .ca_vault_ref
+            .as_ref()
+            .map(|_| "/etc/doro-agent/pki/ca.pem".to_string()),
+        cert_path: material
+            .cert_vault_ref
+            .as_ref()
+            .map(|_| "/etc/doro-agent/pki/agent.pem".to_string()),
+        key_path: material
+            .key_vault_ref
+            .as_ref()
+            .map(|_| "/etc/doro-agent/pki/agent.key".to_string()),
+        server_name: derive_tls_server_name(edge_public_url, edge_grpc_addr)?,
+    }))
+}
+
+fn grpc_endpoint_uses_tls(edge_public_url: &str, edge_grpc_addr: &str) -> AppResult<bool> {
+    let endpoint = build_grpc_base_url(edge_public_url, edge_grpc_addr)?;
+    Ok(reqwest::Url::parse(&endpoint)
+        .map_err(|error| AppError::internal(format!("invalid edge grpc url: {error}")))?
+        .scheme()
+        == "https")
+}
+
+fn derive_tls_server_name(
+    edge_public_url: &str,
+    edge_grpc_addr: &str,
+) -> AppResult<Option<String>> {
+    let grpc_url = reqwest::Url::parse(&build_grpc_base_url(edge_public_url, edge_grpc_addr)?)
+        .map_err(|error| AppError::internal(format!("invalid edge grpc url: {error}")))?;
+    if let Some(host) = grpc_url.host_str() {
+        if host.parse::<std::net::IpAddr>().is_err() {
+            return Ok(Some(host.to_string()));
+        }
+    }
+
+    let public_url = reqwest::Url::parse(edge_public_url)
+        .map_err(|error| AppError::internal(format!("invalid edge public url: {error}")))?;
+    Ok(public_url.host_str().map(ToOwned::to_owned))
+}
+
+fn build_grpc_base_url(edge_public_url: &str, edge_grpc_addr: &str) -> AppResult<String> {
+    if edge_grpc_addr.contains("://") {
+        return Ok(edge_grpc_addr.trim_end_matches('/').to_string());
+    }
+
+    let public_url = reqwest::Url::parse(edge_public_url)
+        .map_err(|error| AppError::internal(format!("invalid edge public url: {error}")))?;
+    Ok(format!(
+        "{}://{}",
+        public_url.scheme(),
+        edge_grpc_addr.trim_end_matches('/')
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;
@@ -941,6 +1156,7 @@ mod tests {
             hostname_snapshot: "demo".to_string(),
             status,
             bootstrap_payload_json: serde_json::json!({}),
+            artifact_payload_json: serde_json::json!({}),
             rendered_vars_json: serde_json::json!({}),
             error_message: String::new(),
             created_at: now,

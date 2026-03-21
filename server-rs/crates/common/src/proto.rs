@@ -7,6 +7,10 @@ pub mod agent {
     include!(concat!(env!("OUT_DIR"), "/dorohedoro.agent.v1.rs"));
 }
 
+pub mod edge {
+    include!(concat!(env!("OUT_DIR"), "/dorohedoro.edge.v1.rs"));
+}
+
 pub mod runtime {
     pub mod v1 {
         include!(concat!(env!("OUT_DIR"), "/dorohedoro.runtime.v1.rs"));
@@ -25,6 +29,18 @@ pub mod control {
 
 pub mod deployment {
     include!(concat!(env!("OUT_DIR"), "/dorohedoro.deployment.v1.rs"));
+}
+
+pub mod query {
+    include!(concat!(env!("OUT_DIR"), "/dorohedoro.query.v1.rs"));
+}
+
+pub mod alerts {
+    include!(concat!(env!("OUT_DIR"), "/dorohedoro.alerts.v1.rs"));
+}
+
+pub mod audit {
+    include!(concat!(env!("OUT_DIR"), "/dorohedoro.audit.v1.rs"));
 }
 
 use self::runtime::RuntimeReplyEnvelope;
