@@ -22,9 +22,7 @@ use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::{
-    service::{EnrollmentService, ListInput},
-};
+use crate::service::{EnrollmentService, ListInput};
 
 pub async fn spawn_handlers(
     client: Client,

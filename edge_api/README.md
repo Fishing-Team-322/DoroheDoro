@@ -36,7 +36,7 @@ Those belong in `server-rs`.
 
 ## Current NATS alignment
 
-The active live bridge is aligned with `server-rs` enrollment-plane on:
+The active live bridge is aligned with `server-rs` on:
 
 - `agents.enroll.request`
 - `agents.policy.fetch`
@@ -47,9 +47,30 @@ The active live bridge is aligned with `server-rs` enrollment-plane on:
 - `agents.diagnostics.get`
 - `control.policies.list`
 - `control.policies.get`
+- `control.policies.create`
+- `control.policies.update`
 - `control.policies.revisions`
+- `control.hosts.list`
+- `control.hosts.get`
+- `control.hosts.create`
+- `control.hosts.update`
+- `control.host-groups.list`
+- `control.host-groups.get`
+- `control.host-groups.create`
+- `control.host-groups.update`
+- `control.credentials.list`
+- `control.credentials.get`
+- `control.credentials.create`
+- `deployments.jobs.create`
+- `deployments.jobs.get`
+- `deployments.jobs.list`
+- `deployments.jobs.retry`
+- `deployments.jobs.cancel`
+- `deployments.jobs.status`
+- `deployments.jobs.step`
+- `deployments.plan.create`
 
-The wider control/deployment/query/alert subject registry is already centralized in [`internal/natsbridge/subjects`](C:/C++WWW/DoroheDoro/edge_api/internal/natsbridge/subjects/subjects.go). Routes without a live `server-rs` implementation return a deliberate `501 not_implemented` with `X-Boundary-State: awaiting-runtime` and the mapped `X-NATS-Subject`, instead of fake business logic in Go.
+The wider control/deployment/query/alert subject registry is already centralized in [`internal/natsbridge/subjects`](./internal/natsbridge/subjects). Routes without a live `server-rs` implementation return a deliberate `501 not_implemented` with `X-Boundary-State: awaiting-runtime` and the mapped `X-NATS-Subject`, instead of fake business logic in Go.
 
 ## HTTP surface
 
@@ -73,7 +94,28 @@ WEB boundary routes:
 - `GET /api/v1/agents/{id}/policy`
 - `GET /api/v1/policies`
 - `GET /api/v1/policies/{id}`
+- `POST /api/v1/policies`
+- `PATCH /api/v1/policies/{id}`
 - `GET /api/v1/policies/{id}/revisions`
+- `GET /api/v1/hosts`
+- `POST /api/v1/hosts`
+- `GET /api/v1/hosts/{id}`
+- `PATCH /api/v1/hosts/{id}`
+- `GET /api/v1/host-groups`
+- `POST /api/v1/host-groups`
+- `GET /api/v1/host-groups/{id}`
+- `PATCH /api/v1/host-groups/{id}`
+- `GET /api/v1/credentials`
+- `POST /api/v1/credentials`
+- `GET /api/v1/credentials/{id}`
+- `POST /api/v1/deployments`
+- `GET /api/v1/deployments`
+- `GET /api/v1/deployments/{id}`
+- `GET /api/v1/deployments/{id}/steps`
+- `GET /api/v1/deployments/{id}/targets`
+- `POST /api/v1/deployments/{id}/retry`
+- `POST /api/v1/deployments/{id}/cancel`
+- `POST /api/v1/deployments/plan`
 - `GET /api/v1/stream/logs`
 - `GET /api/v1/stream/deployments`
 - `GET /api/v1/stream/alerts`
@@ -82,14 +124,18 @@ WEB boundary routes:
 Currently live against real Rust runtime:
 
 - agents list/detail/diagnostics
-- policy list/detail/revisions
+- policy list/detail/create/update/revisions
+- hosts list/detail/create/update
+- host-groups list/detail/create/update
+- credentials metadata list/detail/create
+- deployment plan/create/list/get/retry/cancel
+- deployment steps/status/targets read-side
+- deployment status/step SSE stream
 - current agent policy
 - enrollment / heartbeat / diagnostics / ingest over gRPC
 
 Still controlled `501 not_implemented` until the corresponding Rust plane exists:
 
-- hosts / host-groups / credentials
-- deployments
 - query / dashboards / alerts / audit
 
 Compatibility routes kept for the current frontend:
@@ -156,8 +202,18 @@ This starts:
 - `nats`
 - `postgres`
 - `enrollment-plane`
+- `control-plane`
+- `deployment-plane`
 
-This is the primary local workflow. The standalone [`edge_api/docker-compose.yml`](C:/C++WWW/DoroheDoro/edge_api/docker-compose.yml) is now only an isolated edge-only debug stack.
+This is the primary local workflow. The standalone [`edge_api/docker-compose.yml`](./docker-compose.yml) is now only an isolated edge-only debug stack.
+
+Server/staging stack for `fishingteam.su`:
+
+```bash
+docker compose -f docker-compose.server.yml up -d --build
+```
+
+That stack binds only localhost-facing ports and is intended to sit behind Nginx. See [`docs/server-deploy.md`](../docs/server-deploy.md).
 
 `docker compose` now generates short-lived dev certificates automatically and starts `edge-api` with agent mTLS enabled by default.
 

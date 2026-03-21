@@ -35,4 +35,34 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	if registry.ControlPoliciesRevisions != "control.policies.revisions" {
 		t.Fatalf("unexpected policies revisions subject: %s", registry.ControlPoliciesRevisions)
 	}
+	if registry.ControlHostsList != "control.hosts.list" {
+		t.Fatalf("unexpected hosts list subject: %s", registry.ControlHostsList)
+	}
+	if registry.ControlHostsCreate != "control.hosts.create" {
+		t.Fatalf("unexpected hosts create subject: %s", registry.ControlHostsCreate)
+	}
+	if registry.ControlHostGroupsList != "control.host-groups.list" {
+		t.Fatalf("unexpected host groups list subject: %s", registry.ControlHostGroupsList)
+	}
+	if registry.ControlCredentialsCreate != "control.credentials.create" {
+		t.Fatalf("unexpected credentials create subject: %s", registry.ControlCredentialsCreate)
+	}
+	if registry.DeploymentsJobsCreate != "deployments.jobs.create" {
+		t.Fatalf("unexpected deployments create subject: %s", registry.DeploymentsJobsCreate)
+	}
+	if registry.DeploymentsJobsGet != "deployments.jobs.get" {
+		t.Fatalf("unexpected deployments get subject: %s", registry.DeploymentsJobsGet)
+	}
+	if registry.DeploymentsJobsList != "deployments.jobs.list" {
+		t.Fatalf("unexpected deployments list subject: %s", registry.DeploymentsJobsList)
+	}
+	if registry.DeploymentsJobsStatus != "deployments.jobs.status" {
+		t.Fatalf("unexpected deployments status subject: %s", registry.DeploymentsJobsStatus)
+	}
+	if registry.DeploymentsJobsStep != "deployments.jobs.step" {
+		t.Fatalf("unexpected deployments step subject: %s", registry.DeploymentsJobsStep)
+	}
+	if registry.DeploymentsPlanCreate != "deployments.plan.create" {
+		t.Fatalf("unexpected deployments plan subject: %s", registry.DeploymentsPlanCreate)
+	}
 }
