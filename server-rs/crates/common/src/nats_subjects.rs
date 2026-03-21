@@ -2,6 +2,7 @@ pub const AGENTS_ENROLL_REQUEST: &str = "agents.enroll.request";
 pub const AGENTS_POLICY_FETCH: &str = "agents.policy.fetch";
 pub const AGENTS_HEARTBEAT: &str = "agents.heartbeat";
 pub const AGENTS_DIAGNOSTICS: &str = "agents.diagnostics";
+pub const SECURITY_POSTURE_REPORTS: &str = "security.posture.reports";
 pub const AGENTS_LIST: &str = "agents.list";
 pub const AGENTS_GET: &str = "agents.get";
 pub const AGENTS_DIAGNOSTICS_GET: &str = "agents.diagnostics.get";
@@ -66,6 +67,7 @@ pub const QUERY_LOGS_TOP_HOSTS: &str = "query.logs.top_hosts";
 pub const QUERY_LOGS_TOP_SERVICES: &str = "query.logs.top_services";
 pub const QUERY_LOGS_HEATMAP: &str = "query.logs.heatmap";
 pub const QUERY_LOGS_TOP_PATTERNS: &str = "query.logs.top_patterns";
+pub const QUERY_LOGS_ANOMALIES: &str = "query.logs.anomalies";
 pub const QUERY_DASHBOARDS_OVERVIEW: &str = "query.dashboards.overview";
 
 pub const TICKETS_LIST: &str = "tickets.list";
@@ -86,10 +88,18 @@ pub const ANOMALIES_INSTANCES_GET: &str = "anomalies.instances.get";
 
 pub const ALERTS_LIST: &str = "alerts.list";
 pub const ALERTS_GET: &str = "alerts.get";
+pub const ALERTS_RULES_LIST: &str = "alerts.rules.list";
+pub const ALERTS_RULES_GET: &str = "alerts.rules.get";
 pub const ALERTS_RULES_CREATE: &str = "alerts.rules.create";
 pub const ALERTS_RULES_UPDATE: &str = "alerts.rules.update";
 
 pub const AUDIT_LIST: &str = "audit.list";
+pub const AUDIT_EVENTS_APPEND: &str = "audit.events.append";
+pub const LOGS_INGEST_RAW: &str = "logs.ingest.raw";
+pub const LOGS_INGEST_NORMALIZED: &str = "logs.ingest.normalized";
+pub const UI_STREAM_LOGS: &str = "ui.stream.logs";
+pub const UI_STREAM_ALERTS: &str = "ui.stream.alerts";
+pub const UI_STREAM_AGENTS: &str = "ui.stream.agents";
 
 #[cfg(test)]
 mod tests {
@@ -101,6 +111,7 @@ mod tests {
         assert_eq!(AGENTS_POLICY_FETCH, "agents.policy.fetch");
         assert_eq!(AGENTS_HEARTBEAT, "agents.heartbeat");
         assert_eq!(AGENTS_DIAGNOSTICS, "agents.diagnostics");
+        assert_eq!(SECURITY_POSTURE_REPORTS, "security.posture.reports");
         assert_eq!(AGENTS_LIST, "agents.list");
         assert_eq!(AGENTS_GET, "agents.get");
         assert_eq!(AGENTS_DIAGNOSTICS_GET, "agents.diagnostics.get");
@@ -174,6 +185,7 @@ mod tests {
         assert_eq!(QUERY_LOGS_TOP_SERVICES, "query.logs.top_services");
         assert_eq!(QUERY_LOGS_HEATMAP, "query.logs.heatmap");
         assert_eq!(QUERY_LOGS_TOP_PATTERNS, "query.logs.top_patterns");
+        assert_eq!(QUERY_LOGS_ANOMALIES, "query.logs.anomalies");
         assert_eq!(QUERY_DASHBOARDS_OVERVIEW, "query.dashboards.overview");
         assert_eq!(TICKETS_LIST, "tickets.list");
         assert_eq!(TICKETS_GET, "tickets.get");
@@ -191,8 +203,16 @@ mod tests {
         assert_eq!(ANOMALIES_INSTANCES_GET, "anomalies.instances.get");
         assert_eq!(ALERTS_LIST, "alerts.list");
         assert_eq!(ALERTS_GET, "alerts.get");
+        assert_eq!(ALERTS_RULES_LIST, "alerts.rules.list");
+        assert_eq!(ALERTS_RULES_GET, "alerts.rules.get");
         assert_eq!(ALERTS_RULES_CREATE, "alerts.rules.create");
         assert_eq!(ALERTS_RULES_UPDATE, "alerts.rules.update");
         assert_eq!(AUDIT_LIST, "audit.list");
+        assert_eq!(AUDIT_EVENTS_APPEND, "audit.events.append");
+        assert_eq!(LOGS_INGEST_RAW, "logs.ingest.raw");
+        assert_eq!(LOGS_INGEST_NORMALIZED, "logs.ingest.normalized");
+        assert_eq!(UI_STREAM_LOGS, "ui.stream.logs");
+        assert_eq!(UI_STREAM_ALERTS, "ui.stream.alerts");
+        assert_eq!(UI_STREAM_AGENTS, "ui.stream.agents");
     }
 }

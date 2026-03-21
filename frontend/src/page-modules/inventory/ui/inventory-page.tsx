@@ -1,201 +1,214 @@
 "use client";
 
-import { useState } from "react";
-import { hosts } from "@/src/mocks/data/dashboard";
-import { formatPercent, formatRelativeLabel } from "@/src/shared/lib/dashboard";
-import { cn } from "@/src/shared/lib/cn";
+import { useEffect, useState } from "react";
 import { useI18n } from "@/src/shared/lib/i18n";
-import { Button, HealthBadge, KeyValueList, StatusBadge } from "@/src/shared/ui";
-import type { Host } from "@/src/shared/types/dashboard";
-import { HostsTable } from "@/src/widgets/hosts-table";
-
-const CONTENT_INSET = "px-4 md:px-6";
-const SECTION_Y = "py-5";
+import { formatRelativeLabel } from "@/src/shared/lib/dashboard";
+import {
+  listHostGroups,
+  listHosts,
+  type HostGroupItem,
+  type HostItem,
+} from "@/src/shared/lib/runtime-api";
+import {
+  Card,
+  EmptyState,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/src/shared/ui";
+import { PageHeader } from "@/src/widgets/dashboard-layout";
+import { ErrorCard, JsonValue, LoadingCard } from "@/src/page-modules/common/ui/runtime-state";
 
 export function InventoryPage() {
   const { dictionary, locale } = useI18n();
-  const copy = dictionary.inventory;
-  const [selectedHost, setSelectedHost] = useState<Host | undefined>(hosts[0]);
+  const [hosts, setHosts] = useState<HostItem[]>([]);
+  const [hostGroups, setHostGroups] = useState<HostGroupItem[]>([]);
+  const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [hostsResponse, groupsResponse] = await Promise.all([
+          listHosts(),
+          listHostGroups(),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setHosts(hostsResponse.items);
+        setHostGroups(groupsResponse.items);
+        setSelectedHostId((current) => current ?? hostsResponse.items[0]?.host_id ?? null);
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error ? loadError.message : "Failed to load inventory"
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectedHost = hosts.find((item) => item.host_id === selectedHostId) ?? null;
 
   return (
-    <div className="min-w-0">
-      <header
-        className={cn(
-          CONTENT_INSET,
-          "border-b border-[color:var(--border)] pb-5 pt-4 md:pb-6 md:pt-16"
-        )}
-      >
-        <nav aria-label="Breadcrumb">
-          <ol className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted-foreground)]">
-            <li className="flex items-center gap-2">
-              <span>{dictionary.common.dashboard}</span>
-              <span className="text-[color:var(--border-strong)]">/</span>
-            </li>
-            <li className="text-[color:var(--foreground)]">{copy.title}</li>
-          </ol>
-        </nav>
+    <div className="space-y-6">
+      <PageHeader
+        title="Inventory"
+        description="Live host inventory and host groups from control-plane."
+        breadcrumbs={[
+          { label: dictionary.common.dashboard, href: "#" },
+          { label: "Inventory" },
+        ]}
+      />
 
-        <div className="mt-4 flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="min-w-0 max-w-4xl space-y-2">
-            <h1 className="text-[28px] font-semibold tracking-tight text-[color:var(--foreground)]">
-              {copy.title}
-            </h1>
-            <p className="text-sm leading-6 text-[color:var(--muted-foreground)]">
-              {copy.description}
-            </p>
+      {loading ? <LoadingCard label="Loading inventory..." /> : null}
+      {!loading && error ? <ErrorCard message={error} /> : null}
+
+      {!loading && !error ? (
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <Card>
+              <div className="space-y-3">
+                <h2 className="text-base font-semibold text-[color:var(--foreground)]">
+                  Hosts
+                </h2>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Hostname</TableHead>
+                      <TableHead>IP</TableHead>
+                      <TableHead>Remote user</TableHead>
+                      <TableHead>Updated</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {hosts.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4}>
+                          <EmptyState
+                            variant="flush"
+                            title="No hosts"
+                            description="Create hosts through WEB or the API to populate inventory."
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      hosts.map((host) => (
+                        <TableRow
+                          key={host.host_id}
+                          className={
+                            host.host_id === selectedHostId
+                              ? "bg-[color:rgba(56,189,248,0.08)]"
+                              : undefined
+                          }
+                          onClick={() => setSelectedHostId(host.host_id)}
+                        >
+                          <TableCell className="font-medium text-[color:var(--foreground)]">
+                            {host.hostname}
+                          </TableCell>
+                          <TableCell>{host.ip}:{host.ssh_port}</TableCell>
+                          <TableCell>{host.remote_user}</TableCell>
+                          <TableCell>{formatRelativeLabel(host.updated_at, locale)}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
+
+            <Card>
+              <div className="space-y-3">
+                <h2 className="text-base font-semibold text-[color:var(--foreground)]">
+                  Host groups
+                </h2>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Members</TableHead>
+                      <TableHead>Updated</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {hostGroups.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4}>
+                          <EmptyState
+                            variant="flush"
+                            title="No host groups"
+                            description="Create host groups to target deployments by inventory slice."
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      hostGroups.map((group) => (
+                        <TableRow key={group.host_group_id}>
+                          <TableCell className="font-medium text-[color:var(--foreground)]">
+                            {group.name}
+                          </TableCell>
+                          <TableCell>{group.description || "—"}</TableCell>
+                          <TableCell>{group.members.length}</TableCell>
+                          <TableCell>{formatRelativeLabel(group.updated_at, locale)}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </Card>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <Button type="button" variant="outline">
-              {copy.addFilters}
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <div className="grid min-w-0 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="min-w-0">
-          <section className="min-w-0">
-            <HostsTable
-              hosts={hosts}
-              selectedHostId={selectedHost?.id}
-              onSelectHost={setSelectedHost}
-            />
-          </section>
-        </div>
-
-        <aside className="min-w-0 border-t border-[color:var(--border)] xl:border-l xl:border-t-0">
-          {selectedHost ? (
-            <>
-              <section
-                className={cn(
-                  CONTENT_INSET,
-                  SECTION_Y,
-                  "border-b border-[color:var(--border)]"
-                )}
-              >
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                      {selectedHost.name}
-                    </h2>
-                    <p className="text-sm text-[color:var(--muted-foreground)]">
-                      {selectedHost.cluster} · {selectedHost.os}
+          <Card>
+            <div className="space-y-3">
+              <h2 className="text-base font-semibold text-[color:var(--foreground)]">
+                Host inspector
+              </h2>
+              {selectedHost ? (
+                <>
+                  <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-3">
+                    <p className="text-lg font-semibold text-[color:var(--foreground)]">
+                      {selectedHost.hostname}
+                    </p>
+                    <p className="mt-1 text-sm text-[color:var(--muted-foreground)]">
+                      {selectedHost.ip}:{selectedHost.ssh_port} via {selectedHost.remote_user}
+                    </p>
+                    <p className="mt-2 text-xs uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
+                      Created {formatRelativeLabel(selectedHost.created_at, locale)}
                     </p>
                   </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge status={selectedHost.status} />
-                    <HealthBadge health={selectedHost.health} />
-                  </div>
-                </div>
-              </section>
-
-              <section
-                className={cn(
-                  CONTENT_INSET,
-                  SECTION_Y,
-                  "border-b border-[color:var(--border)]"
-                )}
-              >
-                <div className="mb-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--muted-foreground)]">
-                    {copy.sections.context}
-                  </p>
-                </div>
-
-                <KeyValueList
-                  items={[
-                    {
-                      label: copy.fields.environment,
-                      value: selectedHost.environment.toUpperCase(),
-                    },
-                    { label: copy.fields.provider, value: selectedHost.provider },
-                    { label: copy.fields.region, value: selectedHost.region },
-                    { label: copy.fields.policies, value: selectedHost.policyCount },
-                  ]}
+                  <JsonValue value={selectedHost.labels} />
+                </>
+              ) : (
+                <EmptyState
+                  variant="flush"
+                  title="No host selected"
+                  description="Pick a host from the table to inspect its labels and access metadata."
                 />
-              </section>
-
-              <section
-                className={cn(
-                  CONTENT_INSET,
-                  SECTION_Y,
-                  "border-b border-[color:var(--border)]"
-                )}
-              >
-                <div className="mb-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--muted-foreground)]">
-                    {copy.sections.load}
-                  </p>
-                </div>
-
-                <KeyValueList
-                  items={[
-                    { label: copy.fields.ipAddress, value: selectedHost.ipAddress },
-                    { label: copy.fields.cpu, value: formatPercent(selectedHost.cpuLoad) },
-                    {
-                      label: copy.fields.memory,
-                      value: formatPercent(selectedHost.memoryUsage),
-                    },
-                    {
-                      label: copy.fields.lastSeen,
-                      value: formatRelativeLabel(selectedHost.lastSeenAt, locale),
-                    },
-                  ]}
-                />
-              </section>
-
-              <section className={cn(CONTENT_INSET, SECTION_Y)}>
-                <div className="mb-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--muted-foreground)]">
-                    {copy.sections.relations}
-                  </p>
-                </div>
-
-                <KeyValueList
-                  items={[
-                    { label: copy.fields.tags, value: selectedHost.tags.join(", ") },
-                    { label: copy.fields.cluster, value: selectedHost.cluster },
-                    { label: copy.fields.platform, value: selectedHost.os },
-                  ]}
-                />
-              </section>
-            </>
-          ) : (
-            <>
-              <section
-                className={cn(
-                  CONTENT_INSET,
-                  SECTION_Y,
-                  "border-b border-[color:var(--border)]"
-                )}
-              >
-                <div className="space-y-1">
-                  <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                    {copy.detailsTitle}
-                  </h2>
-                  <p className="text-sm text-[color:var(--muted-foreground)]">
-                    {copy.detailsDescription}
-                  </p>
-                </div>
-              </section>
-
-              <section className={cn(CONTENT_INSET, SECTION_Y)}>
-                <div className="mb-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--muted-foreground)]">
-                    {copy.stateTitle}
-                  </p>
-                </div>
-
-                <p className="text-sm leading-6 text-[color:var(--muted-foreground)]">
-                  {copy.stateDescription}
-                </p>
-              </section>
-            </>
-          )}
-        </aside>
-      </div>
+              )}
+            </div>
+          </Card>
+        </section>
+      ) : null}
     </div>
   );
 }

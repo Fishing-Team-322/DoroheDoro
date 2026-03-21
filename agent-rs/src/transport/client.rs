@@ -1,14 +1,20 @@
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::BTreeMap,
+    net::{IpAddr, SocketAddr},
+    path::Path,
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use bytes::{BufMut, BytesMut};
 use reqwest::{
     header::{HeaderMap, HeaderValue, CONTENT_TYPE},
-    Client,
+    Certificate, Client, Identity, Url,
 };
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
+    config::TlsConfig,
     error::{AppError, AppResult},
     proto::{agent, edge, ingest},
     transport::{
@@ -25,13 +31,25 @@ pub struct EdgeGrpcTransport {
     base_url: String,
 }
 
+#[derive(Debug, Clone)]
+struct PreparedEndpoint {
+    url: Url,
+    resolve: Option<SocketAddr>,
+}
+
 impl EdgeGrpcTransport {
-    pub fn new(edge_url: &str, edge_grpc_addr: &str) -> AppResult<Self> {
+    pub fn new(edge_url: &str, edge_grpc_addr: &str, tls: &TlsConfig) -> AppResult<Self> {
         let base_url = build_base_url(edge_url, edge_grpc_addr)?;
-        let scheme = reqwest::Url::parse(&base_url)
-            .map_err(|error| AppError::invalid_config(format!("invalid edge grpc url: {error}")))?
-            .scheme()
-            .to_string();
+        let prepared = prepare_endpoint(&base_url, tls.server_name.as_deref())?;
+        let tls_configured = tls.ca_path.is_some()
+            || tls.cert_path.is_some()
+            || tls.key_path.is_some()
+            || tls
+                .server_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_some();
 
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -41,17 +59,42 @@ impl EdgeGrpcTransport {
         headers.insert("te", HeaderValue::from_static("trailers"));
         headers.insert("grpc-accept-encoding", HeaderValue::from_static("identity"));
 
-        let builder = if scheme == "http" {
-            Client::builder()
-                .default_headers(headers)
-                .http2_prior_knowledge()
+        let mut builder = Client::builder()
+            .default_headers(headers)
+            .timeout(Duration::from_secs(15));
+
+        if prepared.url.scheme() == "http" {
+            if tls_configured {
+                return Err(AppError::invalid_config(
+                    "TLS settings are configured but the gRPC endpoint uses plain HTTP",
+                ));
+            }
+            builder = builder.http2_prior_knowledge();
         } else {
-            Client::builder().default_headers(headers).use_rustls_tls()
-        };
+            builder = builder.use_rustls_tls();
+            if let Some(path) = tls.ca_path.as_deref() {
+                let certificate = load_ca_certificate(path)?;
+                builder = builder.add_root_certificate(certificate);
+            }
+            if let (Some(cert_path), Some(key_path)) =
+                (tls.cert_path.as_deref(), tls.key_path.as_deref())
+            {
+                let identity = load_client_identity(cert_path, key_path)?;
+                builder = builder.identity(identity);
+            }
+            if let Some(resolve) = prepared.resolve {
+                if let Some(host) = prepared.url.host_str() {
+                    builder = builder.resolve(host, resolve);
+                }
+            }
+        }
 
-        let client = builder.timeout(Duration::from_secs(15)).build()?;
+        let client = builder.build()?;
 
-        Ok(Self { client, base_url })
+        Ok(Self {
+            client,
+            base_url: prepared.url.to_string().trim_end_matches('/').to_string(),
+        })
     }
 
     async fn unary_json<Request, Response>(
@@ -132,7 +175,6 @@ impl AgentTransport for EdgeGrpcTransport {
             .ok_or_else(|| AppError::protocol("fetch policy response is missing `policy`"))?;
 
         Ok(PolicySnapshot {
-            agent_id: request.agent_id,
             policy_id: policy.policy_id,
             policy_revision: policy.revision,
             policy_body_json: policy.body_json,
@@ -145,9 +187,6 @@ impl AgentTransport for EdgeGrpcTransport {
     }
 
     async fn send_heartbeat(&self, payload: agent::HeartbeatPayload) -> AppResult<()> {
-        // TODO: edge heartbeat request does not expose host_metadata yet. Keep building and
-        // testing the richer heartbeat payload on the agent side until the shared ingress
-        // contract is updated in a dedicated server/edge task.
         let _: edge::Ack = self
             .unary_json(
                 "/SendHeartbeat",
@@ -205,14 +244,14 @@ impl AgentTransport for EdgeGrpcTransport {
     }
 
     async fn send_diagnostics(&self, payload: agent::DiagnosticsPayload) -> AppResult<()> {
-        let diagnostics: crate::runtime::DiagnosticsSnapshot =
-            serde_json::from_str(&payload.payload_json)?;
+        let hostname = extract_diagnostics_hostname(&payload.payload_json)
+            .unwrap_or_else(|| "unknown-host".to_string());
         let _: edge::Ack = self
             .unary_json(
                 "/SendDiagnostics",
                 &edge::DiagnosticsRequest {
                     agent_id: payload.agent_id,
-                    host: diagnostics.hostname,
+                    host: hostname,
                     sent_at_unix_ms: payload.sent_at_unix_ms,
                     payload_json: payload.payload_json,
                 },
@@ -222,7 +261,7 @@ impl AgentTransport for EdgeGrpcTransport {
     }
 }
 
-fn build_base_url(edge_url: &str, edge_grpc_addr: &str) -> AppResult<String> {
+pub fn build_base_url(edge_url: &str, edge_grpc_addr: &str) -> AppResult<String> {
     if edge_grpc_addr.contains("://") {
         return Ok(edge_grpc_addr.trim_end_matches('/').to_string());
     }
@@ -236,6 +275,136 @@ fn build_base_url(edge_url: &str, edge_grpc_addr: &str) -> AppResult<String> {
         "{scheme}://{}",
         edge_grpc_addr.trim_end_matches('/')
     ))
+}
+
+pub fn endpoint_uses_tls(edge_url: &str, edge_grpc_addr: &str) -> AppResult<bool> {
+    let base_url = build_base_url(edge_url, edge_grpc_addr)?;
+    let url = Url::parse(&base_url)
+        .map_err(|error| AppError::invalid_config(format!("invalid edge grpc url: {error}")))?;
+    Ok(url.scheme() == "https")
+}
+
+pub fn derive_server_name(
+    edge_url: &str,
+    edge_grpc_addr: &str,
+    configured_server_name: Option<&str>,
+) -> AppResult<Option<String>> {
+    if let Some(server_name) = configured_server_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(Some(server_name.to_string()));
+    }
+
+    let base_url = build_base_url(edge_url, edge_grpc_addr)?;
+    let url = Url::parse(&base_url)
+        .map_err(|error| AppError::invalid_config(format!("invalid edge grpc url: {error}")))?;
+    if let Some(host) = url.host_str() {
+        if host.parse::<IpAddr>().is_err() {
+            return Ok(Some(host.to_string()));
+        }
+    }
+
+    let edge_url = Url::parse(edge_url)
+        .map_err(|error| AppError::invalid_config(format!("invalid edge_url: {error}")))?;
+    Ok(edge_url
+        .host_str()
+        .map(ToOwned::to_owned)
+        .or_else(|| url.host_str().map(ToOwned::to_owned)))
+}
+
+pub(crate) fn load_ca_certificate(path: &Path) -> AppResult<Certificate> {
+    let pem = std::fs::read(path)?;
+    require_pem_block(&pem, "CERTIFICATE", path, "tls.ca_path")?;
+    Certificate::from_pem(&pem).map_err(|error| {
+        AppError::invalid_config(format!(
+            "failed to parse tls.ca_path `{}`: {error}",
+            path.display()
+        ))
+    })
+}
+
+pub(crate) fn load_client_identity(cert_path: &Path, key_path: &Path) -> AppResult<Identity> {
+    let cert_pem = std::fs::read(cert_path)?;
+    require_pem_block(&cert_pem, "CERTIFICATE", cert_path, "tls.cert_path")?;
+
+    let key_pem = std::fs::read(key_path)?;
+    let key_text = std::str::from_utf8(&key_pem).map_err(|error| {
+        AppError::invalid_config(format!(
+            "failed to parse tls.key_path `{}` as UTF-8 PEM: {error}",
+            key_path.display()
+        ))
+    })?;
+    if !key_text.contains("-----BEGIN PRIVATE KEY-----")
+        && !key_text.contains("-----BEGIN RSA PRIVATE KEY-----")
+        && !key_text.contains("-----BEGIN EC PRIVATE KEY-----")
+    {
+        return Err(AppError::invalid_config(format!(
+            "tls.key_path `{}` does not contain a PEM private key block",
+            key_path.display()
+        )));
+    }
+
+    let mut pem = cert_pem;
+    pem.push(b'\n');
+    pem.extend_from_slice(&key_pem);
+    Identity::from_pem(&pem).map_err(|error| {
+        AppError::invalid_config(format!(
+            "failed to parse client certificate/key `{}` + `{}`: {error}",
+            cert_path.display(),
+            key_path.display()
+        ))
+    })
+}
+
+fn prepare_endpoint(base_url: &str, server_name: Option<&str>) -> AppResult<PreparedEndpoint> {
+    let mut url = Url::parse(base_url)
+        .map_err(|error| AppError::invalid_config(format!("invalid edge grpc url: {error}")))?;
+    let original_host = url
+        .host_str()
+        .ok_or_else(|| AppError::invalid_config("edge gRPC url must include a host"))?
+        .to_string();
+
+    let Some(server_name) = server_name.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(PreparedEndpoint { url, resolve: None });
+    };
+
+    if server_name == original_host {
+        return Ok(PreparedEndpoint { url, resolve: None });
+    }
+
+    let port = url
+        .port_or_known_default()
+        .ok_or_else(|| AppError::invalid_config("edge gRPC url must include a port"))?;
+    let ip = original_host.parse::<IpAddr>().map_err(|_| {
+        AppError::invalid_config(
+            "tls.server_name override requires edge_grpc_addr to use an IP literal host",
+        )
+    })?;
+    url.set_host(Some(server_name))
+        .map_err(|_| AppError::invalid_config("invalid tls.server_name"))?;
+
+    Ok(PreparedEndpoint {
+        url,
+        resolve: Some(SocketAddr::new(ip, port)),
+    })
+}
+
+fn require_pem_block(pem: &[u8], block_name: &str, path: &Path, field_name: &str) -> AppResult<()> {
+    let text = std::str::from_utf8(pem).map_err(|error| {
+        AppError::invalid_config(format!(
+            "failed to parse {field_name} `{}` as UTF-8 PEM: {error}",
+            path.display()
+        ))
+    })?;
+    if text.contains(&format!("-----BEGIN {block_name}-----")) {
+        Ok(())
+    } else {
+        Err(AppError::invalid_config(format!(
+            "{field_name} `{}` does not contain a PEM {block_name} block",
+            path.display()
+        )))
+    }
 }
 
 fn grpc_status(headers: &HeaderMap) -> AppResult<(i32, String)> {
@@ -282,11 +451,25 @@ where
     Ok(serde_json::from_slice(payload)?)
 }
 
+fn extract_diagnostics_hostname(payload_json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(payload_json).ok()?;
+    value
+        .get("hostname")
+        .and_then(|value| value.as_str())
+        .or_else(|| value.get("host").and_then(|value| value.as_str()))
+        .map(ToOwned::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::proto::edge::IngestLogsResponse;
+    use std::net::SocketAddr;
 
-    use super::{build_base_url, decode_grpc_frame};
+    use crate::{config::TlsConfig, proto::edge::IngestLogsResponse, transport::EdgeGrpcTransport};
+
+    use super::{
+        build_base_url, decode_grpc_frame, derive_server_name, extract_diagnostics_hostname,
+        prepare_endpoint,
+    };
 
     #[test]
     fn builds_url_from_edge_address() {
@@ -301,6 +484,50 @@ mod tests {
     }
 
     #[test]
+    fn derives_server_name_from_endpoint_when_not_overridden() {
+        assert_eq!(
+            derive_server_name(
+                "https://edge.example.local",
+                "edge.example.local:7443",
+                None
+            )
+            .unwrap()
+            .as_deref(),
+            Some("edge.example.local")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_edge_url_host_when_grpc_addr_uses_ip_literal() {
+        assert_eq!(
+            derive_server_name("https://edge.example.local", "10.0.0.5:7443", None)
+                .unwrap()
+                .as_deref(),
+            Some("edge.example.local")
+        );
+    }
+
+    #[test]
+    fn prepares_endpoint_for_ip_literal_server_name_override() {
+        let prepared =
+            prepare_endpoint("https://10.0.0.5:7443", Some("edge.example.local")).unwrap();
+        assert_eq!(prepared.url.host_str(), Some("edge.example.local"));
+        assert_eq!(
+            prepared.resolve,
+            Some("10.0.0.5:7443".parse::<SocketAddr>().unwrap())
+        );
+    }
+
+    #[test]
+    fn rejects_server_name_override_for_non_ip_host() {
+        let error =
+            prepare_endpoint("https://edge.internal:7443", Some("edge.example.local")).unwrap_err();
+        assert!(error.to_string().contains(
+            "tls.server_name override requires edge_grpc_addr to use an IP literal host"
+        ));
+    }
+
+    #[test]
     fn decodes_grpc_json_frame() {
         let payload = br#"{"accepted":true,"accepted_count":2,"request_id":"req-1"}"#;
         let mut frame = Vec::new();
@@ -311,5 +538,47 @@ mod tests {
         let decoded: IngestLogsResponse = decode_grpc_frame(&frame).unwrap();
         assert!(decoded.accepted);
         assert_eq!(decoded.accepted_count, 2);
+    }
+
+    #[test]
+    fn keeps_tls_config_shape_serializable() {
+        let tls = TlsConfig {
+            ca_path: Some("/etc/doro-agent/ca.pem".into()),
+            cert_path: Some("/etc/doro-agent/agent.pem".into()),
+            key_path: Some("/etc/doro-agent/agent.key".into()),
+            server_name: Some("edge.example.local".to_string()),
+        };
+        assert_eq!(tls.server_name.as_deref(), Some("edge.example.local"));
+    }
+
+    #[test]
+    fn rejects_tls_config_on_plain_http_endpoint() {
+        let error = EdgeGrpcTransport::new(
+            "http://edge.example.local:8080",
+            "edge.example.local:9090",
+            &TlsConfig {
+                ca_path: Some("/etc/doro-agent/ca.pem".into()),
+                cert_path: None,
+                key_path: None,
+                server_name: None,
+            },
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("TLS settings are configured but the gRPC endpoint uses plain HTTP"));
+    }
+
+    #[test]
+    fn extracts_hostname_from_generic_diagnostics_payload() {
+        assert_eq!(
+            extract_diagnostics_hostname(r#"{"hostname":"demo-host"}"#).as_deref(),
+            Some("demo-host")
+        );
+        assert_eq!(
+            extract_diagnostics_hostname(r#"{"host":"demo-host"}"#).as_deref(),
+            Some("demo-host")
+        );
     }
 }

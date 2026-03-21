@@ -3,99 +3,93 @@ name: agent-release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: Release version override
+      image_tag:
+        description: Optional image tag override
         required: false
   push:
-    tags:
-      - "agent-v*"
+    branches:
+      - main
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            arch: amd64
-          - target: aarch64-unknown-linux-gnu
-            arch: arm64
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve release version
+      - name: Resolve image metadata
         id: vars
         env:
-          RAW_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          INPUT_TAG: ${{ github.event.inputs.image_tag }}
         run: |
-          echo "release_version=${RAW_VERSION#agent-v}" >> "$GITHUB_OUTPUT"
+          SHORT_SHA="${GITHUB_SHA::12}"
+          IMAGE_TAG="${INPUT_TAG:-main-${SHORT_SHA}}"
+          echo "image_repository=${{ vars.AGENT_IMAGE_REPOSITORY }}" >> "$GITHUB_OUTPUT"
+          echo "channel=main" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "floating_tag=main" >> "$GITHUB_OUTPUT"
+          echo "version=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Install packaging toolchain
+      - name: Ensure repository variable is configured
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends jq dpkg-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          if [ -z "${{ steps.vars.outputs.image_repository }}" ]; then
+            echo "Repository variable AGENT_IMAGE_REPOSITORY is required" >&2
+            exit 1
+          fi
 
-      - name: Install Rust target
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
-          targets: ${{ matrix.target }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build release artifacts
+      - name: Build and push multi-arch agent image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./agent-rs/packaging/container/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.vars.outputs.image_repository }}:${{ steps.vars.outputs.floating_tag }}
+            ${{ steps.vars.outputs.image_repository }}:${{ steps.vars.outputs.image_tag }}
+          provenance: false
+          sbom: false
+
+      - name: Generate image compatibility manifest
         env:
-          VERSION: ${{ steps.vars.outputs.release_version }}
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          VERSION: ${{ steps.vars.outputs.version }}
         run: |
-          bash scripts/release/build-agent-artifacts.sh \
-            --target "${{ matrix.target }}" \
-            --arch "${{ matrix.arch }}" \
-            --version "${VERSION}"
+          bash scripts/release/generate-agent-image-manifest.sh \
+            --image-repository "${{ steps.vars.outputs.image_repository }}" \
+            --image-tag "${{ steps.vars.outputs.image_tag }}" \
+            --image-digest "${{ steps.build.outputs.digest }}" \
+            --version "${VERSION}" \
+            --release-channel "${{ steps.vars.outputs.channel }}" \
+            --output-dir "dist/agent-image/${VERSION}"
 
-      - name: Upload arch artifacts
+      - name: Verify compatibility manifest contents
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+          EXPECTED_DIGEST: ${{ steps.build.outputs.digest }}
+          EXPECTED_REF: ${{ steps.vars.outputs.image_repository }}:${{ steps.vars.outputs.image_tag }}
+        run: |
+          MANIFEST="dist/agent-image/${VERSION}/agent-release-manifest.json"
+          grep -q '"install_mode": "docker_image"' "${MANIFEST}"
+          grep -q '"package_type": "container"' "${MANIFEST}"
+          grep -q "\"artifact_path\": \"${EXPECTED_REF}\"" "${MANIFEST}"
+          grep -q "\"image_digest\": \"${EXPECTED_DIGEST}\"" "${MANIFEST}"
+
+      - name: Upload image manifest metadata
         uses: actions/upload-artifact@v4
         with:
-          name: agent-artifacts-${{ matrix.arch }}
-          path: dist/agent/${{ steps.vars.outputs.release_version }}
-
-  manifest:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Resolve release version
-        id: vars
-        env:
-          RAW_VERSION: ${{ github.event.inputs.version || github.ref_name }}
-        run: |
-          echo "release_version=${RAW_VERSION#agent-v}" >> "$GITHUB_OUTPUT"
-
-      - name: Install jq
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends jq
-
-      - name: Download all arch artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist/agent/downloaded
-
-      - name: Normalize release directory
-        env:
-          VERSION: ${{ steps.vars.outputs.release_version }}
-        run: |
-          set -euo pipefail
-          mkdir -p "dist/agent/${VERSION}"
-          find dist/agent/downloaded -type f -exec mv {} "dist/agent/${VERSION}/" \;
-
-      - name: Generate manifest
-        env:
-          VERSION: ${{ steps.vars.outputs.release_version }}
-        run: |
-          bash scripts/release/generate-manifest.sh --version "${VERSION}"
-
-      - name: Upload release manifest
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-release-manifest
-          path: dist/agent/${{ steps.vars.outputs.release_version }}/agent-release-manifest.json
+          name: agent-image-release
+          path: dist/agent-image/${{ steps.vars.outputs.version }}

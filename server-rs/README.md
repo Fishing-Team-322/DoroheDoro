@@ -2,129 +2,106 @@
 
 Private Rust runtime for the internal `SERVER` domains.
 
-## Ownership
-
-- `enrollment-plane` owns agent lifecycle write/read-side:
-  - `agents.enroll.request`
-  - `agents.policy.fetch`
-  - `agents.heartbeat`
-  - `agents.diagnostics`
-  - `agents.list`
-  - `agents.get`
-  - `agents.diagnostics.get`
-  - `agents.policy.get`
-  - `agents.bootstrap-token.issue`
-- `control-plane` owns all `control.*`:
-  - `control.policies.*`
-  - `control.hosts.*`
-  - `control.host-groups.*`
-  - `control.credentials.*`
-  - `control.clusters.*`
-  - `control.roles.*` and `control.role-bindings.*`
-  - `control.integrations.*`
-- `deployment-plane` owns all `deployments.*`:
-  - `deployments.jobs.create|get|list|retry|cancel`
-  - `deployments.plan.create`
-  - publishes `deployments.jobs.status`
-  - publishes `deployments.jobs.step`
-
-`server-rs` does not keep legacy `agents.registry.*` subjects and `enrollment-plane` no longer responds to `control.policies.*`.
-
 ## Runtime crates
 
 - `common`
-  - protobuf codegen
-  - canonical NATS subject registry
-  - shared runtime reply envelope
-  - shared config/bootstrap/health helpers
+  - shared protobuf generation
+  - canonical subject constants
+  - shared config/bootstrap/reply helpers
+  - shared JSON event models for streaming/audit
 - `enrollment-plane`
-  - PostgreSQL-backed agent registry
-  - enrollment and policy fetch for agents
-  - persisted heartbeat and diagnostics
-  - bootstrap-token issuance pinned to a policy revision
+  - persistent agent registry
+  - bootstrap tokens
+  - enrollment
+  - policy fetch
+  - heartbeat and diagnostics persistence
+  - agent stream and audit event publishing
 - `control-plane`
-  - policies with append-only revisions
-  - hosts with deterministic list/paging/query
-  - host groups with explicit membership mutations
-  - credentials metadata only
-  - cluster registry + membership read/command-side
-  - custom roles, permissions, and scoped bindings
-  - cluster-aware integration catalog + bindings
-  - ticket/problem tracking with comments and events
-  - anomaly rule/instance persistence with cluster scoping
-  - audit-ready columns and `control_audit_events`
+  - policies and revisions
+  - hosts, host groups, credentials metadata
+  - clusters
+  - roles / permissions / bindings
+  - integrations
+  - tickets
+  - anomaly rules / instances
+  - shared `runtime_audit_events` read model
+  - `audit.list` request/reply plus append subscriber
 - `deployment-plane`
-  - immutable deployment snapshot generation
-  - job/attempt/target/step persistence
-  - canonical job detail read-side
-  - mock executor and ansible-runner skeleton
+  - deployment plans
+  - job / attempt / target / step persistence
+  - real `ansible-runner` execution
+  - Vault-backed secret resolution
+  - artifact manifest resolution
+  - deployment lifecycle audit publishing
+- `ingestion-plane`
+  - consumes `logs.ingest.raw`
+  - normalizes log batches
+  - writes OpenSearch and ClickHouse
+  - publishes `logs.ingest.normalized`
+  - publishes `ui.stream.logs`
+- `query-alert-plane`
+  - query handlers for logs and overview
+  - alert rule and instance API
+  - alert evaluation over stored log data
+  - anomaly rule engine (rare fingerprint + threshold + baseline detectors backed by Postgres/ClickHouse)
+  - publishes `ui.stream.alerts`
+  - publishes audit events for alert lifecycle
 
 ## Contracts
 
-Shared contracts live in [`contracts/proto`](/c:/develop/DoroheDoro/contracts/proto):
+Shared contracts live in [`../contracts/proto`](../contracts/proto):
 
 - `runtime.proto`
-  - `RuntimeReplyEnvelope`
-  - `AuditContext`
-  - `PagingRequest`
-  - `PagingResponse`
 - `agent.proto`
-  - typed read-side messages for `agents.list/get/diagnostics.get/policy.get`
 - `control.proto`
-  - audit-aware create/update requests
-  - paged list requests and responses
 - `deployment.proto`
-  - audit-aware job/plan commands
-  - canonical `GetDeploymentJobResponse`
+- `edge.proto`
+- `query.proto`
+- `alerts.proto`
+- `audit.proto`
 
-Future placeholders already reserved in the shared subject registry:
+Canonical subjects live in [`../contracts/subjects/registry.yaml`](../contracts/subjects/registry.yaml).
 
-- `query.logs.search|get|context|histogram|severity|top_hosts|top_services|heatmap|top_patterns`
-- `query.dashboards.overview`
-- `alerts.list|get|rules.create|rules.update`
-- `audit.list`
+## Runtime ownership
+
+- `enrollment-plane` owns `agents.*` enrollment/lifecycle
+- `control-plane` owns `control.*`, tickets, anomalies and audit read-side
+- `deployment-plane` owns `deployments.*`
+- `ingestion-plane` owns raw->normalized ingest and storage fan-out
+- `query-alert-plane` owns `query.*`, `alerts.*`, и потоковый алгоритмический детект редких fingerprint-ов
 
 ## Health and readiness
 
 Every plane exposes:
 
 - `GET /healthz`
-  - process is alive
 - `GET /readyz`
-  - Postgres is reachable
-  - NATS is reachable
-  - plane-specific runtime is ready
 
-`deployment-plane` also checks executor readiness on `/readyz`.
+Plane readiness now checks the real dependencies for that plane:
 
-## Database and migrations
+- Postgres
+- NATS
+- OpenSearch / ClickHouse where applicable
+- executor readiness for `deployment-plane`
+
+## Migrations
 
 All planes apply the shared migration set on startup.
 
-Current migration highlights:
+Notable latest migrations:
 
-- `0001_init_enrollment.sql`
-  - agents, policies, revisions, diagnostics, bindings
-- `0002_control_plane_init.sql`
-  - hosts, host groups, credentials metadata
-- `0003_enrollment_tokens_policy_revision.sql`
-  - pinned revision on bootstrap tokens
-- `0004_deployment_plane_init.sql`
-  - jobs, attempts, targets, steps
-- `0005_control_audit_foundation.sql`
-  - audit columns on control entities
-  - `control_audit_events`
-  - latest-binding and latest-diagnostics indexes
-- `0006_control_clusters_rbac_integrations_tickets_anomalies.sql`
-  - clusters, cluster membership, and metadata
-  - custom roles/permissions/bindings + integration catalog/bindings
-  - ticket/comment/event stores and anomaly rule/instance tables
+- `0007_deployment_target_artifacts.sql`
+  - resolved artifact summary on deployment targets
+- `0008_runtime_audit_and_alerts.sql`
+  - shared `runtime_audit_events`
+  - `alert_rules`
+  - `alert_instances`
 
 ## Environment
 
-Shared required env:
+Shared:
 
-- `POSTGRES_DSN`
+- `POSTGRES_DSN` when the plane uses Postgres
 - `NATS_URL`
 - `RUST_LOG` optional, defaults to `info`
 
@@ -144,103 +121,88 @@ Shared required env:
 - `EDGE_PUBLIC_URL`
 - `EDGE_GRPC_ADDR`
 - `AGENT_STATE_DIR_DEFAULT`
-- `MOCK_EXECUTOR_STEP_DELAY_MS` optional
-- `MOCK_EXECUTOR_FAIL_MODE=never|partial|all` optional
-- `MOCK_EXECUTOR_FAIL_HOSTS=host1,host2` optional
-- `ANSIBLE_RUNNER_BIN` required when `DEPLOYMENT_EXECUTOR_KIND=ansible`
-- `ANSIBLE_PLAYBOOK_PATH` required when `DEPLOYMENT_EXECUTOR_KIND=ansible`
-- `DEPLOYMENT_TEMP_DIR` optional
+- `ANSIBLE_RUNNER_BIN`
+- `ANSIBLE_PLAYBOOK_PATH`
+- `DEPLOYMENT_TEMP_DIR`
+- `ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION`
+- `AGENT_ARTIFACT_MANIFEST_URL`
+- `AGENT_RELEASE_BASE_URL`
+- `AGENT_ARTIFACT_VERSION`
+- `AGENT_PREFERRED_PACKAGE_TYPE=deb|tar.gz`
+- `VAULT_ADDR`
+- `VAULT_ROLE_ID`
+- `VAULT_SECRET_ID`
+- `AGENT_MTLS_CA_VAULT_REF`
+- `AGENT_MTLS_CERT_VAULT_REF`
+- `AGENT_MTLS_KEY_VAULT_REF`
 
-See [`server-rs/.env.example`](/c:/develop/DoroheDoro/server-rs/.env.example) for a local template.
+`ingestion-plane`:
+
+- `INGESTION_HTTP_ADDR`
+- `OPENSEARCH_URL`
+- `OPENSEARCH_INDEX_PREFIX`
+- `OPENSEARCH_USERNAME` optional
+- `OPENSEARCH_PASSWORD` optional
+- `CLICKHOUSE_DSN`
+- `CLICKHOUSE_DATABASE`
+- `CLICKHOUSE_TABLE`
+
+`query-alert-plane`:
+
+- `QUERY_ALERT_HTTP_ADDR`
+- `OPENSEARCH_URL`
+- `OPENSEARCH_INDEX_PREFIX`
+- `OPENSEARCH_USERNAME` optional
+- `OPENSEARCH_PASSWORD` optional
+- `CLICKHOUSE_DSN`
+- `CLICKHOUSE_DATABASE`
+- `CLICKHOUSE_TABLE`
+- `RARE_FINGERPRINT_ENABLED`
+- `RARE_FINGERPRINT_WINDOW_MINUTES`
+- `RARE_FINGERPRINT_MAX_COUNT`
+- `RARE_FINGERPRINT_SEVERITY`
+- `ANOMALY_EVALUATION_INTERVAL_SECS`
+- `ANOMALY_RULE_CACHE_TTL_SECS`
+
+See [`./.env.example`](./.env.example).
 
 ## Local run
 
-1. Start dependencies:
+Full runtime stack through compose:
 
 ```bash
-docker compose up -d postgres nats
+docker compose up --build
 ```
 
-2. Export env from `.env.example`.
-
-3. Start the planes:
+Or run planes directly after exporting env from `.env.example`:
 
 ```bash
 cd server-rs
 cargo run -p enrollment-plane
-# separate terminal
 cargo run -p control-plane
-# separate terminal
 cargo run -p deployment-plane
+cargo run -p ingestion-plane
+cargo run -p query-alert-plane
 ```
 
-## Local smoke
+## Runtime smoke gates
 
-Minimum demo smoke after all three planes are running:
+The cross-plane smoke suites are kept as explicit gates because they require a live Postgres and NATS stack.
 
-- `control.policies.list|create|get|update|revisions`
-- `control.hosts.list|create|get|update`
-- `control.host-groups.list|create|get|update|add-member|remove-member`
-- `control.credentials.list|create|get`
-- `control.clusters.list|get|create|update|add-host|remove-host`
-- `control.roles.list|get|create|update`
-- `control.roles.permissions.get|set`
-- `control.role-bindings.list|create|delete`
-- `control.integrations.list|get|create|update|bind|unbind`
-- `tickets.list|get|create|assign|unassign|comment.add|status.change|close`
-- `anomalies.rules.list|get|create|update`
-- `anomalies.instances.list|get`
-- `agents.list|get|diagnostics.get|policy.get`
-- `deployments.plan.create`
-- `deployments.jobs.create|list|get|retry|cancel`
+Run them after the local stack is up:
 
-Important integration expectation:
+```bash
+make server-smoke
+```
 
-- there must be no duplicate responders for `control.policies.*` when `enrollment-plane`, `control-plane`, and `deployment-plane` run together
+## Useful checks
 
-## Deployment-plane behavior
-
-`deployments.jobs.get` is the canonical detail read model. It returns:
-
-- job summary
-- attempts
-- per-target statuses
-- deployment steps
-- aggregate counters inside `DeploymentJobSummary`
-
-### Mock executor
-
-`DEPLOYMENT_EXECUTOR_KIND=mock` is demo-ready:
-
-- moves jobs through `queued -> running -> terminal`
-- writes attempt-level and target-level steps
-- writes target results
-- supports success, partial failure, and full failure modes through env
-
-### Ansible runner skeleton
-
-`DEPLOYMENT_EXECUTOR_KIND=ansible` is prepared for the next step:
-
-- validates runner/playbook/temp-dir prerequisites
-- renders a workspace per attempt
-- renders inventory, vars, and bootstrap artifacts
-- returns structured execution output metadata with stdout/stderr refs
-- does not yet invoke real ansible-runner orchestration
-
-## Current scope
-
-Implemented now:
-
-- canonical runtime reply envelope across Rust planes
-- canonical subject registry in `common`
-- audit-aware control-plane foundation
-- agent registry read-side in `enrollment-plane`
-- deployment job backend with attempt-level executor API
-- shared startup/bootstrap/health behavior
-
-Not implemented yet:
-
-- real ansible-runner execution
-- Vault secret material resolution inside executor runtime
-- query/alert runtime handlers
-- `edge_api` migration to the new canonical protobuf request/reply contracts
+```bash
+cargo check --manifest-path Cargo.toml \
+  -p common \
+  -p enrollment-plane \
+  -p control-plane \
+  -p deployment-plane \
+  -p ingestion-plane \
+  -p query-alert-plane
+```

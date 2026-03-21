@@ -5,6 +5,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const docsDir = path.join(root, 'docs');
+const checkOnly = process.argv.includes('--check');
 
 const str = { type: 'string' };
 const bool = { type: 'boolean' };
@@ -47,11 +48,6 @@ const natsHeaders = {
   'X-NATS-Subject': headerRef('NatsSubject'),
 };
 
-const runtimeHeaders = {
-  ...natsHeaders,
-  'X-Boundary-State': headerRef('BoundaryState'),
-};
-
 const response = (description, schema, headers) => {
   const out = { description };
   if (headers) out.headers = headers;
@@ -72,13 +68,6 @@ const publicErrors = (...codes) => {
     if (code === 401) bag[401] = err('unauthorized', 'Authentication is required or the session is missing.');
     if (code === 403) bag[403] = err('forbidden', 'CSRF or permission validation failed.');
     if (code === 404) bag[404] = err('not_found', 'Requested resource was not found.');
-    if (code === 501) {
-      bag[501] = {
-        description: 'The route exists in the boundary, but the backing Rust runtime plane is not available yet.',
-        headers: runtimeHeaders,
-        content: jsonBody('ErrorEnvelope'),
-      };
-    }
     if (code === 502) bag[502] = err('internal', 'Invalid upstream response or bridge decode failure.');
     if (code === 503) bag[503] = err('unavailable', 'Upstream runtime or NATS bridge is unavailable.');
     if (code === 504) bag[504] = err('deadline_exceeded', 'Upstream request timed out.');
@@ -130,9 +119,10 @@ const spec = {
     { name: 'integrations', description: 'Outbound integrations and scope bindings.' },
     { name: 'tickets', description: 'Ticket lifecycle actions and ticket comments.' },
     { name: 'anomalies', description: 'Anomaly rules and anomaly instances.' },
-    { name: 'logs', description: 'Query-plane log APIs. Currently controlled placeholders until runtime exists.' },
-    { name: 'alerts', description: 'Alert-plane APIs. Currently controlled placeholders until runtime exists.' },
-    { name: 'audit', description: 'Audit-plane API. Currently controlled placeholder until runtime exists.' },
+    { name: 'logs', description: 'Live query-plane log search, context and analytics routes backed by server-rs.' },
+    { name: 'dashboards', description: 'Live overview dashboards backed by query-alert-plane.' },
+    { name: 'alerts', description: 'Live alert instance and alert rule APIs backed by query-alert-plane.' },
+    { name: 'audit', description: 'Live cross-plane audit feed backed by control-plane runtime audit events.' },
     { name: 'stream', description: 'SSE gateway endpoints.' },
   ],
   paths: {},
@@ -143,7 +133,6 @@ const spec = {
     headers: {
       RequestId: { description: 'Request correlation ID generated or propagated by the boundary.', schema: str },
       NatsSubject: { description: 'NATS subject bridged by the boundary for the request.', schema: str },
-      BoundaryState: { description: 'Boundary runtime state marker for controlled placeholder routes.', schema: { type: 'string', enum: ['awaiting-runtime'] } },
     },
     schemas: {
       ErrorBody: { type: 'object', properties: { code: str, message: str, request_id: str }, required: ['code', 'message', 'request_id'] },
@@ -210,6 +199,36 @@ const spec = {
       TicketStatusRequest: { type: 'object', properties: { status: str, resolution: str, reason: str }, required: ['status'] },
       TicketCloseRequest: { type: 'object', properties: { resolution: str, reason: str } },
       AnomalyRuleUpsertRequest: { type: 'object', properties: { name: str, kind: str, scope_type: str, scope_id: str, config_json: freeObject, is_active: bool, reason: str }, required: ['name', 'kind'] },
+      LogQueryFilter: { type: 'object', properties: { query: str, from: dt, to: dt, host: str, service: str, severity: str } },
+      LogSearchRequest: { type: 'object', properties: { query: str, from: dt, to: dt, host: str, service: str, severity: str, limit: u32, offset: u64 } },
+      LogContextRequest: { type: 'object', properties: { event_id: str, before: u32, after: u32 }, required: ['event_id'] },
+      LogEventItem: { type: 'object', properties: { id: str, timestamp: dt, host: str, agent_id: str, source_type: str, source: str, service: str, severity: str, message: str, fingerprint: str, labels: { type: 'object', additionalProperties: { type: 'string' } }, fields_json: freeObject, raw: str }, required: ['id', 'timestamp', 'host', 'agent_id', 'source_type', 'source', 'service', 'severity', 'message', 'fingerprint', 'labels', 'fields_json', 'raw'] },
+      LogSearchResponse: { type: 'object', properties: { items: { type: 'array', items: ref('LogEventItem') }, total: u64, limit: u32, offset: u64, took_ms: u32, request_id: str }, required: ['items', 'total', 'limit', 'offset', 'took_ms', 'request_id'] },
+      LogEventResponse: { type: 'object', properties: { item: ref('LogEventItem'), took_ms: u32, request_id: str }, required: ['request_id'] },
+      LogContextResponse: { type: 'object', properties: { anchor: ref('LogEventItem'), before: { type: 'array', items: ref('LogEventItem') }, after: { type: 'array', items: ref('LogEventItem') }, took_ms: u32, request_id: str }, required: ['before', 'after', 'took_ms', 'request_id'] },
+      CountBucketItem: { type: 'object', properties: { key: str, count: u64 }, required: ['key', 'count'] },
+      CountBucketsResponse: { type: 'object', properties: { items: { type: 'array', items: ref('CountBucketItem') }, request_id: str }, required: ['items', 'request_id'] },
+      HistogramBucketItem: { type: 'object', properties: { bucket: str, count: u64 }, required: ['bucket', 'count'] },
+      HistogramResponse: { type: 'object', properties: { items: { type: 'array', items: ref('HistogramBucketItem') }, request_id: str }, required: ['items', 'request_id'] },
+      HeatmapBucketItem: { type: 'object', properties: { bucket: str, severity: str, count: u64 }, required: ['bucket', 'severity', 'count'] },
+      HeatmapResponse: { type: 'object', properties: { items: { type: 'array', items: ref('HeatmapBucketItem') }, request_id: str }, required: ['items', 'request_id'] },
+      PatternBucketItem: { type: 'object', properties: { fingerprint: str, sample_message: str, count: u64 }, required: ['fingerprint', 'sample_message', 'count'] },
+      TopPatternsResponse: { type: 'object', properties: { items: { type: 'array', items: ref('PatternBucketItem') }, request_id: str }, required: ['items', 'request_id'] },
+      LogAnomalyItem: { type: 'object', properties: { alert_instance_id: str, alert_rule_id: str, status: str, severity: str, title: str, fingerprint: str, host: str, service: str, triggered_at: dt, payload_json: freeObject }, required: ['alert_instance_id', 'alert_rule_id', 'status', 'severity', 'title', 'fingerprint', 'host', 'service', 'triggered_at', 'payload_json'] },
+      LogAnomaliesResponse: { type: 'object', properties: { items: { type: 'array', items: ref('LogAnomalyItem') }, total: u64, limit: u32, offset: u64, request_id: str }, required: ['items', 'total', 'limit', 'offset', 'request_id'] },
+      DashboardMetricItem: { type: 'object', properties: { key: str, label: str, value: str, change: { type: 'number' }, trend: str, description: str }, required: ['key', 'label', 'value', 'change', 'trend', 'description'] },
+      DashboardActivityItem: { type: 'object', properties: { kind: str, title: str, description: str, timestamp: dt }, required: ['kind', 'title', 'description', 'timestamp'] },
+      DashboardOverviewResponse: { type: 'object', properties: { metrics: { type: 'array', items: ref('DashboardMetricItem') }, active_hosts: u64, open_alerts: u64, deployment_jobs: u64, ingested_events: u64, recent_activity: { type: 'array', items: ref('DashboardActivityItem') }, log_histogram: { type: 'array', items: ref('HistogramBucketItem') }, top_services: { type: 'array', items: ref('CountBucketItem') }, top_hosts: { type: 'array', items: ref('CountBucketItem') }, request_id: str }, required: ['metrics', 'active_hosts', 'open_alerts', 'deployment_jobs', 'ingested_events', 'recent_activity', 'log_histogram', 'top_services', 'top_hosts', 'request_id'] },
+      AlertRuleItem: { type: 'object', properties: { alert_rule_id: str, name: str, description: str, status: str, severity: str, scope_type: str, scope_id: str, condition_json: freeObject, created_at: dt, updated_at: dt, created_by: str, updated_by: str }, required: ['alert_rule_id', 'name', 'status', 'severity', 'scope_type', 'condition_json', 'created_at', 'updated_at', 'created_by', 'updated_by'] },
+      AlertRuleMutationRequest: { type: 'object', properties: { name: str, description: str, status: str, severity: str, scope_type: str, scope_id: str, condition_json: freeObject, reason: str }, required: ['name', 'severity', 'scope_type', 'condition_json'] },
+      AlertInstanceItem: { type: 'object', properties: { alert_instance_id: str, alert_rule_id: str, title: str, status: str, severity: str, triggered_at: dt, acknowledged_at: dt, resolved_at: dt, host: str, service: str, fingerprint: str, payload_json: freeObject }, required: ['alert_instance_id', 'alert_rule_id', 'title', 'status', 'severity', 'triggered_at', 'host', 'service', 'fingerprint', 'payload_json'] },
+      AlertInstancesResponse: { type: 'object', properties: { items: { type: 'array', items: ref('AlertInstanceItem') }, paging: ref('PagingMeta'), request_id: str }, required: ['items', 'paging', 'request_id'] },
+      AlertInstanceResponse: { type: 'object', properties: { item: ref('AlertInstanceItem'), request_id: str }, required: ['request_id'] },
+      AlertRulesResponse: { type: 'object', properties: { items: { type: 'array', items: ref('AlertRuleItem') }, paging: ref('PagingMeta'), request_id: str }, required: ['items', 'paging', 'request_id'] },
+      AlertRuleResponse: { type: 'object', properties: { item: ref('AlertRuleItem'), request_id: str }, required: ['request_id'] },
+      PagingMeta: { type: 'object', properties: { limit: u32, offset: u64, total: u64 }, required: ['limit', 'offset', 'total'] },
+      AuditEventItem: { type: 'object', properties: { audit_event_id: str, event_type: str, entity_type: str, entity_id: str, actor_id: str, actor_type: str, request_id: str, reason: str, payload_json: freeObject, created_at: dt }, required: ['audit_event_id', 'event_type', 'entity_type', 'entity_id', 'actor_id', 'actor_type', 'request_id', 'reason', 'payload_json', 'created_at'] },
+      AuditEventsResponse: { type: 'object', properties: { items: { type: 'array', items: ref('AuditEventItem') }, paging: ref('PagingMeta'), request_id: str }, required: ['items', 'paging', 'request_id'] },
     },
   },
 };
@@ -262,22 +281,6 @@ const successOp = (tag, summary, requestSchema, status = 200, params = []) =>
     responses: {
       [status]: response('OK.', 'SuccessResponse', natsHeaders),
       ...publicErrors(400, 401, 403, 404, 502, 503, 504),
-    },
-  });
-
-const placeholderOp = (tag, summary, description, params = []) =>
-  secure({
-    tags: [tag],
-    summary,
-    description,
-    ...(params.length ? { parameters: params } : {}),
-    responses: {
-      501: {
-        description: 'Boundary route is present, but the Rust runtime plane is not wired yet.',
-        headers: runtimeHeaders,
-        content: jsonBody('ErrorEnvelope'),
-      },
-      ...publicErrors(401),
     },
   });
 
@@ -407,28 +410,27 @@ paths['/api/v1/anomalies/rules/{id}'] = { get: itemOp('anomalies', 'Get anomaly 
 paths['/api/v1/anomalies/instances'] = { get: listOp('anomalies', 'List anomaly instances', 'AnomalyInstanceItem', { paged: true, params: [q('limit', u32, 'Maximum number of instances.'), q('offset', u64, 'Pagination offset.'), q('query', str, 'Free text search term.'), q('anomaly_rule_id', str, 'Filter by anomaly rule ID.'), q('cluster_id', str, 'Filter by cluster ID.'), q('status', str, 'Filter by status.')] }) };
 paths['/api/v1/anomalies/instances/{id}'] = { get: itemOp('anomalies', 'Get anomaly instance', 'AnomalyInstanceItem', { params: [p('id', 'Anomaly instance ID.')] }) };
 
-paths['/api/v1/logs/search'] = { post: placeholderOp('logs', 'Search logs', 'Query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/logs/{eventId}'] = { get: placeholderOp('logs', 'Get log event', 'Query-plane route reserved for server-rs runtime.', [p('eventId', 'Log event ID.')]) };
-paths['/api/v1/logs/context'] = { post: placeholderOp('logs', 'Get event context', 'Query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/logs/histogram'] = { get: placeholderOp('logs', 'Get log histogram', 'Query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/logs/severity'] = { get: placeholderOp('logs', 'Get severity aggregation', 'Query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/logs/top-hosts'] = { get: placeholderOp('logs', 'Get top hosts', 'Query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/logs/top-services'] = { get: placeholderOp('logs', 'Get top services', 'Query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/logs/heatmap'] = { get: placeholderOp('logs', 'Get heatmap', 'Query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/logs/top-patterns'] = { get: placeholderOp('logs', 'Get top patterns', 'Query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/logs/anomalies'] = { get: placeholderOp('logs', 'Get log anomalies', 'Query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/dashboards/overview'] = { get: placeholderOp('logs', 'Get dashboard overview', 'Dashboard query-plane route reserved for server-rs runtime.') };
-paths['/api/v1/alerts'] = { get: placeholderOp('alerts', 'List alerts', 'Alert-plane route reserved for server-rs runtime.'), post: placeholderOp('alerts', 'Create alert rule', 'Alert-plane route reserved for server-rs runtime.') };
-paths['/api/v1/alerts/{id}'] = { get: placeholderOp('alerts', 'Get alert', 'Alert-plane route reserved for server-rs runtime.', [p('id', 'Alert ID.')]), patch: placeholderOp('alerts', 'Update alert rule', 'Alert-plane route reserved for server-rs runtime.', [p('id', 'Alert ID.')]) };
-paths['/api/v1/audit'] = { get: placeholderOp('audit', 'List audit entries', 'Audit-plane route reserved for server-rs runtime.') };
+paths['/api/v1/logs/search'] = { post: secure({ tags: ['logs'], summary: 'Search logs', requestBody: { required: true, content: jsonBody('LogSearchRequest') }, responses: { 200: response('OK.', 'LogSearchResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/logs/{eventId}'] = { get: secure({ tags: ['logs'], summary: 'Get one normalized log event', parameters: [p('eventId', 'Log event ID.')], responses: { 200: response('OK.', 'LogEventResponse', natsHeaders), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
+paths['/api/v1/logs/context'] = { post: secure({ tags: ['logs'], summary: 'Get log context around an event', requestBody: { required: true, content: jsonBody('LogContextRequest') }, responses: { 200: response('OK.', 'LogContextResponse', natsHeaders), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
+paths['/api/v1/logs/histogram'] = { get: secure({ tags: ['logs'], summary: 'Get histogram over log events', parameters: [q('query', str, 'Free-text query.'), q('from', dt, 'Inclusive RFC3339 timestamp.'), q('to', dt, 'Inclusive RFC3339 timestamp.'), q('host', str, 'Host filter.'), q('service', str, 'Service filter.'), q('severity', str, 'Severity filter.')], responses: { 200: response('OK.', 'HistogramResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/logs/severity'] = { get: secure({ tags: ['logs'], summary: 'Get severity buckets', parameters: [q('query', str, 'Free-text query.'), q('from', dt, 'Inclusive RFC3339 timestamp.'), q('to', dt, 'Inclusive RFC3339 timestamp.'), q('host', str, 'Host filter.'), q('service', str, 'Service filter.'), q('severity', str, 'Severity filter.'), q('limit', u32, 'Maximum number of buckets.')], responses: { 200: response('OK.', 'CountBucketsResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/logs/top-hosts'] = { get: secure({ tags: ['logs'], summary: 'Get top hosts by matching events', parameters: [q('query', str, 'Free-text query.'), q('from', dt, 'Inclusive RFC3339 timestamp.'), q('to', dt, 'Inclusive RFC3339 timestamp.'), q('host', str, 'Host filter.'), q('service', str, 'Service filter.'), q('severity', str, 'Severity filter.'), q('limit', u32, 'Maximum number of buckets.')], responses: { 200: response('OK.', 'CountBucketsResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/logs/top-services'] = { get: secure({ tags: ['logs'], summary: 'Get top services by matching events', parameters: [q('query', str, 'Free-text query.'), q('from', dt, 'Inclusive RFC3339 timestamp.'), q('to', dt, 'Inclusive RFC3339 timestamp.'), q('host', str, 'Host filter.'), q('service', str, 'Service filter.'), q('severity', str, 'Severity filter.'), q('limit', u32, 'Maximum number of buckets.')], responses: { 200: response('OK.', 'CountBucketsResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/logs/heatmap'] = { get: secure({ tags: ['logs'], summary: 'Get heatmap by time bucket and severity', parameters: [q('query', str, 'Free-text query.'), q('from', dt, 'Inclusive RFC3339 timestamp.'), q('to', dt, 'Inclusive RFC3339 timestamp.'), q('host', str, 'Host filter.'), q('service', str, 'Service filter.'), q('severity', str, 'Severity filter.')], responses: { 200: response('OK.', 'HeatmapResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/logs/top-patterns'] = { get: secure({ tags: ['logs'], summary: 'Get top message patterns', parameters: [q('query', str, 'Free-text query.'), q('from', dt, 'Inclusive RFC3339 timestamp.'), q('to', dt, 'Inclusive RFC3339 timestamp.'), q('host', str, 'Host filter.'), q('service', str, 'Service filter.'), q('severity', str, 'Severity filter.'), q('limit', u32, 'Maximum number of patterns.')], responses: { 200: response('OK.', 'TopPatternsResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/logs/anomalies'] = { get: secure({ tags: ['logs'], summary: 'List log-origin alert projections', parameters: [q('host', str, 'Host filter.'), q('service', str, 'Service filter.'), q('severity', str, 'Severity filter.'), q('limit', u32, 'Maximum number of items.'), q('offset', u64, 'Pagination offset.')], responses: { 200: response('OK.', 'LogAnomaliesResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/dashboards/overview'] = { get: secure({ tags: ['dashboards'], summary: 'Get overview dashboard data', parameters: [q('from', dt, 'Inclusive RFC3339 timestamp.'), q('to', dt, 'Inclusive RFC3339 timestamp.')], responses: { 200: response('OK.', 'DashboardOverviewResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/alerts'] = { get: secure({ tags: ['alerts'], summary: 'List alert instances', parameters: [q('status', str, 'Alert instance status filter.'), q('severity', str, 'Alert severity filter.'), q('host', str, 'Host filter.'), q('service', str, 'Service filter.'), q('limit', u32, 'Maximum number of items.'), q('offset', u64, 'Pagination offset.')], responses: { 200: response('OK.', 'AlertInstancesResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }), post: secure({ tags: ['alerts'], summary: 'Create alert rule', requestBody: { required: true, content: jsonBody('AlertRuleMutationRequest') }, responses: { 200: response('OK.', 'AlertRuleResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/alerts/rules'] = { get: secure({ tags: ['alerts'], summary: 'List alert rules', parameters: [q('query', str, 'Free-text query.'), q('status', str, 'Alert rule status filter.'), q('limit', u32, 'Maximum number of items.'), q('offset', u64, 'Pagination offset.')], responses: { 200: response('OK.', 'AlertRulesResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
+paths['/api/v1/alerts/rules/{id}'] = { get: secure({ tags: ['alerts'], summary: 'Get alert rule', parameters: [p('id', 'Alert rule ID.')], responses: { 200: response('OK.', 'AlertRuleResponse', natsHeaders), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
+paths['/api/v1/alerts/{id}'] = { get: secure({ tags: ['alerts'], summary: 'Get alert instance', parameters: [p('id', 'Alert instance ID.')], responses: { 200: response('OK.', 'AlertInstanceResponse', natsHeaders), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }), patch: secure({ tags: ['alerts'], summary: 'Update alert rule', parameters: [p('id', 'Alert rule ID.')], requestBody: { required: true, content: jsonBody('AlertRuleMutationRequest') }, responses: { 200: response('OK.', 'AlertRuleResponse', natsHeaders), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
+paths['/api/v1/audit'] = { get: secure({ tags: ['audit'], summary: 'List cross-plane audit events', parameters: [q('event_type', str, 'Event type filter.'), q('entity_type', str, 'Entity type filter.'), q('entity_id', str, 'Entity ID filter.'), q('actor_id', str, 'Actor ID filter.'), q('limit', u32, 'Maximum number of items.'), q('offset', u64, 'Pagination offset.')], responses: { 200: response('OK.', 'AuditEventsResponse', natsHeaders), ...publicErrors(400, 401, 403, 502, 503, 504) } }) };
 
 paths['/api/v1/stream/logs'] = { get: sse('stream', 'Logs SSE stream', 'Fan-out stream for ui.stream.logs subject.') };
 paths['/api/v1/stream/deployments'] = { get: sse('stream', 'Deployments SSE stream', 'Fan-out stream for deployments.jobs.status and deployments.jobs.step subjects.') };
 paths['/api/v1/stream/alerts'] = { get: sse('stream', 'Alerts SSE stream', 'Fan-out stream for ui.stream.alerts subject.') };
 paths['/api/v1/stream/agents'] = { get: sse('stream', 'Agents SSE stream', 'Fan-out stream for ui.stream.agents subject.') };
-paths['/api/v1/stream/clusters'] = { get: sse('stream', 'Clusters SSE stream', 'Fan-out stream for ui.stream.clusters subject.') };
-paths['/api/v1/stream/tickets'] = { get: sse('stream', 'Tickets SSE stream', 'Fan-out stream for ui.stream.tickets subject.') };
-paths['/api/v1/stream/anomalies'] = { get: sse('stream', 'Anomalies SSE stream', 'Fan-out stream for ui.stream.anomalies subject.') };
 
 function isScalar(value) {
   return value === null || ['string', 'number', 'boolean'].includes(typeof value);
@@ -467,7 +469,22 @@ function toYAML(value, indent = 0) {
   return `${pad}${yamlScalar(value)}`;
 }
 
-fs.mkdirSync(docsDir, { recursive: true });
-fs.writeFileSync(path.join(docsDir, 'openapi.json'), `${JSON.stringify(spec, null, 2)}\n`, 'utf8');
-fs.writeFileSync(path.join(docsDir, 'openapi.yaml'), `${toYAML(spec)}\n`, 'utf8');
-console.log('rendered edge_api/docs/openapi.json and edge_api/docs/openapi.yaml');
+const jsonOutput = `${JSON.stringify(spec, null, 2)}\n`;
+const yamlOutput = `${toYAML(spec)}\n`;
+const jsonPath = path.join(docsDir, 'openapi.json');
+const yamlPath = path.join(docsDir, 'openapi.yaml');
+
+if (checkOnly) {
+  const existingJson = fs.existsSync(jsonPath) ? fs.readFileSync(jsonPath, 'utf8') : '';
+  const existingYaml = fs.existsSync(yamlPath) ? fs.readFileSync(yamlPath, 'utf8') : '';
+  if (existingJson !== jsonOutput || existingYaml !== yamlOutput) {
+    console.error('OpenAPI spec is out of date. Run `node edge_api/scripts/render-openapi.cjs`.');
+    process.exit(1);
+  }
+  console.log('OpenAPI spec is up to date.');
+} else {
+  fs.mkdirSync(docsDir, { recursive: true });
+  fs.writeFileSync(jsonPath, jsonOutput, 'utf8');
+  fs.writeFileSync(yamlPath, yamlOutput, 'utf8');
+  console.log('rendered edge_api/docs/openapi.json and edge_api/docs/openapi.yaml');
+}

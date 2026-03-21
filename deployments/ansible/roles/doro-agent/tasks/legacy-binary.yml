@@ -1,0 +1,116 @@
+---
+- name: Resolve runtime binary path
+  ansible.builtin.set_fact:
+    doro_agent_runtime_binary_path: >-
+      {{ doro_agent_package_binary_path if doro_agent_selected_artifact.package_type == 'deb' else doro_agent_tarball_binary_path }}
+
+- name: Resolve artifact sources
+  ansible.builtin.set_fact:
+    doro_agent_selected_artifact_url: >-
+      {% if doro_agent_selected_artifact.source_uri is defined and (doro_agent_selected_artifact.source_uri | trim) != '' %}
+      {% if doro_agent_selected_artifact.source_uri[:7] == 'http://' or doro_agent_selected_artifact.source_uri[:8] == 'https://' %}
+      {{ doro_agent_selected_artifact.source_uri }}
+      {% else %}
+      {{ '' }}
+      {% endif %}
+      {% elif doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' %}
+      {{ doro_agent_selected_artifact.artifact_path }}
+      {% elif doro_agent_release_base_url | trim != '' %}
+      {{ doro_agent_release_base_url }}/{{ doro_agent_selected_artifact.artifact_path | regex_replace('^\\./', '') | regex_replace('^/', '') }}
+      {% else %}
+      {{ '' }}
+      {% endif %}
+    doro_agent_selected_artifact_local_path: >-
+      {% if doro_agent_selected_artifact.source_uri is defined and (doro_agent_selected_artifact.source_uri | trim) != '' %}
+      {% if doro_agent_selected_artifact.source_uri[:7] == 'http://' or doro_agent_selected_artifact.source_uri[:8] == 'https://' %}
+      {{ '' }}
+      {% else %}
+      {{ doro_agent_selected_artifact.source_uri }}
+      {% endif %}
+      {% elif doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' or doro_agent_release_base_url | trim != '' %}
+      {{ '' }}
+      {% else %}
+      {{ doro_agent_selected_artifact.artifact_path }}
+      {% endif %}
+
+- name: Create temp work directory
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: doro-agent
+  register: doro_agent_tmp_dir
+
+- name: Download artifact from release URL
+  ansible.builtin.get_url:
+    url: "{{ doro_agent_selected_artifact_url }}"
+    dest: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
+    mode: "0644"
+  when: doro_agent_selected_artifact_url | trim != ''
+
+- name: Copy artifact from local controller path
+  ansible.builtin.copy:
+    src: "{{ doro_agent_selected_artifact_local_path }}"
+    dest: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
+    mode: "0644"
+  when: doro_agent_selected_artifact_url | trim == ''
+
+- name: Install agent deb package
+  ansible.builtin.apt:
+    deb: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
+    state: present
+  when: doro_agent_selected_artifact.package_type == 'deb'
+
+- name: Create unpack directory for tarball install
+  ansible.builtin.file:
+    path: "{{ doro_agent_tmp_dir.path }}/bundle"
+    state: directory
+    mode: "0755"
+  when: doro_agent_selected_artifact.package_type == 'tar.gz'
+
+- name: Unpack tarball bundle
+  ansible.builtin.unarchive:
+    src: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
+    dest: "{{ doro_agent_tmp_dir.path }}/bundle"
+    remote_src: true
+  when: doro_agent_selected_artifact.package_type == 'tar.gz'
+
+- name: Install tarball binary
+  ansible.builtin.copy:
+    src: "{{ doro_agent_tmp_dir.path }}/bundle/{{ doro_agent_selected_artifact.bundle_root }}/bin/doro-agent"
+    dest: "{{ doro_agent_tarball_binary_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+  when: doro_agent_selected_artifact.package_type == 'tar.gz'
+
+- name: Install tarball docs
+  ansible.builtin.copy:
+    src: "{{ doro_agent_tmp_dir.path }}/bundle/{{ doro_agent_selected_artifact.bundle_root }}/docs/INSTALL.md"
+    dest: "{{ doro_agent_docs_dir }}/INSTALL.md"
+    owner: root
+    group: root
+    mode: "0644"
+    remote_src: true
+  when: doro_agent_selected_artifact.package_type == 'tar.gz'
+
+- name: Render legacy systemd unit
+  ansible.builtin.template:
+    src: doro-agent.service.j2
+    dest: "{{ doro_agent_systemd_unit_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart doro-agent
+
+- name: Remove container runner when using legacy binary mode
+  ansible.builtin.file:
+    path: "{{ doro_agent_container_runner_path }}"
+    state: absent
+
+- name: Ensure agent service is enabled and started
+  ansible.builtin.systemd_service:
+    name: "{{ doro_agent_service_name }}"
+    enabled: true
+    state: started

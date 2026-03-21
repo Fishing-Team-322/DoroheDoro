@@ -21,6 +21,10 @@ pub struct AgentConfig {
     #[serde(default)]
     pub diagnostics: DiagnosticsConfig,
     #[serde(default)]
+    pub security_scan: SecurityScanConfig,
+    #[serde(default)]
+    pub policy: PolicyConfig,
+    #[serde(default)]
     pub batch: BatchConfig,
     #[serde(default)]
     pub queues: QueueConfig,
@@ -34,6 +38,8 @@ pub struct AgentConfig {
     pub install: InstallConfig,
     #[serde(default)]
     pub platform: PlatformConfig,
+    #[serde(default)]
+    pub tls: TlsConfig,
     #[serde(default)]
     pub scope: ScopeConfig,
     #[serde(default)]
@@ -63,6 +69,86 @@ pub struct DiagnosticsConfig {
 impl Default for DiagnosticsConfig {
     fn default() -> Self {
         Self { interval_sec: 0 }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SecurityScanConfig {
+    #[serde(default = "default_security_scan_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_security_scan_interval")]
+    pub interval_sec: u64,
+    #[serde(default = "default_security_scan_jitter")]
+    pub jitter_sec: u64,
+    #[serde(default = "default_security_scan_timeout")]
+    pub timeout_sec: u64,
+    #[serde(default = "default_security_scan_parallelism")]
+    pub max_parallel_checks: usize,
+    #[serde(default)]
+    pub profile: SecurityScanProfile,
+    #[serde(default)]
+    pub allowed_ports: Vec<u16>,
+    #[serde(default)]
+    pub blocked_ports: Vec<u16>,
+    #[serde(default = "default_security_scan_package_watchlist")]
+    pub package_watchlist: Vec<String>,
+    #[serde(default = "default_security_scan_rules_path")]
+    pub version_rules_path: PathBuf,
+    #[serde(default = "default_security_scan_publish")]
+    pub publish_as_diagnostics: bool,
+    #[serde(default = "default_security_scan_persist_last_report")]
+    pub persist_last_report: bool,
+}
+
+impl Default for SecurityScanConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_security_scan_enabled(),
+            interval_sec: default_security_scan_interval(),
+            jitter_sec: default_security_scan_jitter(),
+            timeout_sec: default_security_scan_timeout(),
+            max_parallel_checks: default_security_scan_parallelism(),
+            profile: SecurityScanProfile::default(),
+            allowed_ports: Vec::new(),
+            blocked_ports: Vec::new(),
+            package_watchlist: default_security_scan_package_watchlist(),
+            version_rules_path: default_security_scan_rules_path(),
+            publish_as_diagnostics: default_security_scan_publish(),
+            persist_last_report: default_security_scan_persist_last_report(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SecurityScanProfile {
+    Light,
+    #[default]
+    Balanced,
+    Deep,
+}
+
+impl SecurityScanProfile {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Balanced => "balanced",
+            Self::Deep => "deep",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PolicyConfig {
+    #[serde(default = "default_policy_refresh_interval")]
+    pub refresh_interval_sec: u64,
+}
+
+impl Default for PolicyConfig {
+    fn default() -> Self {
+        Self {
+            refresh_interval_sec: default_policy_refresh_interval(),
+        }
     }
 }
 
@@ -188,6 +274,18 @@ pub struct PlatformConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+pub struct TlsConfig {
+    #[serde(default)]
+    pub ca_path: Option<PathBuf>,
+    #[serde(default)]
+    pub cert_path: Option<PathBuf>,
+    #[serde(default)]
+    pub key_path: Option<PathBuf>,
+    #[serde(default)]
+    pub server_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
 pub struct ScopeConfig {
     #[serde(default)]
     pub configured_cluster_id: Option<String>,
@@ -255,7 +353,7 @@ pub enum StartAt {
     End,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct SourceConfig {
     #[serde(rename = "type")]
     pub kind: String,
@@ -312,6 +410,56 @@ impl AgentConfig {
         }
         if let Some(value) = env::var_os("DIAGNOSTICS_INTERVAL_SEC") {
             self.diagnostics.interval_sec = parse_u64(&value, self.diagnostics.interval_sec);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_ENABLED") {
+            self.security_scan.enabled = parse_bool(&value, self.security_scan.enabled);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_INTERVAL_SEC") {
+            self.security_scan.interval_sec = parse_u64(&value, self.security_scan.interval_sec);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_JITTER_SEC") {
+            self.security_scan.jitter_sec = parse_u64(&value, self.security_scan.jitter_sec);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_TIMEOUT_SEC") {
+            self.security_scan.timeout_sec = parse_u64(&value, self.security_scan.timeout_sec);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_MAX_PARALLEL_CHECKS") {
+            self.security_scan.max_parallel_checks =
+                parse_usize(&value, self.security_scan.max_parallel_checks);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_PROFILE") {
+            match value.to_string_lossy().to_ascii_lowercase().as_str() {
+                "light" => self.security_scan.profile = SecurityScanProfile::Light,
+                "balanced" => self.security_scan.profile = SecurityScanProfile::Balanced,
+                "deep" => self.security_scan.profile = SecurityScanProfile::Deep,
+                _ => {}
+            }
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_ALLOWED_PORTS") {
+            self.security_scan.allowed_ports =
+                parse_port_list(&value, &self.security_scan.allowed_ports);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_BLOCKED_PORTS") {
+            self.security_scan.blocked_ports =
+                parse_port_list(&value, &self.security_scan.blocked_ports);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_PACKAGE_WATCHLIST") {
+            self.security_scan.package_watchlist =
+                parse_string_list(&value, &self.security_scan.package_watchlist);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_VERSION_RULES_PATH") {
+            self.security_scan.version_rules_path = PathBuf::from(value);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_PUBLISH_AS_DIAGNOSTICS") {
+            self.security_scan.publish_as_diagnostics =
+                parse_bool(&value, self.security_scan.publish_as_diagnostics);
+        }
+        if let Some(value) = env::var_os("SECURITY_SCAN_PERSIST_LAST_REPORT") {
+            self.security_scan.persist_last_report =
+                parse_bool(&value, self.security_scan.persist_last_report);
+        }
+        if let Some(value) = env::var_os("POLICY_REFRESH_INTERVAL_SEC") {
+            self.policy.refresh_interval_sec = parse_u64(&value, self.policy.refresh_interval_sec);
         }
         if let Some(value) = env::var_os("BATCH_MAX_EVENTS") {
             self.batch.max_events = parse_usize(&value, self.batch.max_events);
@@ -393,6 +541,18 @@ impl AgentConfig {
         if let Some(value) = env::var_os("ALLOW_MACHINE_ID") {
             self.platform.allow_machine_id = parse_bool(&value, self.platform.allow_machine_id);
         }
+        if let Some(value) = env::var_os("TLS_CA_PATH") {
+            self.tls.ca_path = Some(PathBuf::from(value));
+        }
+        if let Some(value) = env::var_os("TLS_CERT_PATH") {
+            self.tls.cert_path = Some(PathBuf::from(value));
+        }
+        if let Some(value) = env::var_os("TLS_KEY_PATH") {
+            self.tls.key_path = Some(PathBuf::from(value));
+        }
+        if let Some(value) = env::var_os("TLS_SERVER_NAME") {
+            self.tls.server_name = Some(value.to_string_lossy().into_owned());
+        }
         if let Some(value) = env::var_os("CLUSTER_ID") {
             self.scope.configured_cluster_id = Some(value.to_string_lossy().into_owned());
         }
@@ -418,6 +578,12 @@ impl AgentConfig {
         normalize_optional_string(&mut self.scope.cluster_name);
         normalize_optional_string(&mut self.scope.service_name);
         normalize_optional_string(&mut self.scope.environment);
+        normalize_optional_string(&mut self.tls.server_name);
+        normalize_string_list(&mut self.security_scan.package_watchlist);
+        self.security_scan.allowed_ports.sort_unstable();
+        self.security_scan.allowed_ports.dedup();
+        self.security_scan.blocked_ports.sort_unstable();
+        self.security_scan.blocked_ports.dedup();
         for source in &mut self.sources {
             if source.source_id.is_none() {
                 source.source_id = Some(format!("file:{}", source.path.to_string_lossy()));
@@ -446,6 +612,51 @@ impl AgentConfig {
         if self.diagnostics.interval_sec == 0 {
             return Err(AppError::invalid_config(
                 "diagnostics.interval_sec must be greater than zero",
+            ));
+        }
+        if self.security_scan.interval_sec == 0 {
+            return Err(AppError::invalid_config(
+                "security_scan.interval_sec must be greater than zero",
+            ));
+        }
+        if self.security_scan.timeout_sec == 0 {
+            return Err(AppError::invalid_config(
+                "security_scan.timeout_sec must be greater than zero",
+            ));
+        }
+        if self.security_scan.max_parallel_checks == 0 {
+            return Err(AppError::invalid_config(
+                "security_scan.max_parallel_checks must be greater than zero",
+            ));
+        }
+        if self.security_scan.version_rules_path.as_os_str().is_empty() {
+            return Err(AppError::invalid_config(
+                "security_scan.version_rules_path must be configured",
+            ));
+        }
+        if self
+            .security_scan
+            .package_watchlist
+            .iter()
+            .any(|entry| entry.trim().is_empty())
+        {
+            return Err(AppError::invalid_config(
+                "security_scan.package_watchlist must not contain empty values",
+            ));
+        }
+        if self
+            .security_scan
+            .allowed_ports
+            .iter()
+            .any(|port| self.security_scan.blocked_ports.contains(port))
+        {
+            return Err(AppError::invalid_config(
+                "security_scan.allowed_ports and security_scan.blocked_ports must not overlap",
+            ));
+        }
+        if self.policy.refresh_interval_sec == 0 {
+            return Err(AppError::invalid_config(
+                "policy.refresh_interval_sec must be greater than zero",
             ));
         }
         if self.batch.max_events == 0 {
@@ -486,6 +697,11 @@ impl AgentConfig {
         if self.spool.enabled && self.spool.max_disk_bytes == 0 {
             return Err(AppError::invalid_config(
                 "spool.max_disk_bytes must be greater than zero when spool is enabled",
+            ));
+        }
+        if self.tls.cert_path.is_some() ^ self.tls.key_path.is_some() {
+            return Err(AppError::invalid_config(
+                "tls.cert_path and tls.key_path must be configured together",
             ));
         }
         for source in &self.sources {
@@ -545,12 +761,69 @@ fn normalize_optional_string(value: &mut Option<String>) {
     }
 }
 
+fn normalize_string_list(values: &mut Vec<String>) {
+    let mut deduped = Vec::with_capacity(values.len());
+    for value in values.drain(..) {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || deduped.iter().any(|current| current == trimmed) {
+            continue;
+        }
+        deduped.push(trimmed.to_string());
+    }
+    *values = deduped;
+}
+
 fn default_log_level() -> String {
     "info".to_string()
 }
 
 fn default_heartbeat_interval() -> u64 {
     30
+}
+
+fn default_policy_refresh_interval() -> u64 {
+    30
+}
+
+fn default_security_scan_enabled() -> bool {
+    true
+}
+
+fn default_security_scan_interval() -> u64 {
+    86_400
+}
+
+fn default_security_scan_jitter() -> u64 {
+    900
+}
+
+fn default_security_scan_timeout() -> u64 {
+    120
+}
+
+fn default_security_scan_parallelism() -> usize {
+    4
+}
+
+fn default_security_scan_package_watchlist() -> Vec<String> {
+    vec![
+        "openssl".to_string(),
+        "openssh".to_string(),
+        "nginx".to_string(),
+        "docker".to_string(),
+    ]
+}
+
+fn default_security_scan_rules_path() -> PathBuf {
+    PathBuf::from("/etc/doro-agent/security-rules.yaml")
+}
+
+fn default_security_scan_publish() -> bool {
+    true
+}
+
+fn default_security_scan_persist_last_report() -> bool {
+    true
 }
 
 fn default_batch_max_events() -> usize {
@@ -641,23 +914,106 @@ fn parse_usize(value: &std::ffi::OsStr, fallback: usize) -> usize {
     value.to_string_lossy().parse::<usize>().unwrap_or(fallback)
 }
 
+fn parse_port_list(value: &std::ffi::OsStr, fallback: &[u16]) -> Vec<u16> {
+    let parsed = value
+        .to_string_lossy()
+        .split(',')
+        .filter_map(|entry| entry.trim().parse::<u16>().ok())
+        .collect::<Vec<_>>();
+    if parsed.is_empty() && !value.is_empty() {
+        fallback.to_vec()
+    } else {
+        parsed
+    }
+}
+
+fn parse_string_list(value: &std::ffi::OsStr, fallback: &[String]) -> Vec<String> {
+    let parsed = value
+        .to_string_lossy()
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if parsed.is_empty() && !value.is_empty() {
+        fallback.to_vec()
+    } else {
+        parsed
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
         env, fs,
-        path::PathBuf,
-        sync::{LazyLock, Mutex},
+        path::{Path, PathBuf},
     };
 
     use tempfile::TempDir;
 
-    use super::{AgentConfig, InstallMode, StartAt, TransportMode};
+    use crate::test_support::lock_agent_env;
 
-    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    use super::{AgentConfig, InstallMode, SecurityScanProfile, StartAt, TransportMode};
+
+    fn clear_test_env() {
+        for key in [
+            "EDGE_URL",
+            "EDGE_GRPC_ADDR",
+            "BOOTSTRAP_TOKEN",
+            "STATE_DIR",
+            "LOG_LEVEL",
+            "HEARTBEAT_INTERVAL_SEC",
+            "DIAGNOSTICS_INTERVAL_SEC",
+            "SECURITY_SCAN_ENABLED",
+            "SECURITY_SCAN_INTERVAL_SEC",
+            "SECURITY_SCAN_JITTER_SEC",
+            "SECURITY_SCAN_TIMEOUT_SEC",
+            "SECURITY_SCAN_MAX_PARALLEL_CHECKS",
+            "SECURITY_SCAN_PROFILE",
+            "SECURITY_SCAN_ALLOWED_PORTS",
+            "SECURITY_SCAN_BLOCKED_PORTS",
+            "SECURITY_SCAN_PACKAGE_WATCHLIST",
+            "SECURITY_SCAN_VERSION_RULES_PATH",
+            "SECURITY_SCAN_PUBLISH_AS_DIAGNOSTICS",
+            "SECURITY_SCAN_PERSIST_LAST_REPORT",
+            "POLICY_REFRESH_INTERVAL_SEC",
+            "BATCH_MAX_EVENTS",
+            "BATCH_MAX_BYTES",
+            "BATCH_FLUSH_INTERVAL_MS",
+            "BATCH_FLUSH_INTERVAL_SEC",
+            "BATCH_COMPRESS_THRESHOLD_BYTES",
+            "QUEUE_EVENT_CAPACITY",
+            "QUEUE_SEND_CAPACITY",
+            "QUEUE_EVENT_BYTES_SOFT_LIMIT",
+            "QUEUE_SEND_BYTES_SOFT_LIMIT",
+            "DEGRADED_FAILURE_THRESHOLD",
+            "DEGRADED_SERVER_UNAVAILABLE_SEC",
+            "DEGRADED_QUEUE_PRESSURE_PCT",
+            "DEGRADED_QUEUE_RECOVER_PCT",
+            "DEGRADED_UNACKED_LAG_BYTES",
+            "DEGRADED_SHUTDOWN_SPOOL_GRACE_SEC",
+            "SPOOL_ENABLED",
+            "SPOOL_DIR",
+            "SPOOL_MAX_DISK_BYTES",
+            "TRANSPORT_MODE",
+            "INSTALL_MODE",
+            "ALLOW_MACHINE_ID",
+            "TLS_CA_PATH",
+            "TLS_CERT_PATH",
+            "TLS_KEY_PATH",
+            "TLS_SERVER_NAME",
+            "CLUSTER_ID",
+            "CLUSTER_NAME",
+            "SERVICE_NAME",
+            "ENVIRONMENT",
+        ] {
+            env::remove_var(key);
+        }
+    }
 
     #[test]
     fn loads_phase_two_yaml_config() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_agent_env();
         clear_test_env();
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("agent.yaml");
@@ -672,6 +1028,20 @@ heartbeat:
   interval_sec: 15
 diagnostics:
   interval_sec: 10
+security_scan:
+  interval_sec: 120
+  jitter_sec: 30
+  timeout_sec: 15
+  max_parallel_checks: 2
+  profile: "deep"
+  allowed_ports: [22, 443]
+  blocked_ports: [23]
+  package_watchlist: ["openssl", "docker"]
+  version_rules_path: "/etc/doro-agent/security-rules.yaml"
+  publish_as_diagnostics: true
+  persist_last_report: true
+policy:
+  refresh_interval_sec: 20
 batch:
   max_events: 42
   max_bytes: 10000
@@ -698,6 +1068,11 @@ sources:
 
         let config = AgentConfig::load(&config_path).unwrap();
         assert_eq!(config.edge_grpc_addr, "localhost:9090");
+        assert_eq!(config.security_scan.interval_sec, 120);
+        assert_eq!(config.security_scan.profile, SecurityScanProfile::Deep);
+        assert_eq!(config.security_scan.allowed_ports, vec![22, 443]);
+        assert_eq!(config.security_scan.blocked_ports, vec![23]);
+        assert_eq!(config.policy.refresh_interval_sec, 20);
         assert_eq!(config.batch.max_events, 42);
         assert_eq!(config.transport.mode, TransportMode::Mock);
         assert_eq!(config.sources[0].start_at, StartAt::Beginning);
@@ -706,7 +1081,7 @@ sources:
 
     #[test]
     fn applies_defaults_for_source_id_diagnostics_and_spool_dir() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_agent_env();
         clear_test_env();
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("agent.yaml");
@@ -732,6 +1107,10 @@ sources:
             config.diagnostics.interval_sec,
             config.heartbeat.interval_sec
         );
+        assert!(config.security_scan.enabled);
+        assert_eq!(config.security_scan.interval_sec, 86_400);
+        assert_eq!(config.security_scan.package_watchlist.len(), 4);
+        assert_eq!(config.policy.refresh_interval_sec, 30);
         assert_eq!(
             config.spool.dir,
             PathBuf::from("/tmp/doro-agent").join("spool")
@@ -742,7 +1121,7 @@ sources:
 
     #[test]
     fn env_overrides_scalar_fields() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_agent_env();
         clear_test_env();
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("agent.yaml");
@@ -765,6 +1144,22 @@ sources:
 
         env::set_var("EDGE_URL", "https://edge.example.local");
         env::set_var("EDGE_GRPC_ADDR", "edge.example.local:7443");
+        env::set_var("SECURITY_SCAN_ENABLED", "false");
+        env::set_var("SECURITY_SCAN_INTERVAL_SEC", "600");
+        env::set_var("SECURITY_SCAN_JITTER_SEC", "60");
+        env::set_var("SECURITY_SCAN_TIMEOUT_SEC", "45");
+        env::set_var("SECURITY_SCAN_MAX_PARALLEL_CHECKS", "8");
+        env::set_var("SECURITY_SCAN_PROFILE", "light");
+        env::set_var("SECURITY_SCAN_ALLOWED_PORTS", "22,443");
+        env::set_var("SECURITY_SCAN_BLOCKED_PORTS", "23,25");
+        env::set_var("SECURITY_SCAN_PACKAGE_WATCHLIST", "openssl,nginx");
+        env::set_var(
+            "SECURITY_SCAN_VERSION_RULES_PATH",
+            "/tmp/security-rules.yaml",
+        );
+        env::set_var("SECURITY_SCAN_PUBLISH_AS_DIAGNOSTICS", "false");
+        env::set_var("SECURITY_SCAN_PERSIST_LAST_REPORT", "false");
+        env::set_var("POLICY_REFRESH_INTERVAL_SEC", "60");
         env::set_var("BATCH_MAX_EVENTS", "100");
         env::set_var("BATCH_FLUSH_INTERVAL_MS", "750");
         env::set_var("QUEUE_SEND_CAPACITY", "16");
@@ -772,6 +1167,10 @@ sources:
         env::set_var("TRANSPORT_MODE", "mock");
         env::set_var("INSTALL_MODE", "ansible");
         env::set_var("ALLOW_MACHINE_ID", "true");
+        env::set_var("TLS_CA_PATH", "/etc/doro-agent/ca.pem");
+        env::set_var("TLS_CERT_PATH", "/etc/doro-agent/agent.pem");
+        env::set_var("TLS_KEY_PATH", "/etc/doro-agent/agent.key");
+        env::set_var("TLS_SERVER_NAME", "edge.example.local");
         env::set_var("CLUSTER_ID", "cluster-a");
         env::set_var("CLUSTER_NAME", "prod");
         env::set_var("SERVICE_NAME", "api");
@@ -779,22 +1178,27 @@ sources:
 
         let config = AgentConfig::load(&config_path).unwrap();
 
-        env::remove_var("EDGE_URL");
-        env::remove_var("EDGE_GRPC_ADDR");
-        env::remove_var("BATCH_MAX_EVENTS");
-        env::remove_var("BATCH_FLUSH_INTERVAL_MS");
-        env::remove_var("QUEUE_SEND_CAPACITY");
-        env::remove_var("SPOOL_ENABLED");
-        env::remove_var("TRANSPORT_MODE");
-        env::remove_var("INSTALL_MODE");
-        env::remove_var("ALLOW_MACHINE_ID");
-        env::remove_var("CLUSTER_ID");
-        env::remove_var("CLUSTER_NAME");
-        env::remove_var("SERVICE_NAME");
-        env::remove_var("ENVIRONMENT");
-
         assert_eq!(config.edge_url, "https://edge.example.local");
         assert_eq!(config.edge_grpc_addr, "edge.example.local:7443");
+        assert!(!config.security_scan.enabled);
+        assert_eq!(config.security_scan.interval_sec, 600);
+        assert_eq!(config.security_scan.jitter_sec, 60);
+        assert_eq!(config.security_scan.timeout_sec, 45);
+        assert_eq!(config.security_scan.max_parallel_checks, 8);
+        assert_eq!(config.security_scan.profile, SecurityScanProfile::Light);
+        assert_eq!(config.security_scan.allowed_ports, vec![22, 443]);
+        assert_eq!(config.security_scan.blocked_ports, vec![23, 25]);
+        assert_eq!(
+            config.security_scan.package_watchlist,
+            vec!["openssl".to_string(), "nginx".to_string()]
+        );
+        assert_eq!(
+            config.security_scan.version_rules_path,
+            PathBuf::from("/tmp/security-rules.yaml")
+        );
+        assert!(!config.security_scan.publish_as_diagnostics);
+        assert!(!config.security_scan.persist_last_report);
+        assert_eq!(config.policy.refresh_interval_sec, 60);
         assert_eq!(config.batch.max_events, 100);
         assert_eq!(config.batch.flush_interval_ms, 750);
         assert_eq!(config.queues.send_capacity, 16);
@@ -802,6 +1206,22 @@ sources:
         assert_eq!(config.transport.mode, TransportMode::Mock);
         assert_eq!(config.install.mode, InstallMode::Ansible);
         assert!(config.platform.allow_machine_id);
+        assert_eq!(
+            config.tls.ca_path.as_deref(),
+            Some(Path::new("/etc/doro-agent/ca.pem"))
+        );
+        assert_eq!(
+            config.tls.cert_path.as_deref(),
+            Some(Path::new("/etc/doro-agent/agent.pem"))
+        );
+        assert_eq!(
+            config.tls.key_path.as_deref(),
+            Some(Path::new("/etc/doro-agent/agent.key"))
+        );
+        assert_eq!(
+            config.tls.server_name.as_deref(),
+            Some("edge.example.local")
+        );
         assert_eq!(
             config.scope.configured_cluster_id.as_deref(),
             Some("cluster-a")
@@ -811,42 +1231,66 @@ sources:
         assert_eq!(config.scope.environment.as_deref(), Some("production"));
     }
 
-    fn clear_test_env() {
-        for key in [
-            "EDGE_URL",
-            "EDGE_GRPC_ADDR",
-            "BOOTSTRAP_TOKEN",
-            "STATE_DIR",
-            "LOG_LEVEL",
-            "HEARTBEAT_INTERVAL_SEC",
-            "DIAGNOSTICS_INTERVAL_SEC",
-            "BATCH_MAX_EVENTS",
-            "BATCH_MAX_BYTES",
-            "BATCH_FLUSH_INTERVAL_MS",
-            "BATCH_FLUSH_INTERVAL_SEC",
-            "BATCH_COMPRESS_THRESHOLD_BYTES",
-            "QUEUE_EVENT_CAPACITY",
-            "QUEUE_SEND_CAPACITY",
-            "QUEUE_EVENT_BYTES_SOFT_LIMIT",
-            "QUEUE_SEND_BYTES_SOFT_LIMIT",
-            "DEGRADED_FAILURE_THRESHOLD",
-            "DEGRADED_SERVER_UNAVAILABLE_SEC",
-            "DEGRADED_QUEUE_PRESSURE_PCT",
-            "DEGRADED_QUEUE_RECOVER_PCT",
-            "DEGRADED_UNACKED_LAG_BYTES",
-            "DEGRADED_SHUTDOWN_SPOOL_GRACE_SEC",
-            "SPOOL_ENABLED",
-            "SPOOL_DIR",
-            "SPOOL_MAX_DISK_BYTES",
-            "TRANSPORT_MODE",
-            "INSTALL_MODE",
-            "ALLOW_MACHINE_ID",
-            "CLUSTER_ID",
-            "CLUSTER_NAME",
-            "SERVICE_NAME",
-            "ENVIRONMENT",
-        ] {
-            env::remove_var(key);
-        }
+    #[test]
+    fn rejects_partial_tls_keypair() {
+        let _guard = lock_agent_env();
+        clear_test_env();
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("agent.yaml");
+        fs::write(
+            &config_path,
+            r#"
+edge_url: "https://edge.example.local"
+edge_grpc_addr: "edge.example.local:7443"
+bootstrap_token: "token"
+state_dir: "/tmp/doro-agent"
+tls:
+  cert_path: "/etc/doro-agent/agent.pem"
+sources:
+  - type: "file"
+    path: "/tmp/test.log"
+    source: "syslog"
+    service: "demo"
+    severity_hint: "info"
+"#,
+        )
+        .unwrap();
+
+        let error = AgentConfig::load(&config_path).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("tls.cert_path and tls.key_path must be configured together"));
+    }
+
+    #[test]
+    fn rejects_overlapping_security_port_rules() {
+        let _guard = lock_agent_env();
+        clear_test_env();
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("agent.yaml");
+        fs::write(
+            &config_path,
+            r#"
+edge_url: "http://localhost:8080"
+edge_grpc_addr: "localhost:9090"
+bootstrap_token: "token"
+state_dir: "/tmp/doro-agent"
+security_scan:
+  allowed_ports: [22]
+  blocked_ports: [22]
+sources:
+  - type: "file"
+    path: "/tmp/test.log"
+    source: "syslog"
+    service: "demo"
+    severity_hint: "info"
+"#,
+        )
+        .unwrap();
+
+        let error = AgentConfig::load(&config_path).unwrap_err();
+        assert!(error.to_string().contains(
+            "security_scan.allowed_ports and security_scan.blocked_ports must not overlap"
+        ));
     }
 }

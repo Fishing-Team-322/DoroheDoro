@@ -5,16 +5,14 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_BASE_URL: /api/edge
-        NEXT_PUBLIC_SITE_URL: https://fishingteam.su
+        NEXT_PUBLIC_SITE_URL: ${PUBLIC_BASE_URL:-https://edge.example.com}
     environment:
       NEXT_PUBLIC_API_BASE_URL: /api/edge
       EDGE_API_INTERNAL_URL: http://edge-api:8080
-      NEXT_PUBLIC_SITE_URL: https://fishingteam.su
+      NEXT_PUBLIC_SITE_URL: ${PUBLIC_BASE_URL:-https://edge.example.com}
     depends_on:
       edge-api:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:13000:3000"
     restart: unless-stopped
     healthcheck:
       test:
@@ -29,13 +27,36 @@ services:
       retries: 10
       start_period: 10s
 
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      frontend:
+        condition: service_healthy
+      edge-api:
+        condition: service_healthy
+    environment:
+      NGINX_SERVER_NAME: ${NGINX_SERVER_NAME:-edge.example.com}
+    volumes:
+      - ./deployments/nginx/server.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${SERVER_CERTS_DIR:?SERVER_CERTS_DIR must point to a directory containing server.crt server.key ca.crt}:/certs:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://127.0.0.1/healthz >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
   edge-api:
     image: dorohedoro-edge-api-server
     build:
       context: ./edge_api
       dockerfile: Dockerfile
     env_file:
-      - ./edge_api/.env.server
+      - ${EDGE_API_SERVER_ENV_FILE:-./edge_api/.env.server}
     depends_on:
       nats:
         condition: service_healthy
@@ -47,14 +68,11 @@ services:
         condition: service_healthy
       deployment-plane:
         condition: service_healthy
-      edge-api-certs:
-        condition: service_completed_successfully
-    ports:
-      - "127.0.0.1:18080:8080"
-      - "127.0.0.1:19090:9090"
+      query-alert-plane:
+        condition: service_healthy
     restart: unless-stopped
     volumes:
-      - edge-api-certs:/certs:ro
+      - ${SERVER_CERTS_DIR:?SERVER_CERTS_DIR must point to a directory containing server.crt server.key ca.crt}:/certs:ro
     healthcheck:
       test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8080/readyz"]
       interval: 30s
@@ -62,16 +80,18 @@ services:
       retries: 10
       start_period: 5s
 
-  edge-api-certs:
-    image: dorohedoro-edge-api-server
+  agent-artifacts:
+    image: dorohedoro-agent-artifacts-server
     build:
-      context: ./edge_api
-      dockerfile: Dockerfile
-    entrypoint: ["/usr/local/bin/dev-certs"]
-    environment:
-      DEV_CERTS_OUT_DIR: /certs
-    volumes:
-      - edge-api-certs:/certs
+      context: .
+      dockerfile: ./deployments/artifacts/Dockerfile
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/manifest.json"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   nats:
     image: nats:2.11-alpine
@@ -99,6 +119,82 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    environment:
+      discovery.type: single-node
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+      bootstrap.memory_lock: "true"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS 'http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null",
+        ]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.12-alpine
+    environment:
+      CLICKHOUSE_DB: doro
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://default:clickhouse@127.0.0.1:8123/ping | grep -q Ok",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  vault:
+    image: hashicorp/vault:1.19
+    cap_add:
+      - IPC_LOCK
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: ["vault", "server", "-dev", "-dev-root-token-id=root", "-dev-listen-address=0.0.0.0:8200"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  vault-init:
+    image: hashicorp/vault:1.19
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+    entrypoint: ["/bin/sh", "/vault/bootstrap/init-dev.sh"]
+    volumes:
+      - ./deployments/vault/init-dev.sh:/vault/bootstrap/init-dev.sh:ro
+      - ./deployments/vault/deployment-plane-policy.hcl:/vault/bootstrap/deployment-plane-policy.hcl:ro
+      - ${SERVER_CERTS_DIR:?SERVER_CERTS_DIR must point to a directory containing server.crt server.key ca.crt}:/certs:ro
 
   enrollment-plane:
     image: dorohedoro-enrollment-plane-server
@@ -166,19 +262,37 @@ services:
       POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/doro
       NATS_URL: nats://nats:4222
       DEPLOYMENT_HTTP_ADDR: 0.0.0.0:8083
-      DEPLOYMENT_EXECUTOR_KIND: mock
-      EDGE_PUBLIC_URL: https://fishingteam.su
+      DEPLOYMENT_EXECUTOR_KIND: ansible
+      EDGE_PUBLIC_URL: ${EDGE_PUBLIC_URL:-https://edge.example.com}
       EDGE_GRPC_ADDR: edge-api:9090
       AGENT_STATE_DIR_DEFAULT: /var/lib/doro-agent
+      ANSIBLE_RUNNER_BIN: /usr/local/bin/ansible-runner
+      ANSIBLE_PLAYBOOK_PATH: /app/deployments/ansible/playbooks/install-agent.yml
+      DEPLOYMENT_TEMP_DIR: /tmp/doro-deployment-plane
+      ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION: 10
+      AGENT_ARTIFACT_MANIFEST_URL: http://agent-artifacts:8080/manifest.json
+      AGENT_RELEASE_BASE_URL: http://agent-artifacts:8080
+      AGENT_ARTIFACT_VERSION: 0.2.0
+      AGENT_PREFERRED_PACKAGE_TYPE: deb
+      VAULT_ADDR: http://vault:8200
+      VAULT_ROLE_ID: dev-role-id
+      VAULT_SECRET_ID: dev-secret-id
+      AGENT_MTLS_CA_VAULT_REF: secret/data/agent/ca
+      AGENT_MTLS_CERT_VAULT_REF: secret/data/agent/cert
+      AGENT_MTLS_KEY_VAULT_REF: secret/data/agent/key
       RUST_LOG: info
     depends_on:
       postgres:
         condition: service_healthy
       nats:
         condition: service_healthy
+      control-plane:
+        condition: service_healthy
       enrollment-plane:
         condition: service_healthy
-      control-plane:
+      vault-init:
+        condition: service_completed_successfully
+      agent-artifacts:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -186,8 +300,82 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 10s
+      start_period: 20s
+
+  ingestion-plane:
+    image: dorohedoro-ingestion-plane-server
+    build:
+      context: .
+      dockerfile: ./server-rs/Dockerfile
+      args:
+        RUST_BIN: ingestion-plane
+    environment:
+      NATS_URL: nats://nats:4222
+      INGESTION_HTTP_ADDR: 0.0.0.0:8084
+      OPENSEARCH_URL: http://opensearch:9200
+      OPENSEARCH_INDEX_PREFIX: doro
+      CLICKHOUSE_DSN: http://default:clickhouse@clickhouse:8123
+      CLICKHOUSE_DATABASE: doro
+      CLICKHOUSE_TABLE: logs
+      RARE_FINGERPRINT_ENABLED: ${RARE_FINGERPRINT_ENABLED:-true}
+      RARE_FINGERPRINT_WINDOW_MINUTES: ${RARE_FINGERPRINT_WINDOW_MINUTES:-60}
+      RARE_FINGERPRINT_MAX_COUNT: ${RARE_FINGERPRINT_MAX_COUNT:-1}
+      RARE_FINGERPRINT_SEVERITY: ${RARE_FINGERPRINT_SEVERITY:-medium}
+      RUST_LOG: info
+    depends_on:
+      nats:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8084/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  query-alert-plane:
+    image: dorohedoro-query-alert-plane-server
+    build:
+      context: .
+      dockerfile: ./server-rs/Dockerfile
+      args:
+        RUST_BIN: query-alert-plane
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/doro
+      NATS_URL: nats://nats:4222
+      QUERY_ALERT_HTTP_ADDR: 0.0.0.0:8085
+      OPENSEARCH_URL: http://opensearch:9200
+      OPENSEARCH_INDEX_PREFIX: doro
+      CLICKHOUSE_DSN: http://default:clickhouse@clickhouse:8123
+      CLICKHOUSE_DATABASE: doro
+      CLICKHOUSE_TABLE: logs
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      control-plane:
+        condition: service_healthy
+      ingestion-plane:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8085/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
 volumes:
-  edge-api-certs:
+  clickhouse-data:
+  opensearch-data:
   postgres-data:

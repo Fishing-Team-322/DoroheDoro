@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use async_nats::{Client, Subject, Subscriber};
 use common::{
+    json::{AgentStreamEvent, AuditAppendEvent},
     nats_subjects::{
         AGENTS_BOOTSTRAP_TOKEN_ISSUE, AGENTS_DIAGNOSTICS, AGENTS_DIAGNOSTICS_GET,
         AGENTS_ENROLL_REQUEST, AGENTS_GET, AGENTS_HEARTBEAT, AGENTS_LIST, AGENTS_POLICY_FETCH,
-        AGENTS_POLICY_GET,
+        AGENTS_POLICY_GET, AUDIT_EVENTS_APPEND, UI_STREAM_AGENTS,
     },
     proto::{
         agent::{
@@ -62,11 +63,13 @@ pub async fn spawn_handlers(
         )),
         tokio::spawn(run_heartbeat_handler(
             heartbeat_sub,
+            client.clone(),
             service.clone(),
             shutdown.clone(),
         )),
         tokio::spawn(run_diagnostics_handler(
             diagnostics_sub,
+            client.clone(),
             service.clone(),
             shutdown.clone(),
         )),
@@ -127,9 +130,29 @@ async fn run_issue_bootstrap_token_handler(
         };
 
         let correlation_id = request.correlation_id.clone();
+        let requested_by = request.requested_by.clone();
         match service.issue_bootstrap_token(request).await {
             Ok(response) => {
                 send_ok_reply(&client, &message.reply, &response, &correlation_id).await;
+                publish_audit_event(
+                    &client,
+                    AuditAppendEvent {
+                        event_type: "agents.bootstrap_token.issued".to_string(),
+                        entity_type: "bootstrap_token".to_string(),
+                        entity_id: response.token_id.clone(),
+                        actor_id: first_non_empty(&requested_by, "system"),
+                        actor_type: "user".to_string(),
+                        request_id: first_non_empty(&correlation_id, "bootstrap-token"),
+                        reason: "bootstrap token issued".to_string(),
+                        payload_json: serde_json::json!({
+                            "policy_id": response.policy_id,
+                            "policy_revision_id": response.policy_revision_id,
+                            "expires_at_unix_ms": response.expires_at_unix_ms,
+                        }),
+                        created_at: None,
+                    },
+                )
+                .await;
                 info!(
                     correlation_id,
                     token_id = response.token_id,
@@ -164,6 +187,31 @@ async fn run_enroll_handler(
         match service.enroll(request).await {
             Ok(response) => {
                 send_ok_reply(&client, &message.reply, &response, &correlation_id).await;
+                publish_agent_stream_snapshot(
+                    &client,
+                    service.clone(),
+                    &response.agent_id,
+                    "enrolled",
+                )
+                .await;
+                publish_audit_event(
+                    &client,
+                    AuditAppendEvent {
+                        event_type: "agents.enroll".to_string(),
+                        entity_type: "agent".to_string(),
+                        entity_id: response.agent_id.clone(),
+                        actor_id: response.agent_id.clone(),
+                        actor_type: "agent".to_string(),
+                        request_id: first_non_empty(&correlation_id, &response.agent_id),
+                        reason: "agent enrolled".to_string(),
+                        payload_json: serde_json::json!({
+                            "policy_id": response.policy_id,
+                            "policy_revision": response.policy_revision,
+                        }),
+                        created_at: None,
+                    },
+                )
+                .await;
                 info!(
                     correlation_id,
                     agent_id = response.agent_id,
@@ -213,6 +261,7 @@ async fn run_policy_handler(
 
 async fn run_heartbeat_handler(
     mut subscription: Subscriber,
+    client: Client,
     service: Arc<EnrollmentService>,
     shutdown: CancellationToken,
 ) {
@@ -233,12 +282,14 @@ async fn run_heartbeat_handler(
             continue;
         }
 
+        publish_agent_stream_snapshot(&client, service.clone(), &agent_id, "heartbeat").await;
         info!(agent_id, "persisted heartbeat");
     }
 }
 
 async fn run_diagnostics_handler(
     mut subscription: Subscriber,
+    client: Client,
     service: Arc<EnrollmentService>,
     shutdown: CancellationToken,
 ) {
@@ -259,6 +310,7 @@ async fn run_diagnostics_handler(
             continue;
         }
 
+        publish_agent_stream_snapshot(&client, service.clone(), &agent_id, "diagnostics").await;
         info!(agent_id, "persisted diagnostics snapshot");
     }
 }
@@ -414,5 +466,68 @@ async fn send_reply(
         .await
     {
         error!(error = %error, "failed to publish NATS reply");
+    }
+}
+
+async fn publish_agent_stream_snapshot(
+    client: &Client,
+    service: Arc<EnrollmentService>,
+    agent_id: &str,
+    event_type: &str,
+) {
+    let agent = match service.get_agent(agent_id).await {
+        Ok(agent) => agent,
+        Err(error) => {
+            warn!(agent_id, error = %error, "failed to load agent snapshot for stream publish");
+            return;
+        }
+    };
+
+    let payload = AgentStreamEvent {
+        event_type: event_type.to_string(),
+        agent_id: agent.agent_id,
+        hostname: agent.hostname,
+        status: agent.status,
+        version: agent.version,
+        last_seen_at: agent.last_seen_at,
+    };
+
+    match serde_json::to_vec(&payload) {
+        Ok(bytes) => {
+            if let Err(error) = client
+                .publish(UI_STREAM_AGENTS.to_string(), bytes.into())
+                .await
+            {
+                warn!(agent_id, error = %error, "failed to publish agent stream event");
+            }
+        }
+        Err(error) => {
+            warn!(agent_id, error = %error, "failed to encode agent stream event");
+        }
+    }
+}
+
+async fn publish_audit_event(client: &Client, event: AuditAppendEvent) {
+    match serde_json::to_vec(&event) {
+        Ok(bytes) => {
+            if let Err(error) = client
+                .publish(AUDIT_EVENTS_APPEND.to_string(), bytes.into())
+                .await
+            {
+                warn!(entity_type = %event.entity_type, entity_id = %event.entity_id, error = %error, "failed to publish audit append event");
+            }
+        }
+        Err(error) => {
+            warn!(entity_type = %event.entity_type, entity_id = %event.entity_id, error = %error, "failed to encode audit append event");
+        }
+    }
+}
+
+fn first_non_empty(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.to_string()
     }
 }

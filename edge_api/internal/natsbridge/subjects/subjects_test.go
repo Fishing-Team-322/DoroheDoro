@@ -98,13 +98,13 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	if registry.DeploymentsPlanCreate != "deployments.plan.create" {
 		t.Fatalf("unexpected deployments plan subject: %s", registry.DeploymentsPlanCreate)
 	}
-	if registry.StreamClusters != "ui.stream.clusters" {
-		t.Fatalf("unexpected clusters stream subject: %s", registry.StreamClusters)
+	if registry.StreamLogs != "ui.stream.logs" {
+		t.Fatalf("unexpected logs stream subject: %s", registry.StreamLogs)
 	}
-	if registry.StreamTickets != "ui.stream.tickets" {
-		t.Fatalf("unexpected tickets stream subject: %s", registry.StreamTickets)
+	if registry.StreamAlerts != "ui.stream.alerts" {
+		t.Fatalf("unexpected alerts stream subject: %s", registry.StreamAlerts)
 	}
-	if registry.StreamAnomalies != "ui.stream.anomalies" {
-		t.Fatalf("unexpected anomalies stream subject: %s", registry.StreamAnomalies)
+	if registry.StreamAgents != "ui.stream.agents" {
+		t.Fatalf("unexpected agents stream subject: %s", registry.StreamAgents)
 	}
 }

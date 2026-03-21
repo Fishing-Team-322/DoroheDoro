@@ -1,17 +1,18 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
+use common::json::AuditAppendEvent;
 use serde_json::{json, Value};
 use sqlx::{postgres::PgRow, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::{
     models::{
-        AnomalyInstanceModel, AnomalyRuleModel, ClusterAgentBindingModel, ClusterDetailsModel,
-        ClusterHostBindingModel, ClusterModel, CredentialProfileModel, HostGroupMemberModel,
-        HostGroupModel, HostModel, IntegrationBindingModel, IntegrationModel, PermissionModel,
-        PolicyModel, PolicyRevisionModel, RoleBindingModel, RoleModel, TicketCommentModel,
-        TicketDetailsModel, TicketEventModel, TicketModel,
+        AnomalyInstanceModel, AnomalyRuleModel, AuditEventModel, ClusterAgentBindingModel,
+        ClusterDetailsModel, ClusterHostBindingModel, ClusterModel, CredentialProfileModel,
+        HostGroupMemberModel, HostGroupModel, HostModel, IntegrationBindingModel, IntegrationModel,
+        PermissionModel, PolicyModel, PolicyRevisionModel, RoleBindingModel, RoleModel,
+        TicketCommentModel, TicketDetailsModel, TicketEventModel, TicketModel,
     },
     service::AuditInfo,
 };
@@ -2012,6 +2013,96 @@ impl ControlRepository {
         Ok(rows.into_iter().map(anomaly_instance_from_row).collect())
     }
 
+    pub async fn list_runtime_audit_events(
+        &self,
+        event_type: Option<&str>,
+        entity_type: Option<&str>,
+        entity_id: Option<&str>,
+        actor_id: Option<&str>,
+        limit: u32,
+        offset: u64,
+    ) -> Result<(Vec<AuditEventModel>, u64), sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT id, event_type, entity_type, entity_id, actor_id, actor_type,
+                    request_id, reason, payload_json, created_at
+             FROM runtime_audit_events
+             WHERE ($1::text IS NULL OR event_type = $1)
+               AND ($2::text IS NULL OR entity_type = $2)
+               AND ($3::text IS NULL OR entity_id = $3)
+               AND ($4::text IS NULL OR actor_id = $4)
+             ORDER BY created_at DESC, id DESC
+             LIMIT $5 OFFSET $6",
+        )
+        .bind(event_type)
+        .bind(entity_type)
+        .bind(entity_id)
+        .bind(actor_id)
+        .bind(limit as i64)
+        .bind(offset as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let total = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*)
+             FROM runtime_audit_events
+             WHERE ($1::text IS NULL OR event_type = $1)
+               AND ($2::text IS NULL OR entity_type = $2)
+               AND ($3::text IS NULL OR entity_id = $3)
+               AND ($4::text IS NULL OR actor_id = $4)",
+        )
+        .bind(event_type)
+        .bind(entity_type)
+        .bind(entity_id)
+        .bind(actor_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok((
+            rows.into_iter().map(runtime_audit_event_from_row).collect(),
+            total.max(0) as u64,
+        ))
+    }
+
+    pub async fn append_runtime_audit_event(
+        &self,
+        event: &AuditAppendEvent,
+    ) -> Result<AuditEventModel, sqlx::Error> {
+        let id = match uuid::Uuid::parse_str(event.entity_id.trim()) {
+            Ok(_) => Uuid::new_v4(),
+            Err(_) => Uuid::new_v4(),
+        };
+        let created_at = event
+            .created_at
+            .as_deref()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&chrono::Utc))
+            .unwrap_or_else(Utc::now);
+
+        let row = sqlx::query(
+            "INSERT INTO runtime_audit_events (
+                id, event_type, entity_type, entity_id, actor_id, actor_type,
+                request_id, reason, payload_json, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id, event_type, entity_type, entity_id, actor_id, actor_type,
+                      request_id, reason, payload_json, created_at",
+        )
+        .bind(id)
+        .bind(&event.event_type)
+        .bind(&event.entity_type)
+        .bind(&event.entity_id)
+        .bind(&event.actor_id)
+        .bind(&event.actor_type)
+        .bind(&event.request_id)
+        .bind(&event.reason)
+        .bind(&event.payload_json)
+        .bind(created_at)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(runtime_audit_event_from_row(row))
+    }
+
     pub async fn get_anomaly_instance(
         &self,
         anomaly_instance_id: Uuid,
@@ -2051,7 +2142,26 @@ impl ControlRepository {
         .bind(&audit.actor_type)
         .bind(&audit.request_id)
         .bind(&audit.reason)
-        .bind(payload_json)
+        .bind(&payload_json)
+        .execute(&mut **tx)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO runtime_audit_events (
+                id, event_type, entity_type, entity_id, actor_id, actor_type,
+                request_id, reason, payload_json, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())",
+        )
+        .bind(Uuid::new_v4())
+        .bind(action)
+        .bind(entity_type)
+        .bind(entity_id.to_string())
+        .bind(&audit.actor_id)
+        .bind(&audit.actor_type)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
+        .bind(&payload_json)
         .execute(&mut **tx)
         .await?;
         Ok(())
@@ -2080,7 +2190,26 @@ impl ControlRepository {
         .bind(&audit.actor_type)
         .bind(&audit.request_id)
         .bind(&audit.reason)
-        .bind(payload_json)
+        .bind(&payload_json)
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO runtime_audit_events (
+                id, event_type, entity_type, entity_id, actor_id, actor_type,
+                request_id, reason, payload_json, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())",
+        )
+        .bind(Uuid::new_v4())
+        .bind(action)
+        .bind(entity_type)
+        .bind(entity_id.to_string())
+        .bind(&audit.actor_id)
+        .bind(&audit.actor_type)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
+        .bind(&payload_json)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -2320,5 +2449,20 @@ fn anomaly_instance_from_row(row: PgRow) -> AnomalyInstanceModel {
         started_at: row.get("started_at"),
         resolved_at: row.get("resolved_at"),
         payload_json: row.get("payload_json"),
+    }
+}
+
+fn runtime_audit_event_from_row(row: PgRow) -> AuditEventModel {
+    AuditEventModel {
+        id: row.get("id"),
+        event_type: row.get("event_type"),
+        entity_type: row.get("entity_type"),
+        entity_id: row.get("entity_id"),
+        actor_id: row.get("actor_id"),
+        actor_type: row.get("actor_type"),
+        request_id: row.get("request_id"),
+        reason: row.get("reason"),
+        payload_json: row.get("payload_json"),
+        created_at: row.get("created_at"),
     }
 }

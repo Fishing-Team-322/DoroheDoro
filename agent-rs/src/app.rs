@@ -1,24 +1,28 @@
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
+use chrono::Utc;
 use rusqlite::OpenFlags;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::{
     batching::spawn_batcher,
-    config::{AgentConfig, TransportMode},
-    error::AppResult,
+    config::{AgentConfig, SourceConfig, TransportMode},
+    error::{AppError, AppResult},
     logging,
     metadata::{IdentityStatusSnapshot, RuntimeMetadataContext},
+    policy::parse_file_sources,
     runtime::{
         degraded::spawn_degraded_controller, diagnostics::spawn_diagnostics_worker,
         heartbeat::spawn_heartbeat_worker, sender::spawn_sender, state_writer::spawn_state_writer,
-        RuntimeStaticContext, RuntimeStatusHandle,
+        ConnectivityStaticContext, RuntimePhase, RuntimeStaticContext, RuntimeStatusHandle,
     },
-    sources::spawn_file_source,
-    state::SqliteStateStore,
+    security::{spawn_security_scan_worker, SecurityPostureStatusSnapshot},
+    sources::{spawn_file_source, SourceEvent},
+    state::{RuntimeStatePatch, RuntimeStateRecord, SqliteStateStore},
     transport::{
+        client::{build_base_url, derive_server_name, endpoint_uses_tls},
         AgentTransport, DynTransport, EdgeGrpcTransport, EnrollRequest, FetchPolicyRequest,
         MockTransport,
     },
@@ -35,6 +39,119 @@ pub struct App {
     hostname: String,
     version: String,
     agent_id: String,
+    active_sources: Vec<SourceConfig>,
+}
+
+struct SourceWorker {
+    config: SourceConfig,
+    shutdown: CancellationToken,
+    handle: JoinHandle<()>,
+}
+
+struct SourceSupervisor {
+    queue_config: crate::config::QueueConfig,
+    enrichment: crate::metadata::EventEnrichmentContext,
+    store: SqliteStateStore,
+    status: RuntimeStatusHandle,
+    event_tx: mpsc::Sender<SourceEvent>,
+    shutdown: CancellationToken,
+    workers: BTreeMap<String, SourceWorker>,
+}
+
+struct FetchedPolicy {
+    resolved_agent_id: String,
+    identity_status: IdentityStatusSnapshot,
+    policy_id: String,
+    policy_revision: String,
+    policy_body_json: String,
+    policy_status: String,
+    sources: Vec<SourceConfig>,
+    fetched_at_unix_ms: i64,
+}
+
+impl SourceSupervisor {
+    fn new(
+        queue_config: crate::config::QueueConfig,
+        enrichment: crate::metadata::EventEnrichmentContext,
+        store: SqliteStateStore,
+        status: RuntimeStatusHandle,
+        event_tx: mpsc::Sender<SourceEvent>,
+        shutdown: CancellationToken,
+    ) -> Self {
+        Self {
+            queue_config,
+            enrichment,
+            store,
+            status,
+            event_tx,
+            shutdown,
+            workers: BTreeMap::new(),
+        }
+    }
+
+    async fn reconcile(&mut self, desired_sources: Vec<SourceConfig>) -> AppResult<()> {
+        log_source_shape(&desired_sources);
+
+        let persisted_offsets = self.store.list_file_offsets()?;
+        self.status
+            .set_configured_sources(&desired_sources, &persisted_offsets);
+
+        let desired_by_path = desired_sources
+            .into_iter()
+            .map(|source| (source.path.to_string_lossy().into_owned(), source))
+            .collect::<BTreeMap<_, _>>();
+
+        let paths_to_stop = self
+            .workers
+            .iter()
+            .filter_map(|(path, worker)| match desired_by_path.get(path) {
+                Some(source) if worker.config == *source => None,
+                _ => Some(path.clone()),
+            })
+            .collect::<Vec<_>>();
+
+        for path in paths_to_stop {
+            if let Some(worker) = self.workers.remove(&path) {
+                worker.shutdown.cancel();
+                let _ = worker.handle.await;
+            }
+        }
+
+        for (path, source) in desired_by_path {
+            if self.workers.contains_key(&path) {
+                continue;
+            }
+
+            let source_shutdown = self.shutdown.child_token();
+            let handle = spawn_file_source(
+                source.clone(),
+                self.queue_config.clone(),
+                self.enrichment.clone(),
+                self.store.clone(),
+                self.status.clone(),
+                self.event_tx.clone(),
+                source_shutdown.clone(),
+            );
+            self.workers.insert(
+                path,
+                SourceWorker {
+                    config: source,
+                    shutdown: source_shutdown,
+                    handle,
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    async fn shutdown(&mut self) {
+        let workers = std::mem::take(&mut self.workers);
+        for (_, worker) in workers {
+            worker.shutdown.cancel();
+            let _ = worker.handle.await;
+        }
+    }
 }
 
 impl App {
@@ -48,6 +165,7 @@ impl App {
 
         let store = SqliteStateStore::new(&config.state_dir)?;
         let runtime_state = store.load_runtime_state()?;
+        let security_state = store.load_security_scan_state()?;
         let persisted_offsets = store.list_file_offsets()?;
         let persisted_identity = store.load_identity()?;
         let version = metadata.build.agent_version.clone();
@@ -63,6 +181,11 @@ impl App {
                 reason: runtime_state.identity_status_reason.clone(),
             })
             .unwrap_or_default();
+        let initial_sources = if config.transport.mode.is_edge() {
+            Vec::new()
+        } else {
+            config.sources.clone()
+        };
 
         let status = RuntimeStatusHandle::new(
             String::new(),
@@ -76,12 +199,19 @@ impl App {
                 persisted_identity_present: persisted_identity.is_some(),
                 last_known_edge_url,
                 identity_status,
+                connectivity: build_connectivity_static_context(&config)?,
             },
             config.spool.enabled,
-            &config.sources,
+            &initial_sources,
             &persisted_offsets,
             runtime_state.last_successful_send_at_unix_ms,
         );
+        status.restore_runtime_state(&runtime_state);
+        status.restore_security_posture(SecurityPostureStatusSnapshot::from_record(
+            &config.security_scan,
+            &security_state,
+        ));
+
         if runtime_state.degraded_mode {
             status.set_degraded_mode(true, Some("persisted runtime state".to_string()));
         }
@@ -98,6 +228,7 @@ impl App {
         }
         status.set_last_known_edge_url(Some(config.edge_url.clone()));
         status.update_spool_stats(store.spool_stats()?);
+        status.set_runtime_phase(RuntimePhase::Starting, None);
 
         let transport = build_transport(&config)?;
         let mut app = Self {
@@ -109,13 +240,19 @@ impl App {
             hostname,
             version,
             agent_id: String::new(),
+            active_sources: initial_sources,
         };
-        app.agent_id = app.ensure_identity_and_policy().await?;
-        app.status.set_agent_id(app.agent_id.clone());
+
+        let (agent_id, sources) = app.bootstrap_runtime().await?;
+        app.agent_id = agent_id.clone();
+        app.active_sources = sources.clone();
+        app.status.set_agent_id(agent_id);
+        app.status
+            .set_configured_sources(&sources, &app.store.list_file_offsets()?);
         Ok(app)
     }
 
-    pub async fn run(self) -> AppResult<()> {
+    pub async fn run(mut self) -> AppResult<()> {
         info!(
             agent_id = self.agent_id,
             state_db = %self.store.db_path().display(),
@@ -145,7 +282,6 @@ impl App {
             self.config.batch.clone(),
             self.config.queues.clone(),
             self.config.spool.clone(),
-            self.agent_id.clone(),
             self.hostname.clone(),
         );
 
@@ -163,6 +299,7 @@ impl App {
         let heartbeat = spawn_heartbeat_worker(
             self.transport.clone(),
             self.status.clone(),
+            state_writer.clone(),
             shutdown.clone(),
             self.config.edge_url.clone(),
             self.config.heartbeat.interval_sec,
@@ -171,8 +308,19 @@ impl App {
         let diagnostics = spawn_diagnostics_worker(
             self.transport.clone(),
             self.status.clone(),
+            state_writer.clone(),
             shutdown.clone(),
             self.config.diagnostics.interval_sec,
+        );
+
+        let security_scan = spawn_security_scan_worker(
+            self.transport.clone(),
+            self.status.clone(),
+            state_writer.clone(),
+            shutdown.clone(),
+            self.config.state_dir.clone(),
+            self.hostname.clone(),
+            self.config.security_scan.clone(),
         );
 
         let degraded = spawn_degraded_controller(
@@ -185,36 +333,60 @@ impl App {
             self.config.spool.max_disk_bytes,
         );
 
-        let mut source_handles = Vec::new();
-        if self.config.sources.is_empty() {
-            warn!("agent started without configured sources");
-        } else if self.config.sources.len() > SOURCE_COUNT_WARN_THRESHOLD {
-            warn!(
-                source_count = self.config.sources.len(),
-                threshold = SOURCE_COUNT_WARN_THRESHOLD,
-                "high source count configured; current runtime uses one reader task per source"
-            );
-        }
-        for source in self.config.sources.clone() {
-            source_handles.push(spawn_file_source(
-                source,
-                self.config.queues.clone(),
-                self.metadata.event_enrichment.clone(),
-                self.store.clone(),
-                self.status.clone(),
-                event_tx.clone(),
-                shutdown.clone(),
-            ));
-        }
-        drop(event_tx);
+        let mut source_supervisor = SourceSupervisor::new(
+            self.config.queues.clone(),
+            self.metadata.event_enrichment.clone(),
+            self.store.clone(),
+            self.status.clone(),
+            event_tx,
+            shutdown.clone(),
+        );
+        source_supervisor
+            .reconcile(self.active_sources.clone())
+            .await?;
+        self.status.set_runtime_phase(
+            if self.status.is_degraded_mode() {
+                RuntimePhase::Degraded
+            } else {
+                RuntimePhase::Online
+            },
+            None,
+        );
 
-        tokio::signal::ctrl_c().await?;
-        info!("shutdown signal received");
+        let mut policy_refresh = tokio::time::interval(std::time::Duration::from_secs(
+            self.config.policy.refresh_interval_sec,
+        ));
+        policy_refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("shutdown signal received");
+                    break;
+                }
+                _ = policy_refresh.tick(), if self.config.transport.mode.is_edge() => {
+                    if let Err(error) = self.refresh_policy(&mut source_supervisor).await {
+                        warn!(error = %error, "policy refresh failed without a recoverable runtime source set");
+                    }
+                }
+            }
+        }
+
+        self.status.set_runtime_phase(
+            RuntimePhase::Stopping,
+            Some("shutdown requested".to_string()),
+        );
+        let _ = state_writer
+            .update_runtime_state(RuntimeStatePatch {
+                runtime_status: Some(Some(RuntimePhase::Stopping.as_str().to_string())),
+                runtime_status_reason: Some(Some("shutdown requested".to_string())),
+                ..RuntimeStatePatch::default()
+            })
+            .await;
+
         shutdown.cancel();
-
-        for handle in source_handles {
-            let _ = handle.await;
-        }
+        source_supervisor.shutdown().await;
+        drop(source_supervisor);
         drop(send_tx);
 
         let _ = batcher.await;
@@ -222,16 +394,104 @@ impl App {
         let _ = degraded.await??;
         let _ = heartbeat.await??;
         let _ = diagnostics.await??;
+        let _ = security_scan.await??;
         let _ = state_writer_handle.await??;
 
         info!("doro-agent stopped");
         Ok(())
     }
 
-    async fn ensure_identity_and_policy(&mut self) -> AppResult<String> {
+    async fn bootstrap_runtime(&mut self) -> AppResult<(String, Vec<SourceConfig>)> {
         let mut runtime_state = self.store.load_runtime_state()?;
+        let (agent_id, identity_status) = self.ensure_identity(&mut runtime_state).await?;
+
+        if self.config.transport.mode == TransportMode::Mock {
+            let sources = self.config.sources.clone();
+            self.status
+                .set_configured_sources(&sources, &self.store.list_file_offsets()?);
+            self.status.set_runtime_phase(RuntimePhase::Online, None);
+            self.persist_runtime_phase(RuntimePhase::Online, None)?;
+            return Ok((agent_id, sources));
+        }
+
+        match self
+            .fetch_policy_candidate(agent_id.clone(), identity_status.clone())
+            .await
+        {
+            Ok(fetched) => {
+                self.commit_policy_success(&fetched, true)?;
+                Ok((fetched.resolved_agent_id, fetched.sources))
+            }
+            Err(error) => {
+                let Some(fallback_sources) = self.load_persisted_policy_sources(&runtime_state)?
+                else {
+                    return Err(error);
+                };
+
+                let detail = format!("policy sync failed: {error}");
+                warn!(error = %error, "starting agent with last persisted policy after startup sync failure");
+                self.persist_policy_failure(&mut runtime_state, &error, &detail)?;
+                self.status
+                    .set_runtime_phase(RuntimePhase::Degraded, Some(detail));
+                self.status
+                    .set_configured_sources(&fallback_sources, &self.store.list_file_offsets()?);
+                Ok((agent_id, fallback_sources))
+            }
+        }
+    }
+
+    async fn refresh_policy(&mut self, source_supervisor: &mut SourceSupervisor) -> AppResult<()> {
+        let identity_status = self
+            .store
+            .load_runtime_state()?
+            .identity_status
+            .map(|status| IdentityStatusSnapshot {
+                status,
+                reason: None,
+            })
+            .unwrap_or_else(|| IdentityStatusSnapshot {
+                status: "reused".to_string(),
+                reason: Some("using current in-memory identity".to_string()),
+            });
+
+        match self
+            .fetch_policy_candidate(self.agent_id.clone(), identity_status)
+            .await
+        {
+            Ok(fetched) => {
+                let changed = fetched.sources != self.active_sources;
+                if changed {
+                    if let Err(error) = source_supervisor.reconcile(fetched.sources.clone()).await {
+                        let mut runtime_state = self.store.load_runtime_state()?;
+                        let detail = format!("policy apply failed: {error}");
+                        self.persist_policy_failure(&mut runtime_state, &error, &detail)?;
+                        self.status
+                            .set_runtime_phase(RuntimePhase::Degraded, Some(detail));
+                        return Ok(());
+                    }
+                }
+                self.commit_policy_success(&fetched, false)?;
+                self.agent_id = fetched.resolved_agent_id.clone();
+                self.active_sources = fetched.sources.clone();
+                Ok(())
+            }
+            Err(error) => {
+                let mut runtime_state = self.store.load_runtime_state()?;
+                let detail = format!("policy sync failed: {error}");
+                self.persist_policy_failure(&mut runtime_state, &error, &detail)?;
+                self.status
+                    .set_runtime_phase(RuntimePhase::Degraded, Some(detail));
+                Ok(())
+            }
+        }
+    }
+
+    async fn ensure_identity(
+        &mut self,
+        runtime_state: &mut RuntimeStateRecord,
+    ) -> AppResult<(String, IdentityStatusSnapshot)> {
         let persisted_identity = self.store.load_identity()?;
-        let (mut agent_id, mut identity_status) = if let Some(identity) = persisted_identity {
+        let (agent_id, identity_status) = if let Some(identity) = persisted_identity {
             (
                 identity.agent_id,
                 IdentityStatusSnapshot {
@@ -240,8 +500,13 @@ impl App {
                 },
             )
         } else {
+            self.status.set_runtime_phase(
+                RuntimePhase::Enrolling,
+                Some("enrolling agent identity".to_string()),
+            );
+            let agent_id = self.enroll(None).await?;
             (
-                self.enroll(None).await?,
+                agent_id,
                 IdentityStatusSnapshot {
                     status: "newly_enrolled".to_string(),
                     reason: Some("no persisted identity was found".to_string()),
@@ -249,7 +514,36 @@ impl App {
             )
         };
 
-        let policy = match self
+        runtime_state.identity_status = Some(identity_status.status.clone());
+        runtime_state.identity_status_reason = identity_status.reason.clone();
+        runtime_state.last_known_edge_url = Some(self.config.edge_url.clone());
+        runtime_state.runtime_status = Some(RuntimePhase::Starting.as_str().to_string());
+        runtime_state.runtime_status_reason = None;
+        runtime_state.spool_enabled = self.config.spool.enabled;
+        runtime_state.updated_at_unix_ms = Utc::now().timestamp_millis();
+        self.store.save_runtime_state(runtime_state)?;
+
+        self.status.set_agent_id(agent_id.clone());
+        self.status.set_identity_status(identity_status.clone());
+        self.status
+            .set_last_known_edge_url(Some(self.config.edge_url.clone()));
+
+        Ok((agent_id, identity_status))
+    }
+
+    async fn fetch_policy_candidate(
+        &mut self,
+        agent_id: String,
+        mut identity_status: IdentityStatusSnapshot,
+    ) -> AppResult<FetchedPolicy> {
+        self.status.set_runtime_phase(
+            RuntimePhase::PolicySyncing,
+            Some("synchronizing policy".to_string()),
+        );
+        let mut runtime_state = self.store.load_runtime_state()?;
+        let fetch_started_at = Utc::now().timestamp_millis();
+
+        let (resolved_agent_id, policy) = match self
             .transport
             .fetch_policy(FetchPolicyRequest {
                 agent_id: agent_id.clone(),
@@ -257,54 +551,58 @@ impl App {
             })
             .await
         {
-            Ok(policy) => policy,
+            Ok(policy) => {
+                self.status.record_connectivity_success(fetch_started_at);
+                (agent_id, policy)
+            }
             Err(error) if error.is_identity_error() => {
                 warn!(error = %error, "stored agent identity was rejected, re-enrolling");
+                self.status.record_connectivity_error(&error);
                 identity_status = IdentityStatusSnapshot {
                     status: "re_enrolled".to_string(),
                     reason: Some("stored identity was rejected by the server".to_string()),
                 };
-                agent_id = self.enroll(Some(agent_id.clone())).await?;
-                self.transport
+                let reenrolled_agent_id = self.enroll(Some(agent_id.clone())).await?;
+                self.status.set_agent_id(reenrolled_agent_id.clone());
+                let policy = self
+                    .transport
                     .fetch_policy(FetchPolicyRequest {
-                        agent_id: agent_id.clone(),
+                        agent_id: reenrolled_agent_id.clone(),
                         current_revision: None,
                     })
-                    .await?
+                    .await?;
+                self.status
+                    .record_connectivity_success(Utc::now().timestamp_millis());
+                (reenrolled_agent_id, policy)
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                self.status.record_connectivity_error(&error);
+                return Err(error);
+            }
         };
 
-        runtime_state.applied_policy_revision = Some(policy.policy_revision.clone());
-        // TODO: keep policy_body_json persisted for future cluster-aware server-issued metadata,
-        // but do not parse it on the agent until the shared contract is explicitly fixed.
-        runtime_state.policy_body_json = Some(policy.policy_body_json.clone());
-        runtime_state.last_known_edge_url = Some(self.config.edge_url.clone());
+        self.status.set_policy_fetch_result(fetch_started_at, None);
+        let candidate_sources = if self.config.transport.mode.is_edge() {
+            parse_file_sources(&policy.policy_body_json)?
+        } else {
+            self.config.sources.clone()
+        };
+
         runtime_state.identity_status = Some(identity_status.status.clone());
         runtime_state.identity_status_reason = identity_status.reason.clone();
-        runtime_state.degraded_mode = runtime_state.degraded_mode;
-        runtime_state.blocked_delivery = runtime_state.blocked_delivery;
-        runtime_state.blocked_reason = runtime_state.blocked_reason;
-        runtime_state.spool_enabled = self.config.spool.enabled;
-        runtime_state.updated_at_unix_ms = chrono::Utc::now().timestamp_millis();
+        runtime_state.updated_at_unix_ms = fetch_started_at;
         self.store.save_runtime_state(&runtime_state)?;
 
-        info!(
-            agent_id = agent_id,
-            policy_agent_id = policy.agent_id,
-            policy_id = policy.policy_id,
-            policy_revision = policy.policy_revision,
-            policy_status = policy.status,
-            identity_status = identity_status.status,
-            "agent policy synchronized"
-        );
-        self.status
-            .set_policy_revision(Some(policy.policy_revision.clone()));
-        self.status.set_identity_status(identity_status);
-        self.status
-            .set_last_known_edge_url(Some(self.config.edge_url.clone()));
-
-        Ok(agent_id)
+        Ok(FetchedPolicy {
+            resolved_agent_id,
+            identity_status,
+            policy_id: policy.policy_id,
+            policy_revision: policy.policy_revision,
+            policy_body_json: policy.policy_body_json,
+            policy_status: policy.status,
+            sources: candidate_sources,
+            fetched_at_unix_ms: fetch_started_at,
+        })
     }
 
     async fn enroll(&self, existing_agent_id: Option<String>) -> AppResult<String> {
@@ -317,8 +615,11 @@ impl App {
                 metadata: enrollment_metadata(&self.metadata, &self.config),
                 existing_agent_id,
             })
-            .await?;
+            .await
+            .inspect_err(|error| self.status.record_connectivity_error(error))?;
 
+        self.status
+            .record_connectivity_success(Utc::now().timestamp_millis());
         self.store
             .save_identity(&response.agent_id, &self.hostname, &self.version)?;
         info!(
@@ -328,6 +629,97 @@ impl App {
         );
         Ok(response.agent_id)
     }
+
+    fn load_persisted_policy_sources(
+        &self,
+        runtime_state: &RuntimeStateRecord,
+    ) -> AppResult<Option<Vec<SourceConfig>>> {
+        let Some(policy_body_json) = runtime_state.policy_body_json.as_deref() else {
+            return Ok(None);
+        };
+        Ok(Some(parse_file_sources(policy_body_json)?))
+    }
+
+    fn persist_policy_failure(
+        &self,
+        runtime_state: &mut RuntimeStateRecord,
+        error: &AppError,
+        detail: &str,
+    ) -> AppResult<()> {
+        let now = Utc::now().timestamp_millis();
+        runtime_state.last_known_edge_url = Some(self.config.edge_url.clone());
+        runtime_state.last_policy_fetch_at_unix_ms = Some(now);
+        runtime_state.last_policy_error = Some(error.to_string());
+        runtime_state.runtime_status = Some(RuntimePhase::Degraded.as_str().to_string());
+        runtime_state.runtime_status_reason = Some(detail.to_string());
+        runtime_state.spool_enabled = self.config.spool.enabled;
+        runtime_state.updated_at_unix_ms = now;
+        self.store.save_runtime_state(runtime_state)?;
+
+        self.status
+            .set_policy_fetch_result(now, Some(error.to_string()));
+        self.status.set_policy_error(error.to_string());
+        self.status.record_connectivity_error(error);
+        Ok(())
+    }
+
+    fn commit_policy_success(&mut self, fetched: &FetchedPolicy, startup: bool) -> AppResult<()> {
+        let apply_at = Utc::now().timestamp_millis();
+        let runtime_phase = if self.status.is_degraded_mode() {
+            RuntimePhase::Degraded
+        } else {
+            RuntimePhase::Online
+        };
+        let mut runtime_state = self.store.load_runtime_state()?;
+        runtime_state.applied_policy_revision = Some(fetched.policy_revision.clone());
+        runtime_state.policy_body_json = Some(fetched.policy_body_json.clone());
+        runtime_state.last_known_edge_url = Some(self.config.edge_url.clone());
+        runtime_state.identity_status = Some(fetched.identity_status.status.clone());
+        runtime_state.identity_status_reason = fetched.identity_status.reason.clone();
+        runtime_state.last_policy_fetch_at_unix_ms = Some(fetched.fetched_at_unix_ms);
+        runtime_state.last_policy_apply_at_unix_ms = Some(apply_at);
+        runtime_state.last_policy_error = None;
+        runtime_state.runtime_status = Some(runtime_phase.as_str().to_string());
+        runtime_state.runtime_status_reason = None;
+        runtime_state.spool_enabled = self.config.spool.enabled;
+        runtime_state.updated_at_unix_ms = apply_at;
+        self.store.save_runtime_state(&runtime_state)?;
+
+        info!(
+            agent_id = fetched.resolved_agent_id,
+            policy_id = fetched.policy_id,
+            policy_revision = fetched.policy_revision,
+            policy_status = fetched.policy_status,
+            identity_status = fetched.identity_status.status,
+            startup,
+            "agent policy synchronized"
+        );
+
+        self.status
+            .set_policy_revision(Some(fetched.policy_revision.clone()));
+        self.status
+            .set_identity_status(fetched.identity_status.clone());
+        self.status
+            .set_last_known_edge_url(Some(self.config.edge_url.clone()));
+        self.status.set_agent_id(fetched.resolved_agent_id.clone());
+        self.status.set_policy_apply_success(
+            Some(fetched.policy_revision.clone()),
+            apply_at,
+            fetched.sources.len(),
+        );
+        self.status.set_runtime_phase(runtime_phase, None);
+        self.status
+            .set_configured_sources(&fetched.sources, &self.store.list_file_offsets()?);
+        Ok(())
+    }
+
+    fn persist_runtime_phase(&self, phase: RuntimePhase, reason: Option<String>) -> AppResult<()> {
+        let mut runtime_state = self.store.load_runtime_state()?;
+        runtime_state.runtime_status = Some(phase.as_str().to_string());
+        runtime_state.runtime_status_reason = reason;
+        runtime_state.updated_at_unix_ms = Utc::now().timestamp_millis();
+        self.store.save_runtime_state(&runtime_state)
+    }
 }
 
 fn build_transport(config: &AgentConfig) -> AppResult<Arc<dyn AgentTransport>> {
@@ -336,7 +728,48 @@ fn build_transport(config: &AgentConfig) -> AppResult<Arc<dyn AgentTransport>> {
         TransportMode::Edge => Ok(Arc::new(EdgeGrpcTransport::new(
             &config.edge_url,
             &config.edge_grpc_addr,
+            &config.tls,
         )?)),
+    }
+}
+
+fn build_connectivity_static_context(config: &AgentConfig) -> AppResult<ConnectivityStaticContext> {
+    Ok(ConnectivityStaticContext {
+        endpoint: build_base_url(&config.edge_url, &config.edge_grpc_addr)?,
+        tls_enabled: endpoint_uses_tls(&config.edge_url, &config.edge_grpc_addr)?,
+        mtls_enabled: config.tls.cert_path.is_some() && config.tls.key_path.is_some(),
+        server_name: derive_server_name(
+            &config.edge_url,
+            &config.edge_grpc_addr,
+            config.tls.server_name.as_deref(),
+        )?,
+        ca_path: config
+            .tls
+            .ca_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        cert_path: config
+            .tls
+            .cert_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        key_path: config
+            .tls
+            .key_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+    })
+}
+
+fn log_source_shape(sources: &[SourceConfig]) {
+    if sources.is_empty() {
+        warn!("agent runtime has no configured sources");
+    } else if sources.len() > SOURCE_COUNT_WARN_THRESHOLD {
+        warn!(
+            source_count = sources.len(),
+            threshold = SOURCE_COUNT_WARN_THRESHOLD,
+            "high source count configured; current runtime uses one reader task per source"
+        );
     }
 }
 

@@ -1,225 +1,132 @@
-# Server Deploy Notes for `fishingteam.su`
+# Single-Host Deploy Notes
 
-This document describes the VPS-friendly stack and Nginx layout for the current demo/staging deployment.
+This document describes the compose-managed single-host/domain profile for one public domain hosting both `WEB` and `SERVER`, with image-first `AGENT` delivery.
 
-Related docs:
+## 1. Prepare the server profile
 
-- local/server stack overview: [`docs/demo-stack.md`](./demo-stack.md)
-- agent distribution contract: [`docs/agent-distribution.md`](./agent-distribution.md)
-- dev/test PKI flow: [`docs/dev-pki.md`](./dev-pki.md)
+Start from [`.env.server.example`](../.env.server.example) and set:
 
-## 1. Start the server stack
+- `PUBLIC_BASE_URL=https://<your-domain>`
+- `EDGE_PUBLIC_URL=https://<your-domain>`
+- `AGENT_PUBLIC_GRPC_ADDR=<your-domain>:443`
+- `NGINX_SERVER_NAME=<your-domain>`
+- `SERVER_CERTS_DIR=/absolute/or/relative/path/to/certs`
 
-Use the server compose file:
+Optional image delivery env vars when using the image-only override:
 
-```bash
-docker compose -f docker-compose.server.yml up -d --build
-```
+- `AGENT_IMAGE_REPOSITORY=docker.io/<org>/doro-agent`
+- `AGENT_IMAGE_TAG=main`
+- `AGENT_IMAGE_DIGEST=sha256:...`
+- `AGENT_IMAGE_VERSION=main`
+- `AGENT_RELEASE_CHANNEL=main`
 
-The server stack starts:
+Use a real published digest for deployment tests. The fallback placeholder digest is not intended for a real rollout.
 
-- `frontend`
-- `edge-api`
-- `nats`
-- `postgres`
-- `enrollment-plane`
-- `control-plane`
-- `deployment-plane`
-
-Published host ports are intentionally localhost-bound:
-
-- `127.0.0.1:13000 -> frontend:3000`
-- `127.0.0.1:18080 -> edge-api:8080`
-- `127.0.0.1:19090 -> edge-api:9090`
-
-Internal runtime services stay on the compose network and are not published publicly.
-
-## 2. Environment
-
-The edge boundary uses [`edge_api/.env.server`](../edge_api/.env.server).
-
-Important values there:
-
-- `PUBLIC_BASE_URL=https://fishingteam.su`
-- `EDGE_PUBLIC_URL=https://fishingteam.su`
-- `AGENT_PUBLIC_GRPC_ADDR=fishingteam.su:443`
-- `CORS_ALLOWED_ORIGINS=https://fishingteam.su,https://www.fishingteam.su`
-- `COOKIE_SECURE=true`
-- `AGENT_MTLS_ENABLED=true`
-- `AGENT_TLS_CERT_FILE=/certs/server.crt`
-- `AGENT_TLS_KEY_FILE=/certs/server.key`
-- `AGENT_TLS_CLIENT_CA_FILE=/certs/ca.crt`
-
-Before public exposure, replace:
-
-- `DEV_TEST_PASSWORD`
-
-The current HTTP auth remains a compat/demo stub. This stack is appropriate for demo/staging, not for a hardened public production rollout.
-
-## 3. Nginx routing
-
-Recommended routing:
-
-- `/` -> `http://127.0.0.1:13000`
-- `/api/edge/` -> `http://127.0.0.1:18080` with `/api/edge/` prefix stripped
-- gRPC agent ingress -> `127.0.0.1:19090`
-- `/docs`
-- `/openapi.json`
-- `/openapi.yaml`
-- `/healthz`
-- `/readyz`
-
-Example server block:
-
-```nginx
-server {
-    listen 80;
-    server_name fishingteam.su www.fishingteam.su;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name fishingteam.su www.fishingteam.su;
-
-    ssl_certificate /etc/letsencrypt/live/fishingteam.su/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/fishingteam.su/privkey.pem;
-
-    client_max_body_size 10m;
-
-    location / {
-        proxy_pass http://127.0.0.1:13000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 300s;
-    }
-
-    location /api/edge/ {
-        rewrite ^/api/edge/(.*)$ /$1 break;
-        proxy_pass http://127.0.0.1:18080;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 3600s;
-        add_header X-Accel-Buffering no;
-    }
-
-    location = /docs {
-        proxy_pass http://127.0.0.1:18080/docs;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location /docs/ {
-        proxy_pass http://127.0.0.1:18080/docs/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location = /openapi.json {
-        proxy_pass http://127.0.0.1:18080/openapi.json;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location = /openapi.yaml {
-        proxy_pass http://127.0.0.1:18080/openapi.yaml;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    location = /healthz {
-        proxy_pass http://127.0.0.1:18080/healthz;
-    }
-
-    location = /readyz {
-        proxy_pass http://127.0.0.1:18080/readyz;
-    }
-
-    # gRPC agent ingress on the same public domain.
-    location /dorohedoro.edge.v1.AgentIngressService/ {
-        grpc_pass grpc://127.0.0.1:19090;
-        grpc_read_timeout 3600s;
-        grpc_send_timeout 3600s;
-        grpc_set_header Host $host;
-        grpc_set_header X-Real-IP $remote_addr;
-        grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        grpc_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
-
-## 4. Checks after deploy
-
-Local checks on the VPS:
+## 2. Start the server stack with image-only delivery
 
 ```bash
-curl -i http://127.0.0.1:13000/
-curl -i http://127.0.0.1:18080/
-curl -i http://127.0.0.1:18080/docs
-curl -i http://127.0.0.1:18080/openapi.json
-curl -i http://127.0.0.1:18080/healthz
-curl -i http://127.0.0.1:18080/readyz
+docker compose \
+  --env-file .env.server \
+  -f docker-compose.server.yml \
+  -f deployments/examples/docker-compose.server.image-only.override.yml \
+  up -d --build
 ```
 
-Checks through the public domain:
+The override keeps the compose service name `agent-artifacts`, but changes it to serve only:
+
+- `manifest.json`
+- image metadata JSON
+
+It also switches `deployment-plane` to:
+
+- `AGENT_ARTIFACT_MANIFEST_URL=http://agent-artifacts:8080/manifest.json`
+- `AGENT_RELEASE_BASE_URL=""`
+- `AGENT_PREFERRED_PACKAGE_TYPE=container`
+
+## 3. Ingress model
+
+`docker-compose.server.yml` manages `nginx` inside the stack.
+
+Routing:
+
+- `/` -> `frontend:3000`
+- `/api/edge/` -> `edge-api:8080`
+- `/api/v1/` -> `edge-api:8080`
+- `/auth/*` and `/profile` -> `edge-api:8080`
+- `/docs`, `/openapi.json`, `/openapi.yaml`, `/healthz`, `/readyz`, `/version` -> `edge-api:8080`
+- `/dorohedoro.edge.v1.AgentIngressService/*` -> `grpc://edge-api:9090`
+
+## 4. Vault bootstrap
+
+The server stack uses:
+
+- `vault` in dev mode for the current preprod/demo profile
+- `vault-init` to seed AppRole and placeholder SSH material
+
+Before a real rollout, replace the SSH secret:
 
 ```bash
-curl -I https://fishingteam.su/
-curl -I https://fishingteam.su/docs
-curl -I https://fishingteam.su/openapi.json
-curl -I https://fishingteam.su/api/edge/api/v1/me
+docker compose -f docker-compose.server.yml exec vault \
+  vault kv put secret/ssh/dev \
+  ssh_user=root \
+  ssh_private_key=@/path/to/real/id_ed25519
 ```
 
-## 5. gRPC note
+## 5. Agent delivery bridge
 
-The pre-production single-host stack publishes gRPC only on localhost and expects the reverse proxy to expose it on the same public domain.
+The current `deployment-plane` still consumes an artifact-shaped manifest. The bridge works like this:
 
-That is enough for:
+1. CI publishes `docker.io/<org>/doro-agent`
+2. CI records the pushed digest
+3. CI generates `agent-release-manifest.json`
+4. `deployment-plane` resolves the selected manifest entry
+5. Ansible translates `package_type=container` into `docker_image` install mode
+6. The target host auto-detects `docker`, otherwise `podman`
 
-- local compose smoke
-- server-side demo/staging of WEB/API
-- domain-based external agent enrollment with gRPC+mTLS
+No `server-rs` change is required for the basic flow.
 
-The intended path is:
+## 6. Checks after deploy
 
-`agent -> fishingteam.su:443 -> reverse proxy grpc_pass -> 127.0.0.1:19090 -> edge-api`
+Public checks:
 
-Do not expose `19090` directly on the internet. Keep it loopback-bound and let the reverse proxy forward HTTP/2 gRPC traffic.
+```bash
+curl -k https://<your-domain>/healthz
+curl -k https://<your-domain>/readyz
+curl -k https://<your-domain>/openapi.json
+curl -k https://<your-domain>/api/v1/dashboards/overview
+curl -k https://<your-domain>/api/v1/alerts
+curl -k https://<your-domain>/api/v1/audit
+```
 
-## 6. Real agent rollout note
+Internal delivery checks:
 
-For the current repository state:
+```bash
+docker compose \
+  --env-file .env.server \
+  -f docker-compose.server.yml \
+  -f deployments/examples/docker-compose.server.image-only.override.yml \
+  exec agent-artifacts wget -qO- http://127.0.0.1:8080/manifest.json
+```
 
-- `edge-api` is ready to enforce TLS + mTLS on the public agent ingress
-- transport-level mTLS is reproducibly validated with `fake-agent`
-- the real `agent-rs` install contract already supports the public domain path through:
-  - `edge_url=https://fishingteam.su`
-  - `edge_grpc_addr=fishingteam.su:443`
+Expected manifest fragments:
 
-Current honest limitation:
+- `install_mode=docker_image`
+- `package_type=container`
+- `artifact_path=docker.io/...:main`
 
-- `agent-rs` does not yet expose client-certificate configuration through the runtime/install contract
+## 7. Practical rollout notes
 
-That means the first pre-production practical rollout should be split into:
+Target path:
 
-1. real remote-host rollout against the public TLS boundary
-2. separate mTLS ingress validation with `fake-agent`
+`agent -> <your-domain>:443 -> nginx -> edge-api -> NATS -> server-rs`
 
-Use the provided examples for the three-host rollout:
+Host-side continuity checks after deployment:
 
-- [`deployments/ansible/inventories/three-hosts.example.ini`](../deployments/ansible/inventories/three-hosts.example.ini)
-- [`deployments/ansible/group_vars/agents.example.yml`](../deployments/ansible/group_vars/agents.example.yml)
+- `systemctl status doro-agent`
+- `/var/lib/doro-agent/state.db` still present after restart
+- `/var/lib/doro-agent/last-known-good-image.json` contains the deployed digest reference
+
+Rollback policy:
+
+- prefer digest-pinned rollback
+- do not rely on the floating `main` tag for recovery

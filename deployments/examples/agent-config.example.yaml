@@ -1,6 +1,6 @@
-edge_url: "http://localhost:8080"
-edge_grpc_addr: "localhost:9090"
-bootstrap_token: "dev-bootstrap-token"
+edge_url: "https://logs.example.com"
+edge_grpc_addr: "logs.example.com:7443"
+bootstrap_token: "replace-with-bootstrap-token"
 state_dir: "/var/lib/doro-agent"
 log_level: "info"
 
@@ -12,6 +12,16 @@ install:
 
 platform:
   allow_machine_id: false
+
+policy:
+  refresh_interval_sec: 30
+
+tls:
+  ca_path: "/etc/doro-agent/pki/ca.pem"
+  cert_path: "/etc/doro-agent/pki/agent.pem"
+  key_path: "/etc/doro-agent/pki/agent.key"
+  # Optional only when edge_grpc_addr uses an IP literal or a different TLS name.
+  # server_name: "logs.example.com"
 
 scope:
   configured_cluster_id: "cluster-a"
@@ -28,6 +38,20 @@ heartbeat:
 
 diagnostics:
   interval_sec: 30
+
+security_scan:
+  enabled: true
+  interval_sec: 86400
+  jitter_sec: 900
+  timeout_sec: 120
+  max_parallel_checks: 4
+  profile: "balanced"
+  allowed_ports: [22, 443]
+  blocked_ports: [23, 2375]
+  package_watchlist: ["openssl", "openssh", "nginx", "docker"]
+  version_rules_path: "/etc/doro-agent/security-rules.yaml"
+  publish_as_diagnostics: true
+  persist_last_report: true
 
 batch:
   max_events: 500
@@ -54,11 +78,5 @@ spool:
   dir: "/var/lib/doro-agent/spool"
   max_disk_bytes: 268435456
 
-sources:
-  - type: "file"
-    source_id: "file:/var/log/syslog"
-    path: "/var/log/syslog"
-    start_at: "end"
-    source: "syslog"
-    service: "host"
-    severity_hint: "info"
+# In transport.mode=edge the active sources come from the fetched policy.
+# Keep local sources only in agent-rs/config/agent.example.yaml for mock/dev smoke runs.

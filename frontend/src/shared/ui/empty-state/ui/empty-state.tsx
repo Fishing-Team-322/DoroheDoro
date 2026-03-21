@@ -25,9 +25,9 @@ export function EmptyState({
         className
       )}
     >
-      <h3 className="text-base font-semibold text-[color:var(--foreground)]">{title}</h3>
+      <h3 className="text-lg font-semibold text-[color:var(--foreground)]">{title}</h3>
       {description ? (
-        <p className="mt-1 text-sm text-[color:var(--muted-foreground)]">
+        <p className="mt-1 text-base text-[color:var(--muted-foreground)]">
           {description}
         </p>
       ) : null}

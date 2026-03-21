@@ -2,8 +2,12 @@ use std::sync::Arc;
 
 use async_nats::{Client, Subject, Subscriber};
 use common::{
+    json::AuditAppendEvent,
     nats_subjects::*,
-    proto::{control, decode_message, empty_ok_envelope, encode_message, ok_envelope, runtime},
+    proto::{
+        audit, control, decode_message, empty_ok_envelope, encode_message, ok_envelope,
+        ok_json_envelope, runtime,
+    },
     AppError, AppResult,
 };
 use futures::StreamExt;
@@ -16,12 +20,12 @@ use uuid::Uuid;
 
 use crate::service::{
     parse_policy_json, AnomalyInstanceFilter, AnomalyRuleInput, AnomalyRuleListFilter,
-    AnomalyRuleUpdateInput, AuditInfo, ClusterCreateInput, ClusterHostMutationInput,
-    ClusterListFilter, ClusterUpdateInput, ControlService, CredentialProfileInput, HostGroupInput,
-    HostUpsertInput, IntegrationBindingInput, IntegrationInput, IntegrationUpdateInput, ListInput,
-    PolicyCreateInput, PolicyUpdateInput, RoleBindingInput, RoleBindingListFilter, RoleCreateInput,
-    RoleUpdateInput, TicketAssignInput, TicketCommentInput, TicketCreateInput, TicketListFilter,
-    TicketStatusChangeInput,
+    AnomalyRuleUpdateInput, AuditEventListFilter, AuditInfo, ClusterCreateInput,
+    ClusterHostMutationInput, ClusterListFilter, ClusterUpdateInput, ControlService,
+    CredentialProfileInput, HostGroupInput, HostUpsertInput, IntegrationBindingInput,
+    IntegrationInput, IntegrationUpdateInput, ListInput, PolicyCreateInput, PolicyUpdateInput,
+    RoleBindingInput, RoleBindingListFilter, RoleCreateInput, RoleUpdateInput, TicketAssignInput,
+    TicketCommentInput, TicketCreateInput, TicketListFilter, TicketStatusChangeInput,
 };
 
 pub async fn spawn_handlers(
@@ -42,6 +46,7 @@ pub async fn spawn_handlers(
     );
     tasks.extend(spawn_ticket_handlers(client.clone(), service.clone(), shutdown.clone()).await?);
     tasks.extend(spawn_anomaly_handlers(client.clone(), service.clone(), shutdown.clone()).await?);
+    tasks.extend(spawn_audit_handlers(client.clone(), service.clone(), shutdown.clone()).await?);
     tasks.extend(spawn_credential_handlers(client, service, shutdown).await?);
     Ok(tasks)
 }
@@ -549,6 +554,27 @@ async fn spawn_credential_handlers(
         )),
         tokio::spawn(run_create_credentials_handler(
             create_sub, client, service, shutdown,
+        )),
+    ])
+}
+
+async fn spawn_audit_handlers(
+    client: Client,
+    service: Arc<ControlService>,
+    shutdown: CancellationToken,
+) -> anyhow::Result<Vec<JoinHandle<()>>> {
+    let list_sub = client.subscribe(AUDIT_LIST.to_string()).await?;
+    let append_sub = client.subscribe(AUDIT_EVENTS_APPEND.to_string()).await?;
+
+    Ok(vec![
+        tokio::spawn(run_list_audit_events_handler(
+            list_sub,
+            client.clone(),
+            service.clone(),
+            shutdown.clone(),
+        )),
+        tokio::spawn(run_append_audit_event_handler(
+            append_sub, service, shutdown,
         )),
     ])
 }
@@ -3211,6 +3237,87 @@ async fn run_create_credentials_handler(
             Err(error) => {
                 send_control_error(&client, &message.reply, error, request.correlation_id).await;
             }
+        }
+    }
+}
+
+async fn run_list_audit_events_handler(
+    mut subscription: Subscriber,
+    client: Client,
+    service: Arc<ControlService>,
+    shutdown: CancellationToken,
+) {
+    loop {
+        let message = handle_request!(subscription, shutdown);
+
+        let (request, wants_json) =
+            match decode_message::<audit::ListAuditEventsRequest>(message.payload.as_ref()) {
+                Ok(request) => (request, false),
+                Err(proto_error) => match serde_json::from_slice::<audit::ListAuditEventsRequest>(
+                    message.payload.as_ref(),
+                ) {
+                    Ok(request) => (request, true),
+                    Err(_) => {
+                        send_control_error(&client, &message.reply, proto_error, "").await;
+                        continue;
+                    }
+                },
+            };
+
+        let correlation_id = request.correlation_id.clone();
+        let list = ListInput::from_proto(request.paging.clone());
+        let filter = AuditEventListFilter {
+            event_type: normalize_optional(request.event_type),
+            entity_type: normalize_optional(request.entity_type),
+            entity_id: normalize_optional(request.entity_id),
+            actor_id: normalize_optional(request.actor_id),
+        };
+
+        match service.list_runtime_audit_events(&list, &filter).await {
+            Ok((items, paging)) => {
+                let response = audit::ListAuditEventsResponse {
+                    items: items.into_iter().map(|item| item.into_proto()).collect(),
+                    paging: Some(paging),
+                };
+                if wants_json {
+                    match ok_json_envelope(&response, correlation_id.clone()) {
+                        Ok(envelope) => {
+                            send_control_envelope(&client, &message.reply, envelope).await;
+                        }
+                        Err(error) => {
+                            send_control_error(&client, &message.reply, error, correlation_id)
+                                .await;
+                        }
+                    }
+                } else {
+                    send_control_ok(&client, &message.reply, &response, &correlation_id).await;
+                }
+            }
+            Err(error) => {
+                send_control_error(&client, &message.reply, error, correlation_id).await;
+            }
+        }
+    }
+}
+
+async fn run_append_audit_event_handler(
+    mut subscription: Subscriber,
+    service: Arc<ControlService>,
+    shutdown: CancellationToken,
+) {
+    loop {
+        let message = handle_request!(subscription, shutdown);
+
+        let event = match serde_json::from_slice::<AuditAppendEvent>(message.payload.as_ref()) {
+            Ok(event) => event,
+            Err(error) => {
+                warn!(error = %error, "failed to decode audit append event");
+                continue;
+            }
+        };
+
+        if let Err(error) = service.append_runtime_audit_event(event).await {
+            error!(error_code = error.code().as_str(), error = %error, "failed to append runtime audit event");
         }
     }
 }

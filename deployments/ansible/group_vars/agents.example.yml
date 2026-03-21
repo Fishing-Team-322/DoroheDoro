@@ -2,13 +2,20 @@
 # Copy this file to a private inventory/group_vars location and replace placeholders.
 # It is intentionally example-only and must not contain real secrets in the repo.
 
-doro_agent_artifact_manifest_url: https://fishingteam.su/artifacts/agent/release-manifest.json
-doro_agent_release_base_url: https://fishingteam.su/artifacts/agent
-doro_agent_install_mode: auto
+doro_agent_artifact_manifest_url: https://edge.example.com/artifacts/agent/manifest.json
+doro_agent_release_base_url: ""
+doro_agent_install_mode: docker_image
+doro_agent_image_repository: docker.io/<org>/doro-agent
+doro_agent_image_tag: main
+doro_agent_image_digest: ""
+doro_agent_pull_policy: always
+doro_agent_container_name: doro-agent
+doro_agent_container_engine: auto
+doro_agent_restart_policy: unless-stopped
 
 # Single-host public boundary on the same domain as WEB.
-doro_agent_edge_url: https://fishingteam.su
-doro_agent_edge_grpc_addr: fishingteam.su:443
+doro_agent_edge_url: https://edge.example.com
+doro_agent_edge_grpc_addr: edge.example.com:443
 
 # Replace with a real bootstrap token or the runtime-issued token flow.
 doro_agent_bootstrap_token: CHANGE_ME
@@ -25,7 +32,6 @@ doro_agent_sources:
     service: host
     severity_hint: info
 
-# Current boundary side is mTLS-ready and validated with fake-agent.
-# The real agent runtime currently uses TLS to the public domain but does not yet expose
-# client certificate configuration through this install contract. Keep this rollout on the
-# public TLS path until agent-rs adds explicit client-cert support.
+# deployment-plane can now inject CA/cert/key material through the ansible install contract
+# when Vault refs are configured on the SERVER side. For manual ansible runs you can still
+# keep the public TLS path and omit client identity files until mTLS material is available.

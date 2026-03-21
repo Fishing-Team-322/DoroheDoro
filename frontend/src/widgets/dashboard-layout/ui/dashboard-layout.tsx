@@ -2,10 +2,10 @@
 
 import type { ComponentType, ReactNode } from "react";
 import { useMemo, useState } from "react";
+import * as Tooltip from "@radix-ui/react-tooltip";
+import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { motion } from "motion/react";
-import * as Tooltip from "@radix-ui/react-tooltip";
 import {
   dashboardNavigation,
   type DashboardNavItem,
@@ -15,15 +15,23 @@ import type { Locale } from "@/src/shared/config";
 import { cn } from "@/src/shared/lib/cn";
 import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
 import { ConsolePage } from "@/src/shared/ui";
+import { DashboardSidebarLanguageSwitch } from "@/src/shared/ui/lang-switch";
 import {
+  ActivityIcon,
+  BellIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  GridIcon,
   HomeIcon,
+  LogsIcon,
   MenuIcon,
+  PulseIcon,
+  RocketIcon,
   ServerIcon,
   SettingsIcon,
   ShieldIcon,
 } from "../icons";
+import { useSidebarCollapsedState } from "../model/use-sidebar-collapsed-state";
 
 type DashboardLayoutProps = {
   locale: Locale;
@@ -44,6 +52,8 @@ type DashboardSidebarProps = {
 
 const SIDEBAR_EXPANDED_WIDTH = 288;
 const SIDEBAR_COLLAPSED_WIDTH = 88;
+const BOTTOM_CONTROL_SIZE = 40;
+const BOTTOM_SWITCH_WIDTH = 78;
 
 const SIDEBAR_TRANSITION = {
   duration: 0.28,
@@ -51,7 +61,7 @@ const SIDEBAR_TRANSITION = {
 };
 
 export function DashboardLayout({ locale, children }: DashboardLayoutProps) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useSidebarCollapsedState();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { dictionary } = useI18n();
 
@@ -137,11 +147,11 @@ export function DashboardSidebar({
         }}
         transition={SIDEBAR_TRANSITION}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 h-screen border-r border-[color:var(--border)] bg-[color:var(--background)] lg:z-40",
+          "fixed inset-y-0 left-0 z-50 h-screen bg-[color:var(--background)] lg:z-40",
           mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
-        <div className="relative flex h-full min-h-0 flex-col px-4 py-5">
+        <div className="relative flex h-full min-h-0 flex-col overflow-hidden px-4 py-5">
           <div className="mb-8 shrink-0 overflow-hidden">
             <div
               className="flex h-12 items-center pl-[6px]"
@@ -173,13 +183,19 @@ export function DashboardSidebar({
                 const isActive =
                   pathname === href || pathname.startsWith(`${href}/`);
                 const Icon = item.icon;
-                const navItem = dictionary.navigation[item.key];
+                const navItem =
+                  (
+                    dictionary.navigation as Record<
+                      string,
+                      { label?: string; description?: string } | undefined
+                    >
+                  )[item.key] ?? {};
 
                 return (
                   <SidebarNavItem
                     key={item.href}
                     href={href}
-                    label={navItem.label}
+                    label={navItem.label ?? item.fallbackLabel}
                     Icon={Icon}
                     isActive={isActive}
                     collapsed={collapsed}
@@ -190,22 +206,41 @@ export function DashboardSidebar({
             </nav>
           </div>
 
-          <button
-            type="button"
-            aria-label={
-              collapsed
-                ? dictionary.navigation.expandSidebar
-                : dictionary.navigation.collapseSidebar
-            }
-            onClick={onToggle}
-            className="mt-4 hidden h-10 w-10 shrink-0 self-center items-center justify-center rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-elevated)] text-[color:var(--muted-foreground)] shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition-colors hover:text-[color:var(--foreground)] lg:inline-flex"
-          >
-            {collapsed ? (
-              <ChevronRightIcon className="h-5 w-5 stroke-[2.4]" />
-            ) : (
-              <ChevronLeftIcon className="h-5 w-5 stroke-[2.4]" />
-            )}
-          </button>
+          <div className="mt-4 shrink-0">
+            <div
+              className="mx-auto overflow-visible"
+              style={{
+                width: collapsed
+                  ? `${BOTTOM_CONTROL_SIZE}px`
+                  : `${BOTTOM_SWITCH_WIDTH}px`,
+              }}
+            >
+              <DashboardSidebarLanguageSwitch
+                locale={locale}
+                collapsed={collapsed}
+                onClick={onCloseMobile}
+              />
+
+              <div className="mt-4 hidden justify-center lg:flex">
+                <button
+                  type="button"
+                  aria-label={
+                    collapsed
+                      ? dictionary.navigation.expandSidebar
+                      : dictionary.navigation.collapseSidebar
+                  }
+                  onClick={onToggle}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-elevated)] text-[color:var(--muted-foreground)] shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition-colors hover:text-[color:var(--foreground)]"
+                >
+                  {collapsed ? (
+                    <ChevronRightIcon className="h-5 w-5 stroke-[2.4]" />
+                  ) : (
+                    <ChevronLeftIcon className="h-5 w-5 stroke-[2.4]" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
 
           <button
             type="button"
@@ -391,10 +426,32 @@ function getSidebarIcon(item: Pick<NavItem, "key">) {
   switch (item.key) {
     case "overview":
       return HomeIcon;
-    case "inventory":
+    case "system":
       return ServerIcon;
+    case "inventory":
+      return GridIcon;
     case "policies":
       return ShieldIcon;
+    case "security":
+      return ShieldIcon;
+    case "credentials":
+      return GridIcon;
+    case "deployments":
+      return RocketIcon;
+    case "anomalies":
+      return ActivityIcon;
+    case "integrations":
+      return GridIcon;
+    case "agents":
+      return PulseIcon;
+    case "logs":
+      return LogsIcon;
+    case "live-logs":
+      return ActivityIcon;
+    case "alerts":
+      return BellIcon;
+    case "audit":
+      return ActivityIcon;
     case "profile":
       return SettingsIcon;
     default:

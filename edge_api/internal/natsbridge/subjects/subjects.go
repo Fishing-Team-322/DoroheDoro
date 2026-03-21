@@ -95,20 +95,20 @@ type Registry struct {
 
 	AlertsList        string
 	AlertsGet         string
+	AlertsRulesList   string
+	AlertsRulesGet    string
 	AlertsRulesCreate string
 	AlertsRulesUpdate string
 
-	AuditList string
+	AuditList         string
+	AuditEventsAppend string
 
-	LogsIngestRaw string
+	LogsIngestRaw        string
+	LogsIngestNormalized string
 
-	StreamLogs        string
-	StreamDeployments string
-	StreamAlerts      string
-	StreamAgents      string
-	StreamClusters    string
-	StreamTickets     string
-	StreamAnomalies   string
+	StreamLogs   string
+	StreamAlerts string
+	StreamAgents string
 }
 
 func Defaults() Registry {
@@ -207,19 +207,19 @@ func Defaults() Registry {
 
 		AlertsList:        "alerts.list",
 		AlertsGet:         "alerts.get",
+		AlertsRulesList:   "alerts.rules.list",
+		AlertsRulesGet:    "alerts.rules.get",
 		AlertsRulesCreate: "alerts.rules.create",
 		AlertsRulesUpdate: "alerts.rules.update",
 
-		AuditList: "audit.list",
+		AuditList:         "audit.list",
+		AuditEventsAppend: "audit.events.append",
 
-		LogsIngestRaw: "logs.ingest.raw",
+		LogsIngestRaw:        "logs.ingest.raw",
+		LogsIngestNormalized: "logs.ingest.normalized",
 
-		StreamLogs:        "ui.stream.logs",
-		StreamDeployments: "ui.stream.deployments",
-		StreamAlerts:      "ui.stream.alerts",
-		StreamAgents:      "ui.stream.agents",
-		StreamClusters:    "ui.stream.clusters",
-		StreamTickets:     "ui.stream.tickets",
-		StreamAnomalies:   "ui.stream.anomalies",
+		StreamLogs:   "ui.stream.logs",
+		StreamAlerts: "ui.stream.alerts",
+		StreamAgents: "ui.stream.agents",
 	}
 }

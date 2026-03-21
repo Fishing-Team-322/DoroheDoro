@@ -60,18 +60,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           aria-describedby={describedBy}
           placeholder=" "
           className={cn(
-            "peer w-full rounded-md border bg-[var(--input-background)] outline-none transition-all duration-200",
+            "peer w-full rounded-md  bg-[var(--input-background)] outline-none transition-all duration-200",
             "text-[var(--foreground)] placeholder:text-transparent",
             "disabled:cursor-not-allowed disabled:opacity-50",
             error
-              ? "border-[var(--status-danger-border)] focus:border-[var(--status-danger-border)] focus:bg-[var(--input-background-focus)] focus:shadow-[0_0_0_1px_var(--status-danger-border),0_0_0_2px_rgba(153,27,27,0.08)]"
+              ? "border-[var(--status-danger-border)] focus:bg-[var(--input-background-focus)] focus:shadow-[0_0_0_1px_var(--status-danger-border),0_0_0_2px_rgba(153,27,27,0.08)]"
               : [
                   "border-[var(--input-border)]",
                   "hover:border-[var(--input-border-hover)]",
                   "hover:bg-[var(--input-background-hover)]",
                   "focus:border-[var(--ring)]",
                   "focus:bg-[var(--input-background-focus)]",
-                  "focus:shadow-[0_0_0_1px_var(--ring),0_0_0_2px_rgba(113,113,122,0.08)]",
                 ].join(" "),
             sizeClasses[inputSize],
             className

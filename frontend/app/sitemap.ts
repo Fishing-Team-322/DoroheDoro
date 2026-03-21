@@ -8,8 +8,16 @@ const appRoutes = [
   "",
   "/login",
   "/overview",
-  "/inventory",
+  "/system",
   "/policies",
+  "/deployments",
+  "/deployments/new",
+  "/agents",
+  "/logs",
+  "/logs/live",
+  "/hosts",
+  "/host-groups",
+  "/credentials",
   "/profile",
 ];
 

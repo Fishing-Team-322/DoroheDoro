@@ -379,6 +379,41 @@ pub struct ResolvedCredentialProfile {
     pub vault_ref: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResolvedArtifact {
+    pub version: String,
+    pub platform: String,
+    pub arch: String,
+    pub package_type: String,
+    pub distro_family: String,
+    pub install_mode: String,
+    pub artifact_name: String,
+    pub artifact_path: String,
+    pub source_uri: String,
+    pub checksum_file: String,
+    pub sha256: String,
+    pub bundle_root: Option<String>,
+}
+
+impl ResolvedArtifact {
+    pub fn into_proto(&self) -> deployment::ResolvedArtifactSummary {
+        deployment::ResolvedArtifactSummary {
+            version: self.version.clone(),
+            platform: self.platform.clone(),
+            arch: self.arch.clone(),
+            package_type: self.package_type.clone(),
+            distro_family: self.distro_family.clone(),
+            install_mode: self.install_mode.clone(),
+            artifact_name: self.artifact_name.clone(),
+            artifact_path: self.artifact_path.clone(),
+            source_uri: self.source_uri.clone(),
+            checksum_file: self.checksum_file.clone(),
+            sha256: self.sha256.clone(),
+            bundle_root: self.bundle_root.clone().unwrap_or_default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BootstrapArtifact {
     pub token_id: String,
@@ -391,6 +426,7 @@ pub struct BootstrapArtifact {
 pub struct DeploymentTargetSnapshot {
     pub host: ResolvedHost,
     pub bootstrap: BootstrapArtifact,
+    pub artifact: ResolvedArtifact,
     pub rendered_vars: Value,
 }
 
@@ -427,6 +463,7 @@ impl DeploymentPlan {
                 ip: target.host.ip.clone(),
                 ssh_port: target.host.ssh_port as u32,
                 remote_user: target.host.remote_user.clone(),
+                artifact: Some(target.artifact.into_proto()),
             })
             .collect();
         let bootstrap_previews = self
@@ -579,6 +616,7 @@ pub struct DeploymentTargetRecord {
     pub hostname_snapshot: String,
     pub status: DeploymentTargetStatus,
     pub bootstrap_payload_json: Value,
+    pub artifact_payload_json: Value,
     pub rendered_vars_json: Value,
     pub error_message: String,
     pub created_at: DateTime<Utc>,
@@ -588,7 +626,12 @@ pub struct DeploymentTargetRecord {
 }
 
 impl DeploymentTargetRecord {
+    pub fn artifact_data(&self) -> Option<ResolvedArtifact> {
+        serde_json::from_value(self.artifact_payload_json.clone()).ok()
+    }
+
     pub fn into_proto(self) -> deployment::DeploymentTargetSummary {
+        let artifact = self.artifact_data().map(|artifact| artifact.into_proto());
         deployment::DeploymentTargetSummary {
             deployment_target_id: self.id.to_string(),
             deployment_attempt_id: self.deployment_attempt_id.to_string(),
@@ -600,6 +643,7 @@ impl DeploymentTargetRecord {
             started_at: format_optional_ts(self.started_at),
             finished_at: format_optional_ts(self.finished_at),
             updated_at: format_ts(self.updated_at),
+            artifact,
         }
     }
 }
@@ -714,6 +758,7 @@ pub struct ExecutionTarget {
     pub deployment_target_id: Uuid,
     pub host: ResolvedHost,
     pub bootstrap: BootstrapArtifact,
+    pub artifact: ResolvedArtifact,
     pub rendered_vars: Value,
 }
 
@@ -796,10 +841,40 @@ pub struct BatchConfigYaml {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct QueueConfigYaml {
+    pub event_capacity: usize,
+    pub send_capacity: usize,
+    pub event_bytes_soft_limit: usize,
+    pub send_bytes_soft_limit: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DegradedConfigYaml {
+    pub failure_threshold: u32,
+    pub server_unavailable_sec: u64,
+    pub queue_pressure_pct: u8,
+    pub queue_recover_pct: u8,
+    pub unacked_lag_bytes: u64,
+    pub shutdown_spool_grace_sec: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct SpoolConfigYaml {
     pub enabled: bool,
     pub dir: String,
     pub max_disk_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TlsConfigYaml {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ca_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cert_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -813,7 +888,11 @@ pub struct DeploymentBootstrapConfig {
     pub heartbeat: IntervalConfigYaml,
     pub diagnostics: IntervalConfigYaml,
     pub batch: BatchConfigYaml,
+    pub queues: QueueConfigYaml,
+    pub degraded: DegradedConfigYaml,
     pub spool: SpoolConfigYaml,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls: Option<TlsConfigYaml>,
     pub sources: Vec<FileSourceConfig>,
 }
 

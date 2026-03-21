@@ -7,7 +7,12 @@ use crate::{
     error::AppResult,
     metadata::{
         can_read_file, detect_source_paths, directory_write_access, path_exists,
-        RuntimeMetadataContext, SourcePathStatus,
+        RuntimeMetadataContext, SourcePathStatus, CANONICAL_LOG_DIR,
+    },
+    security::{SecurityRulesFile, SECURITY_SCHEMA_VERSION},
+    transport::client::{
+        build_base_url, derive_server_name, endpoint_uses_tls, load_ca_certificate,
+        load_client_identity, EdgeGrpcTransport,
     },
 };
 
@@ -153,7 +158,10 @@ pub fn run(config_path: &Path) -> AppResult<DoctorReport> {
     }
 
     checks.push(check_state_db(&config.state_dir.join("state.db")));
+    checks.extend(check_security_scan(&config));
     checks.push(check_transport(&config));
+    checks.push(check_logs_directory(&context));
+    checks.extend(check_tls(&config));
 
     for source in detect_source_paths(&config) {
         checks.push(match source.status {
@@ -318,18 +326,108 @@ fn check_state_db(state_db_path: &Path) -> DoctorCheck {
     }
 }
 
-fn check_transport(config: &AgentConfig) -> DoctorCheck {
-    if config.transport.mode.is_edge() && config.edge_url.starts_with("http://") {
-        return DoctorCheck {
-            status: DoctorStatus::Warn,
-            name: "transport".to_string(),
-            detail: format!(
-                "edge_url `{}` uses HTTP; deployed agents should use TLS",
-                config.edge_url
-            ),
-        };
+fn check_security_scan(config: &AgentConfig) -> Vec<DoctorCheck> {
+    let mut checks = Vec::new();
+    if !config.security_scan.enabled {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "security-scan".to_string(),
+            detail: "security posture scan is disabled".to_string(),
+        });
+        return checks;
     }
 
+    checks.push(DoctorCheck {
+        status: if cfg!(target_os = "linux") {
+            DoctorStatus::Pass
+        } else {
+            DoctorStatus::Warn
+        },
+        name: "security-scan".to_string(),
+        detail: format!(
+            "enabled=true, profile={}, interval={}s, jitter={}s, timeout={}s, max_parallel_checks={}",
+            config.security_scan.profile.as_str(),
+            config.security_scan.interval_sec,
+            config.security_scan.jitter_sec,
+            config.security_scan.timeout_sec,
+            config.security_scan.max_parallel_checks
+        ),
+    });
+
+    let report_dir = config.state_dir.join("security");
+    if config.security_scan.persist_last_report {
+        checks.push(check_directory(
+            "security-cache",
+            &report_dir,
+            "security report cache",
+            true,
+        ));
+    } else {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "security-cache".to_string(),
+            detail: "persist_last_report is disabled".to_string(),
+        });
+    }
+
+    let rules_path = &config.security_scan.version_rules_path;
+    if !rules_path.exists() {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Warn,
+            name: "security-rules".to_string(),
+            detail: format!(
+                "security rules file `{}` is missing; package checks will run without minimum secure versions",
+                rules_path.display()
+            ),
+        });
+        return checks;
+    }
+
+    match std::fs::read_to_string(rules_path) {
+        Ok(raw) => match serde_yaml::from_str::<SecurityRulesFile>(&raw) {
+            Ok(file) if file.schema_version == SECURITY_SCHEMA_VERSION => {
+                checks.push(DoctorCheck {
+                    status: DoctorStatus::Pass,
+                    name: "security-rules".to_string(),
+                    detail: format!(
+                        "security rules file `{}` loaded with {} package rule(s)",
+                        rules_path.display(),
+                        file.packages.len()
+                    ),
+                })
+            }
+            Ok(file) => checks.push(DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "security-rules".to_string(),
+                detail: format!(
+                    "security rules file `{}` uses unsupported schema version `{}`",
+                    rules_path.display(),
+                    file.schema_version
+                ),
+            }),
+            Err(error) => checks.push(DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "security-rules".to_string(),
+                detail: format!(
+                    "failed to parse security rules file `{}`: {error}",
+                    rules_path.display()
+                ),
+            }),
+        },
+        Err(error) => checks.push(DoctorCheck {
+            status: DoctorStatus::Fail,
+            name: "security-rules".to_string(),
+            detail: format!(
+                "failed to read security rules file `{}`: {error}",
+                rules_path.display()
+            ),
+        }),
+    }
+
+    checks
+}
+
+fn check_transport(config: &AgentConfig) -> DoctorCheck {
     if can_read_file(Path::new(&config.edge_url)) {
         return DoctorCheck {
             status: DoctorStatus::Warn,
@@ -338,13 +436,257 @@ fn check_transport(config: &AgentConfig) -> DoctorCheck {
         };
     }
 
+    if !config.transport.mode.is_edge() {
+        return DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "transport".to_string(),
+            detail: format!(
+                "transport mode `{}` is configured for local/mock execution",
+                config.transport.mode.as_str()
+            ),
+        };
+    }
+
+    let endpoint = match build_base_url(&config.edge_url, &config.edge_grpc_addr) {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            return DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "transport".to_string(),
+                detail: error.to_string(),
+            };
+        }
+    };
+    let tls_enabled = match endpoint_uses_tls(&config.edge_url, &config.edge_grpc_addr) {
+        Ok(value) => value,
+        Err(error) => {
+            return DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "transport".to_string(),
+                detail: error.to_string(),
+            };
+        }
+    };
+    let server_name = match derive_server_name(
+        &config.edge_url,
+        &config.edge_grpc_addr,
+        config.tls.server_name.as_deref(),
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "transport".to_string(),
+                detail: error.to_string(),
+            };
+        }
+    };
+
+    if !tls_enabled {
+        return DoctorCheck {
+            status: DoctorStatus::Warn,
+            name: "transport".to_string(),
+            detail: format!(
+                "edge endpoint `{endpoint}` uses plain HTTP; this is suitable only for local/dev smoke runs"
+            ),
+        };
+    }
+
+    let server_name_detail = server_name.unwrap_or_else(|| "none".to_string());
+    let server_name_status = if server_name_detail.parse::<std::net::IpAddr>().is_ok() {
+        DoctorStatus::Warn
+    } else {
+        DoctorStatus::Pass
+    };
+
     DoctorCheck {
-        status: DoctorStatus::Pass,
+        status: server_name_status,
         name: "transport".to_string(),
         detail: format!(
-            "transport mode `{}` is configured",
-            config.transport.mode.as_str()
+            "edge endpoint `{endpoint}` uses TLS with server_name `{server_name_detail}`"
         ),
+    }
+}
+
+fn check_logs_directory(context: &RuntimeMetadataContext) -> DoctorCheck {
+    let logs_dir = Path::new(CANONICAL_LOG_DIR);
+    if !context.install.systemd_expected {
+        return DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "logs-dir".to_string(),
+            detail: format!(
+                "canonical log dir `{}` is only a package/systemd hint for this install mode",
+                logs_dir.display()
+            ),
+        };
+    }
+
+    if path_exists(logs_dir) {
+        if !logs_dir.is_dir() {
+            return DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "logs-dir".to_string(),
+                detail: format!(
+                    "canonical log dir `{}` exists but is not a directory",
+                    logs_dir.display()
+                ),
+            };
+        }
+
+        return DoctorCheck {
+            status: if directory_write_access(logs_dir) {
+                DoctorStatus::Pass
+            } else {
+                DoctorStatus::Warn
+            },
+            name: "logs-dir".to_string(),
+            detail: if directory_write_access(logs_dir) {
+                format!(
+                    "canonical log dir `{}` is present for package/systemd installs",
+                    logs_dir.display()
+                )
+            } else {
+                format!(
+                    "canonical log dir `{}` exists but is not writable to the current user; verify systemd `LogsDirectory=` ownership",
+                    logs_dir.display()
+                )
+            },
+        };
+    }
+
+    DoctorCheck {
+        status: DoctorStatus::Warn,
+        name: "logs-dir".to_string(),
+        detail: format!(
+            "canonical log dir `{}` is missing; package/systemd installs should let systemd create it via `LogsDirectory=doro-agent`",
+            logs_dir.display()
+        ),
+    }
+}
+
+fn check_tls(config: &AgentConfig) -> Vec<DoctorCheck> {
+    if !config.transport.mode.is_edge() {
+        return vec![DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "tls".to_string(),
+            detail: "mock transport does not use TLS settings".to_string(),
+        }];
+    }
+
+    let tls_enabled = match endpoint_uses_tls(&config.edge_url, &config.edge_grpc_addr) {
+        Ok(value) => value,
+        Err(error) => {
+            return vec![DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "tls".to_string(),
+                detail: error.to_string(),
+            }];
+        }
+    };
+    let tls_configured = config.tls.ca_path.is_some()
+        || config.tls.cert_path.is_some()
+        || config.tls.key_path.is_some()
+        || config
+            .tls
+            .server_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some();
+
+    if !tls_enabled {
+        if tls_configured {
+            return vec![DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "tls".to_string(),
+                detail: "TLS settings are configured but the gRPC endpoint uses plain HTTP"
+                    .to_string(),
+            }];
+        }
+        return vec![DoctorCheck {
+            status: DoctorStatus::Warn,
+            name: "tls".to_string(),
+            detail: "plaintext HTTP transport configured; no TLS files are required in dev mode"
+                .to_string(),
+        }];
+    }
+
+    let mut checks = Vec::new();
+    checks.push(check_ca_bundle(config));
+    checks.push(check_client_identity(config));
+    checks.push(check_transport_client(config));
+    checks
+}
+
+fn check_ca_bundle(config: &AgentConfig) -> DoctorCheck {
+    let Some(path) = config.tls.ca_path.as_deref() else {
+        return DoctorCheck {
+            status: DoctorStatus::Warn,
+            name: "tls-ca".to_string(),
+            detail: "tls.ca_path is not configured; the system trust store will be used"
+                .to_string(),
+        };
+    };
+
+    match load_ca_certificate(path) {
+        Ok(_) => DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "tls-ca".to_string(),
+            detail: format!(
+                "TLS CA bundle `{}` is readable and parseable",
+                path.display()
+            ),
+        },
+        Err(error) => DoctorCheck {
+            status: DoctorStatus::Fail,
+            name: "tls-ca".to_string(),
+            detail: error.to_string(),
+        },
+    }
+}
+
+fn check_client_identity(config: &AgentConfig) -> DoctorCheck {
+    let (Some(cert_path), Some(key_path)) = (
+        config.tls.cert_path.as_deref(),
+        config.tls.key_path.as_deref(),
+    ) else {
+        return DoctorCheck {
+            status: DoctorStatus::Warn,
+            name: "tls-identity".to_string(),
+            detail: "client mTLS certificate/key are not configured; the endpoint must allow server-auth-only TLS".to_string(),
+        };
+    };
+
+    match load_client_identity(cert_path, key_path) {
+        Ok(_) => DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "tls-identity".to_string(),
+            detail: format!(
+                "client mTLS certificate `{}` and key `{}` are parseable",
+                cert_path.display(),
+                key_path.display()
+            ),
+        },
+        Err(error) => DoctorCheck {
+            status: DoctorStatus::Fail,
+            name: "tls-identity".to_string(),
+            detail: error.to_string(),
+        },
+    }
+}
+
+fn check_transport_client(config: &AgentConfig) -> DoctorCheck {
+    match EdgeGrpcTransport::new(&config.edge_url, &config.edge_grpc_addr, &config.tls) {
+        Ok(_) => DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "transport-client".to_string(),
+            detail: "edge gRPC client configuration is internally consistent".to_string(),
+        },
+        Err(error) => DoctorCheck {
+            status: DoctorStatus::Fail,
+            name: "transport-client".to_string(),
+            detail: error.to_string(),
+        },
     }
 }
 
@@ -353,6 +695,8 @@ mod tests {
     use std::{fs, path::PathBuf};
 
     use tempfile::TempDir;
+
+    use crate::test_support::lock_agent_env;
 
     use super::{run, DoctorStatus};
 
@@ -387,6 +731,7 @@ sources:
 
     #[test]
     fn doctor_warns_for_missing_state_db_and_source() {
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = write_config(&dir);
 
@@ -400,6 +745,7 @@ sources:
 
     #[test]
     fn doctor_passes_when_state_db_exists() {
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = write_config(&dir);
         let state_dir = dir.path().join("state");
@@ -413,5 +759,76 @@ sources:
             .checks
             .iter()
             .any(|check| check.name == "state-db" && check.status == DoctorStatus::Pass));
+    }
+
+    #[test]
+    fn doctor_fails_for_invalid_tls_ca_bundle() {
+        let _guard = lock_agent_env();
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("agent.yaml");
+        let ca_path = dir.path().join("ca.pem");
+        fs::write(&ca_path, "not-a-pem").unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                r#"
+edge_url: 'https://edge.example.local'
+edge_grpc_addr: 'edge.example.local:7443'
+bootstrap_token: 'token'
+state_dir: '{}'
+transport:
+  mode: 'edge'
+tls:
+  ca_path: '{}'
+"#,
+                dir.path().join("state").display(),
+                ca_path.display()
+            ),
+        )
+        .unwrap();
+
+        let report = run(&config_path).unwrap();
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|check| check.name == "tls-ca" && check.status == DoctorStatus::Fail),
+            "{:#?}",
+            report.checks
+        );
+    }
+
+    #[test]
+    fn doctor_fails_when_tls_is_configured_for_plain_http() {
+        let _guard = lock_agent_env();
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("agent.yaml");
+        fs::write(
+            &config_path,
+            format!(
+                r#"
+edge_url: 'http://edge.example.local:8080'
+edge_grpc_addr: 'edge.example.local:9090'
+bootstrap_token: 'token'
+state_dir: '{}'
+transport:
+  mode: 'edge'
+tls:
+  server_name: 'edge.example.local'
+"#,
+                dir.path().join("state").display(),
+            ),
+        )
+        .unwrap();
+
+        let report = run(&config_path).unwrap();
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|check| check.name == "tls" && check.status == DoctorStatus::Fail),
+            "{:#?}",
+            report.checks
+        );
     }
 }

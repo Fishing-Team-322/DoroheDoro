@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { AuthProvider } from "@/src/features/auth";
 import { isLocale, locales } from "@/src/shared/config";
 import { getDictionary, I18nProvider } from "@/src/shared/lib/i18n";
+import { ToastProvider } from "@/src/shared/ui";
 
 type LocaleLayoutProps = {
   children: ReactNode;
@@ -29,7 +30,9 @@ export default async function LocaleLayout({
 
   return (
     <I18nProvider locale={locale} dictionary={dictionary}>
-      <AuthProvider>{children}</AuthProvider>
+      <ToastProvider>
+        <AuthProvider>{children}</AuthProvider>
+      </ToastProvider>
     </I18nProvider>
   );
 }

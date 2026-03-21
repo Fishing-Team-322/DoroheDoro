@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use common::proto::{
+    audit::AuditEvent,
     control::{
         AnomalyInstance, AnomalyRule, Cluster, ClusterAgentBinding, ClusterDetails,
         ClusterHostBinding, CredentialProfileMetadata, Host, HostGroup, HostGroupMember,
@@ -221,6 +222,37 @@ pub fn paging_response(limit: u32, offset: u64, total: u64) -> runtime::PagingRe
         limit,
         offset,
         total,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditEventModel {
+    pub id: Uuid,
+    pub event_type: String,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub actor_id: String,
+    pub actor_type: String,
+    pub request_id: String,
+    pub reason: String,
+    pub payload_json: Value,
+    pub created_at: DateTime<Utc>,
+}
+
+impl AuditEventModel {
+    pub fn into_proto(self) -> AuditEvent {
+        AuditEvent {
+            audit_event_id: self.id.to_string(),
+            event_type: self.event_type,
+            entity_type: self.entity_type,
+            entity_id: self.entity_id,
+            actor_id: self.actor_id,
+            actor_type: self.actor_type,
+            request_id: self.request_id,
+            reason: self.reason,
+            payload_json: self.payload_json.to_string(),
+            created_at: format_ts(self.created_at),
+        }
     }
 }
 

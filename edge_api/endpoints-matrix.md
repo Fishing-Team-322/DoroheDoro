@@ -79,9 +79,6 @@ Current boundary snapshot for the integrated stack in this repository.
 | `GET /api/v1/stream/deployments` | subscribe -> `deployments.jobs.status` + `deployments.jobs.step` | live | deployment SSE fanout |
 | `GET /api/v1/stream/alerts` | subscribe -> `ui.stream.alerts` | live gateway | future runtime publisher |
 | `GET /api/v1/stream/agents` | subscribe -> `ui.stream.agents` | live gateway | future runtime publisher |
-| `GET /api/v1/stream/clusters` | subscribe -> `ui.stream.clusters` | live gateway | reserved for future runtime |
-| `GET /api/v1/stream/tickets` | subscribe -> `ui.stream.tickets` | live gateway | reserved for future runtime |
-| `GET /api/v1/stream/anomalies` | subscribe -> `ui.stream.anomalies` | live gateway | reserved for future runtime |
 
 ## Live gRPC ingress
 
@@ -93,20 +90,13 @@ Current boundary snapshot for the integrated stack in this repository.
 | `SendDiagnostics` | publish -> `agents.diagnostics` | live |
 | `IngestLogs` | publish -> `logs.ingest.raw` | live |
 
-## Controlled `not_implemented`
+## Experimental / non-stable
 
-These route groups are intentionally still thin boundary placeholders because the matching Rust runtime is not present yet:
+The stable boundary now ships only the SSE routes that have a live runtime publisher or a live deployment event path:
 
-- query analytics
-- dashboards
-- alerts
-- audit
+- `GET /api/v1/stream/deployments`
+- `GET /api/v1/stream/agents`
+- `GET /api/v1/stream/logs`
+- `GET /api/v1/stream/alerts`
 
-All such routes return:
-
-- HTTP `501`
-- JSON error code `not_implemented`
-- `X-Boundary-State: awaiting-runtime`
-- mapped `X-NATS-Subject`
-
-That keeps the boundary honest and avoids fake Go business logic.
+Future streams for clusters, tickets and anomalies remain reserved only in shared contracts until Rust runtime publishers exist. They are intentionally absent from the active router and stable OpenAPI surface.

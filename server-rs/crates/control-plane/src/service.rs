@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use common::{
+    json::AuditAppendEvent,
     proto::runtime::{AuditContext, PagingRequest, PagingResponse},
     AppError, AppResult,
 };
@@ -9,11 +10,11 @@ use uuid::Uuid;
 
 use crate::{
     models::{
-        paging_response, AnomalyInstanceModel, AnomalyRuleModel, ClusterDetailsModel, ClusterModel,
-        CredentialProfileModel, HostGroupMemberModel, HostGroupModel, HostModel,
-        IntegrationBindingModel, IntegrationModel, PermissionModel, PolicyModel,
-        PolicyRevisionModel, RoleBindingModel, RoleModel, TicketCommentModel, TicketDetailsModel,
-        TicketModel,
+        paging_response, AnomalyInstanceModel, AnomalyRuleModel, AuditEventModel,
+        ClusterDetailsModel, ClusterModel, CredentialProfileModel, HostGroupMemberModel,
+        HostGroupModel, HostModel, IntegrationBindingModel, IntegrationModel, PermissionModel,
+        PolicyModel, PolicyRevisionModel, RoleBindingModel, RoleModel, TicketCommentModel,
+        TicketDetailsModel, TicketModel,
     },
     repository::{ControlRepository, PermissionDefinition},
 };
@@ -261,6 +262,14 @@ pub struct AnomalyInstanceFilter {
     pub anomaly_rule_id: Option<Uuid>,
     pub cluster_id: Option<Uuid>,
     pub status: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditEventListFilter {
+    pub event_type: Option<String>,
+    pub entity_type: Option<String>,
+    pub entity_id: Option<String>,
+    pub actor_id: Option<String>,
 }
 
 const ROLE_SCOPE_GLOBAL: &str = "global";
@@ -654,6 +663,51 @@ impl ControlService {
                 &input.vault_ref,
                 audit,
             )
+            .await
+            .map_err(map_db_error)
+    }
+
+    pub async fn list_runtime_audit_events(
+        &self,
+        list: &ListInput,
+        filter: &AuditEventListFilter,
+    ) -> AppResult<(Vec<AuditEventModel>, PagingResponse)> {
+        let (items, total) = self
+            .repo
+            .list_runtime_audit_events(
+                filter.event_type.as_deref(),
+                filter.entity_type.as_deref(),
+                filter.entity_id.as_deref(),
+                filter.actor_id.as_deref(),
+                list.limit,
+                list.offset,
+            )
+            .await
+            .map_err(map_db_error)?;
+        Ok((items, paging_response(list.limit, list.offset, total)))
+    }
+
+    pub async fn append_runtime_audit_event(
+        &self,
+        event: AuditAppendEvent,
+    ) -> AppResult<AuditEventModel> {
+        if event.event_type.trim().is_empty() {
+            return Err(AppError::invalid_argument("event_type is required"));
+        }
+        if event.entity_type.trim().is_empty() {
+            return Err(AppError::invalid_argument("entity_type is required"));
+        }
+        if event.entity_id.trim().is_empty() {
+            return Err(AppError::invalid_argument("entity_id is required"));
+        }
+        if event.actor_id.trim().is_empty() {
+            return Err(AppError::invalid_argument("actor_id is required"));
+        }
+        if event.request_id.trim().is_empty() {
+            return Err(AppError::invalid_argument("request_id is required"));
+        }
+        self.repo
+            .append_runtime_audit_event(&event)
             .await
             .map_err(map_db_error)
     }
