@@ -4,26 +4,27 @@ use async_nats::{Client, Subject, Subscriber};
 use common::{
     nats_subjects::{
         AGENTS_BOOTSTRAP_TOKEN_ISSUE, AGENTS_DIAGNOSTICS, AGENTS_DIAGNOSTICS_GET,
-        AGENTS_ENROLL_REQUEST, AGENTS_HEARTBEAT, AGENTS_POLICY_FETCH, AGENTS_REGISTRY_GET,
-        AGENTS_REGISTRY_LIST, CONTROL_POLICIES_GET, CONTROL_POLICIES_LIST,
-        CONTROL_POLICIES_REVISIONS,
+        AGENTS_ENROLL_REQUEST, AGENTS_GET, AGENTS_HEARTBEAT, AGENTS_LIST, AGENTS_POLICY_FETCH,
+        AGENTS_POLICY_GET,
     },
     proto::{
         agent::{
-            DiagnosticsPayload, EnrollRequest, FetchPolicyRequest, HeartbeatPayload,
-            IssueBootstrapTokenRequest,
+            DiagnosticsPayload, EnrollRequest, FetchPolicyRequest, GetAgentDiagnosticsRequest,
+            GetAgentPolicyRequest, GetAgentRequest, HeartbeatPayload, IssueBootstrapTokenRequest,
+            ListAgentsRequest,
         },
-        decode_message, encode_message, ok_envelope, ok_json_envelope,
+        decode_message, encode_message, ok_envelope, runtime,
     },
     AppError,
 };
 use futures::StreamExt;
-use serde::Deserialize;
 use tokio::{select, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::service::EnrollmentService;
+use crate::{
+    service::{EnrollmentService, ListInput},
+};
 
 pub async fn spawn_handlers(
     client: Client,
@@ -37,14 +38,10 @@ pub async fn spawn_handlers(
         .await?;
     let heartbeat_sub = client.subscribe(AGENTS_HEARTBEAT.to_string()).await?;
     let diagnostics_sub = client.subscribe(AGENTS_DIAGNOSTICS.to_string()).await?;
-    let agents_list_sub = client.subscribe(AGENTS_REGISTRY_LIST.to_string()).await?;
-    let agents_get_sub = client.subscribe(AGENTS_REGISTRY_GET.to_string()).await?;
+    let agents_list_sub = client.subscribe(AGENTS_LIST.to_string()).await?;
+    let agents_get_sub = client.subscribe(AGENTS_GET.to_string()).await?;
     let diagnostics_get_sub = client.subscribe(AGENTS_DIAGNOSTICS_GET.to_string()).await?;
-    let policies_list_sub = client.subscribe(CONTROL_POLICIES_LIST.to_string()).await?;
-    let policies_get_sub = client.subscribe(CONTROL_POLICIES_GET.to_string()).await?;
-    let policies_revisions_sub = client
-        .subscribe(CONTROL_POLICIES_REVISIONS.to_string())
-        .await?;
+    let policy_get_sub = client.subscribe(AGENTS_POLICY_GET.to_string()).await?;
 
     Ok(vec![
         tokio::spawn(run_enroll_handler(
@@ -93,20 +90,8 @@ pub async fn spawn_handlers(
             service.clone(),
             shutdown.clone(),
         )),
-        tokio::spawn(run_policies_list_handler(
-            policies_list_sub,
-            client.clone(),
-            service.clone(),
-            shutdown.clone(),
-        )),
-        tokio::spawn(run_policies_get_handler(
-            policies_get_sub,
-            client.clone(),
-            service.clone(),
-            shutdown.clone(),
-        )),
-        tokio::spawn(run_policy_revisions_handler(
-            policies_revisions_sub,
+        tokio::spawn(run_policy_get_handler(
+            policy_get_sub,
             client,
             service,
             shutdown,
@@ -114,24 +99,16 @@ pub async fn spawn_handlers(
     ])
 }
 
-#[derive(Debug, Deserialize)]
-struct CorrelationRequest {
-    #[serde(default)]
-    correlation_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct AgentLookupRequest {
-    #[serde(default)]
-    correlation_id: String,
-    agent_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PolicyLookupRequest {
-    #[serde(default)]
-    correlation_id: String,
-    policy_id: String,
+macro_rules! handle_request {
+    ($subscription:ident, $shutdown:ident) => {
+        select! {
+            _ = $shutdown.cancelled() => break,
+            next_message = $subscription.next() => {
+                let Some(message) = next_message else { break; };
+                message
+            }
+        }
+    };
 }
 
 async fn run_issue_bootstrap_token_handler(
@@ -141,14 +118,7 @@ async fn run_issue_bootstrap_token_handler(
     shutdown: CancellationToken,
 ) {
     loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
+        let message = handle_request!(subscription, shutdown);
 
         let request = match decode_message::<IssueBootstrapTokenRequest>(message.payload.as_ref()) {
             Ok(request) => request,
@@ -161,8 +131,7 @@ async fn run_issue_bootstrap_token_handler(
         let correlation_id = request.correlation_id.clone();
         match service.issue_bootstrap_token(request).await {
             Ok(response) => {
-                let envelope = ok_envelope(&response, correlation_id.clone());
-                send_reply(&client, &message.reply, envelope).await;
+                send_ok_reply(&client, &message.reply, &response, &correlation_id).await;
                 info!(
                     correlation_id,
                     token_id = response.token_id,
@@ -183,14 +152,7 @@ async fn run_enroll_handler(
     shutdown: CancellationToken,
 ) {
     loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
+        let message = handle_request!(subscription, shutdown);
 
         let request = match decode_message::<EnrollRequest>(message.payload.as_ref()) {
             Ok(request) => request,
@@ -203,8 +165,7 @@ async fn run_enroll_handler(
         let correlation_id = request.correlation_id.clone();
         match service.enroll(request).await {
             Ok(response) => {
-                let envelope = ok_envelope(&response, correlation_id.clone());
-                send_reply(&client, &message.reply, envelope).await;
+                send_ok_reply(&client, &message.reply, &response, &correlation_id).await;
                 info!(
                     correlation_id,
                     agent_id = response.agent_id,
@@ -225,14 +186,7 @@ async fn run_policy_handler(
     shutdown: CancellationToken,
 ) {
     loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
+        let message = handle_request!(subscription, shutdown);
 
         let request = match decode_message::<FetchPolicyRequest>(message.payload.as_ref()) {
             Ok(request) => request,
@@ -245,8 +199,7 @@ async fn run_policy_handler(
         let correlation_id = request.correlation_id.clone();
         match service.fetch_policy(request).await {
             Ok(response) => {
-                let envelope = ok_envelope(&response, correlation_id.clone());
-                send_reply(&client, &message.reply, envelope).await;
+                send_ok_reply(&client, &message.reply, &response, &correlation_id).await;
                 info!(
                     correlation_id,
                     agent_id = response.agent_id,
@@ -266,14 +219,7 @@ async fn run_heartbeat_handler(
     shutdown: CancellationToken,
 ) {
     loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
+        let message = handle_request!(subscription, shutdown);
 
         let payload = match decode_message::<HeartbeatPayload>(message.payload.as_ref()) {
             Ok(payload) => payload,
@@ -299,14 +245,7 @@ async fn run_diagnostics_handler(
     shutdown: CancellationToken,
 ) {
     loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
+        let message = handle_request!(subscription, shutdown);
 
         let payload = match decode_message::<DiagnosticsPayload>(message.payload.as_ref()) {
             Ok(payload) => payload,
@@ -333,26 +272,23 @@ async fn run_agents_list_handler(
     shutdown: CancellationToken,
 ) {
     loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
+        let message = handle_request!(subscription, shutdown);
+
+        let request = match decode_message::<ListAgentsRequest>(message.payload.as_ref()) {
+            Ok(request) => request,
+            Err(error) => {
+                send_error_reply(&client, &message.reply, error, "").await;
+                continue;
+            }
         };
 
-        let Some(message) = message else {
-            break;
-        };
-
-        let request = decode_json_or_reply::<CorrelationRequest>(&client, &message).await;
-        let Some(request) = request else {
-            continue;
-        };
-
-        match service.list_agents().await {
+        let list = ListInput::from_proto(request.paging);
+        match service.list_agents(&list).await {
             Ok(response) => {
-                send_json_reply(&client, &message.reply, &response, request.correlation_id).await
+                send_ok_reply(&client, &message.reply, &response, &request.correlation_id).await;
             }
             Err(error) => {
-                send_error_reply(&client, &message.reply, error, request.correlation_id).await
+                send_error_reply(&client, &message.reply, error, request.correlation_id).await;
             }
         }
     }
@@ -365,26 +301,23 @@ async fn run_agents_get_handler(
     shutdown: CancellationToken,
 ) {
     loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
+        let message = handle_request!(subscription, shutdown);
+
+        let request = match decode_message::<GetAgentRequest>(message.payload.as_ref()) {
+            Ok(request) => request,
+            Err(error) => {
+                send_error_reply(&client, &message.reply, error, "").await;
+                continue;
+            }
         };
 
-        let Some(message) = message else {
-            break;
-        };
-
-        let request = decode_json_or_reply::<AgentLookupRequest>(&client, &message).await;
-        let Some(request) = request else {
-            continue;
-        };
-
+        let correlation_id = request.correlation_id.clone();
         match service.get_agent(&request.agent_id).await {
             Ok(response) => {
-                send_json_reply(&client, &message.reply, &response, request.correlation_id).await
+                send_ok_reply(&client, &message.reply, &response, &correlation_id).await;
             }
             Err(error) => {
-                send_error_reply(&client, &message.reply, error, request.correlation_id).await
+                send_error_reply(&client, &message.reply, error, correlation_id).await;
             }
         }
     }
@@ -397,125 +330,66 @@ async fn run_diagnostics_get_handler(
     shutdown: CancellationToken,
 ) {
     loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
+        let message = handle_request!(subscription, shutdown);
+
+        let request = match decode_message::<GetAgentDiagnosticsRequest>(message.payload.as_ref()) {
+            Ok(request) => request,
+            Err(error) => {
+                send_error_reply(&client, &message.reply, error, "").await;
+                continue;
+            }
         };
 
-        let Some(message) = message else {
-            break;
-        };
-
-        let request = decode_json_or_reply::<AgentLookupRequest>(&client, &message).await;
-        let Some(request) = request else {
-            continue;
-        };
-
+        let correlation_id = request.correlation_id.clone();
         match service.latest_diagnostics(&request.agent_id).await {
             Ok(response) => {
-                send_json_reply(&client, &message.reply, &response, request.correlation_id).await
+                send_ok_reply(&client, &message.reply, &response, &correlation_id).await;
             }
             Err(error) => {
-                send_error_reply(&client, &message.reply, error, request.correlation_id).await
+                send_error_reply(&client, &message.reply, error, correlation_id).await;
             }
         }
     }
 }
 
-async fn run_policies_list_handler(
+async fn run_policy_get_handler(
     mut subscription: Subscriber,
     client: Client,
     service: Arc<EnrollmentService>,
     shutdown: CancellationToken,
 ) {
     loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
+        let message = handle_request!(subscription, shutdown);
+
+        let request = match decode_message::<GetAgentPolicyRequest>(message.payload.as_ref()) {
+            Ok(request) => request,
+            Err(error) => {
+                send_error_reply(&client, &message.reply, error, "").await;
+                continue;
+            }
         };
 
-        let Some(message) = message else {
-            break;
-        };
-
-        let request = decode_json_or_reply::<CorrelationRequest>(&client, &message).await;
-        let Some(request) = request else {
-            continue;
-        };
-
-        match service.list_policies().await {
+        let correlation_id = request.correlation_id.clone();
+        match service.get_agent_policy(&request.agent_id).await {
             Ok(response) => {
-                send_json_reply(&client, &message.reply, &response, request.correlation_id).await
+                send_ok_reply(&client, &message.reply, &response, &correlation_id).await;
             }
             Err(error) => {
-                send_error_reply(&client, &message.reply, error, request.correlation_id).await
+                send_error_reply(&client, &message.reply, error, correlation_id).await;
             }
         }
     }
 }
 
-async fn run_policies_get_handler(
-    mut subscription: Subscriber,
-    client: Client,
-    service: Arc<EnrollmentService>,
-    shutdown: CancellationToken,
-) {
-    loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
-
-        let request = decode_json_or_reply::<PolicyLookupRequest>(&client, &message).await;
-        let Some(request) = request else {
-            continue;
-        };
-
-        match service.get_policy(&request.policy_id).await {
-            Ok(response) => {
-                send_json_reply(&client, &message.reply, &response, request.correlation_id).await
-            }
-            Err(error) => {
-                send_error_reply(&client, &message.reply, error, request.correlation_id).await
-            }
-        }
-    }
-}
-
-async fn run_policy_revisions_handler(
-    mut subscription: Subscriber,
-    client: Client,
-    service: Arc<EnrollmentService>,
-    shutdown: CancellationToken,
-) {
-    loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
-
-        let request = decode_json_or_reply::<PolicyLookupRequest>(&client, &message).await;
-        let Some(request) = request else {
-            continue;
-        };
-
-        match service.list_policy_revisions(&request.policy_id).await {
-            Ok(response) => {
-                send_json_reply(&client, &message.reply, &response, request.correlation_id).await
-            }
-            Err(error) => {
-                send_error_reply(&client, &message.reply, error, request.correlation_id).await
-            }
-        }
-    }
+async fn send_ok_reply<T>(
+    client: &Client,
+    reply_subject: &Option<Subject>,
+    payload: &T,
+    correlation_id: &str,
+) where
+    T: prost::Message,
+{
+    send_reply(client, reply_subject, ok_envelope(payload, correlation_id)).await;
 }
 
 async fn send_error_reply(
@@ -524,26 +398,13 @@ async fn send_error_reply(
     error: AppError,
     correlation_id: impl Into<String>,
 ) {
-    let envelope = error.to_envelope(correlation_id.into());
-    send_reply(client, reply_subject, envelope).await;
-}
-
-async fn send_json_reply<T: serde::Serialize>(
-    client: &Client,
-    reply_subject: &Option<Subject>,
-    payload: &T,
-    correlation_id: impl Into<String>,
-) {
-    match ok_json_envelope(payload, correlation_id) {
-        Ok(envelope) => send_reply(client, reply_subject, envelope).await,
-        Err(error) => send_error_reply(client, reply_subject, error, "").await,
-    }
+    send_reply(client, reply_subject, error.to_envelope(correlation_id)).await;
 }
 
 async fn send_reply(
     client: &Client,
     reply_subject: &Option<Subject>,
-    envelope: common::proto::agent::AgentReplyEnvelope,
+    envelope: runtime::RuntimeReplyEnvelope,
 ) {
     let Some(reply_subject) = reply_subject.clone() else {
         warn!("received request without reply subject");
@@ -555,24 +416,5 @@ async fn send_reply(
         .await
     {
         error!(error = %error, "failed to publish NATS reply");
-    }
-}
-
-async fn decode_json_or_reply<T>(client: &Client, message: &async_nats::Message) -> Option<T>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    match serde_json::from_slice::<T>(message.payload.as_ref()) {
-        Ok(request) => Some(request),
-        Err(error) => {
-            send_error_reply(
-                client,
-                &message.reply,
-                AppError::invalid_argument(format!("decode JSON payload: {error}")),
-                "",
-            )
-            .await;
-            None
-        }
     }
 }

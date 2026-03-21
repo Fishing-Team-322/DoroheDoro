@@ -1,13 +1,14 @@
 use std::{collections::HashMap, path::PathBuf};
 
+use common::config::{collect_vars, optional_trimmed, required_string, SharedRuntimeConfig};
 use thiserror::Error;
 
+use crate::executor::MockFailMode;
 use crate::models::ExecutorKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeploymentConfig {
-    pub postgres_dsn: String,
-    pub nats_url: String,
+    pub shared: SharedRuntimeConfig,
     pub deployment_http_addr: String,
     pub deployment_executor_kind: ExecutorKind,
     pub edge_public_url: String,
@@ -16,7 +17,9 @@ pub struct DeploymentConfig {
     pub ansible_runner_bin: Option<String>,
     pub ansible_playbook_path: Option<String>,
     pub deployment_temp_dir: Option<PathBuf>,
-    pub rust_log: String,
+    pub mock_executor_step_delay_ms: u64,
+    pub mock_executor_fail_mode: MockFailMode,
+    pub mock_executor_fail_hosts: Vec<String>,
 }
 
 impl DeploymentConfig {
@@ -30,40 +33,47 @@ impl DeploymentConfig {
         K: Into<String>,
         V: Into<String>,
     {
-        let vars: HashMap<String, String> = vars
-            .into_iter()
-            .map(|(key, value)| (key.into(), value.into()))
-            .collect();
+        let vars: HashMap<String, String> = collect_vars(vars);
 
-        let postgres_dsn = required_or_default(
-            &vars,
-            "POSTGRES_DSN",
-            "postgres://postgres:postgres@localhost:5432/doro",
-        )?;
-        let nats_url = required_or_default(&vars, "NATS_URL", "nats://localhost:4222")?;
-        let deployment_http_addr =
-            required_or_default(&vars, "DEPLOYMENT_HTTP_ADDR", "0.0.0.0:8083")?;
-        let edge_public_url =
-            required_or_default(&vars, "EDGE_PUBLIC_URL", "http://localhost:8080")?;
-        let edge_grpc_addr = required_or_default(&vars, "EDGE_GRPC_ADDR", "localhost:9090")?;
-        let agent_state_dir_default =
-            required_or_default(&vars, "AGENT_STATE_DIR_DEFAULT", "/var/lib/doro-agent")?;
-        let rust_log = vars
-            .get("RUST_LOG")
-            .cloned()
-            .unwrap_or_else(|| "info".to_string());
+        let shared = SharedRuntimeConfig::from_pairs(vars.clone())?;
+        let deployment_http_addr = required_string(&vars, "DEPLOYMENT_HTTP_ADDR")?;
+        let edge_public_url = required_string(&vars, "EDGE_PUBLIC_URL")?;
+        let edge_grpc_addr = required_string(&vars, "EDGE_GRPC_ADDR")?;
+        let agent_state_dir_default = required_string(&vars, "AGENT_STATE_DIR_DEFAULT")?;
 
-        let executor_kind_raw = required_or_default(&vars, "DEPLOYMENT_EXECUTOR_KIND", "mock")?;
+        let executor_kind_raw = required_string(&vars, "DEPLOYMENT_EXECUTOR_KIND")?;
         let deployment_executor_kind = ExecutorKind::from_str(&executor_kind_raw)
             .ok_or(ConfigError::InvalidEnum("DEPLOYMENT_EXECUTOR_KIND"))?;
 
         let ansible_runner_bin = optional_trimmed(&vars, "ANSIBLE_RUNNER_BIN");
         let ansible_playbook_path = optional_trimmed(&vars, "ANSIBLE_PLAYBOOK_PATH");
-        let deployment_temp_dir = optional_trimmed(&vars, "DEPLOYMENT_TEMP_DIR").map(PathBuf::from);
+        let deployment_temp_dir =
+            optional_trimmed(&vars, "DEPLOYMENT_TEMP_DIR").map(PathBuf::from);
+        let mock_executor_step_delay_ms = optional_trimmed(&vars, "MOCK_EXECUTOR_STEP_DELAY_MS")
+            .map(|value| {
+                value
+                    .parse::<u64>()
+                    .map_err(|_| ConfigError::InvalidNumber("MOCK_EXECUTOR_STEP_DELAY_MS"))
+            })
+            .transpose()?
+            .unwrap_or(5);
+        let mock_executor_fail_mode = optional_trimmed(&vars, "MOCK_EXECUTOR_FAIL_MODE")
+            .map(|value| MockFailMode::from_str(&value))
+            .unwrap_or(Some(MockFailMode::Never))
+            .ok_or(ConfigError::InvalidEnum("MOCK_EXECUTOR_FAIL_MODE"))?;
+        let mock_executor_fail_hosts = optional_trimmed(&vars, "MOCK_EXECUTOR_FAIL_HOSTS")
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Ok(Self {
-            postgres_dsn,
-            nats_url,
+            shared,
             deployment_http_addr,
             deployment_executor_kind,
             edge_public_url,
@@ -72,36 +82,21 @@ impl DeploymentConfig {
             ansible_runner_bin,
             ansible_playbook_path,
             deployment_temp_dir,
-            rust_log,
+            mock_executor_step_delay_ms,
+            mock_executor_fail_mode,
+            mock_executor_fail_hosts,
         })
     }
 }
 
-fn required_or_default(
-    vars: &HashMap<String, String>,
-    key: &'static str,
-    default: &'static str,
-) -> Result<String, ConfigError> {
-    let value = vars
-        .get(key)
-        .cloned()
-        .unwrap_or_else(|| default.to_string());
-    if value.trim().is_empty() {
-        return Err(ConfigError::Missing(key));
-    }
-    Ok(value)
-}
-
-fn optional_trimmed(vars: &HashMap<String, String>, key: &'static str) -> Option<String> {
-    vars.get(key)
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ConfigError {
+    #[error(transparent)]
+    Common(#[from] common::config::ConfigError),
     #[error("missing required config value: {0}")]
     Missing(&'static str),
+    #[error("invalid numeric value for: {0}")]
+    InvalidNumber(&'static str),
     #[error("invalid enum value for: {0}")]
     InvalidEnum(&'static str),
 }
@@ -110,14 +105,6 @@ pub enum ConfigError {
 mod tests {
     use super::DeploymentConfig;
     use crate::models::ExecutorKind;
-
-    #[test]
-    fn loads_defaults() {
-        let config = DeploymentConfig::from_pairs(std::iter::empty::<(String, String)>()).unwrap();
-        assert_eq!(config.deployment_http_addr, "0.0.0.0:8083");
-        assert_eq!(config.deployment_executor_kind, ExecutorKind::Mock);
-        assert_eq!(config.edge_grpc_addr, "localhost:9090");
-    }
 
     #[test]
     fn parses_overrides() {
@@ -132,7 +119,9 @@ mod tests {
             ("ANSIBLE_RUNNER_BIN", "/usr/bin/ansible-runner"),
             ("ANSIBLE_PLAYBOOK_PATH", "/srv/playbooks/install.yaml"),
             ("DEPLOYMENT_TEMP_DIR", "/tmp/doro"),
-            ("RUST_LOG", "debug"),
+            ("MOCK_EXECUTOR_STEP_DELAY_MS", "25"),
+            ("MOCK_EXECUTOR_FAIL_MODE", "partial"),
+            ("MOCK_EXECUTOR_FAIL_HOSTS", "host-a,host-b"),
         ])
         .unwrap();
 
@@ -145,5 +134,12 @@ mod tests {
             config.deployment_temp_dir.unwrap().to_string_lossy(),
             "/tmp/doro"
         );
+        assert_eq!(config.mock_executor_step_delay_ms, 25);
+        assert_eq!(config.mock_executor_fail_mode, crate::executor::MockFailMode::Partial);
+        assert_eq!(
+            config.mock_executor_fail_hosts,
+            vec!["host-a".to_string(), "host-b".to_string()]
+        );
+        assert_eq!(config.shared.postgres_dsn, "postgres://example");
     }
 }

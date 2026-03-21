@@ -8,10 +8,12 @@ fn main() {
         .join("edge_api")
         .join("contracts")
         .join("proto");
+    let shared_runtime_proto = shared_proto_root.join("runtime.proto");
     let shared_agent_proto = shared_proto_root.join("agent.proto");
     let shared_ingest_proto = shared_proto_root.join("ingest.proto");
     let edge_proto = edge_proto_root.join("edge.proto");
 
+    println!("cargo:rerun-if-changed={}", shared_runtime_proto.display());
     println!("cargo:rerun-if-changed={}", shared_agent_proto.display());
     println!("cargo:rerun-if-changed={}", shared_ingest_proto.display());
     println!("cargo:rerun-if-changed={}", edge_proto.display());
@@ -29,7 +31,12 @@ fn main() {
     // moved under `contracts/**` without requiring cross-component edits in this task.
     config
         .compile_protos(
-            &[shared_agent_proto, shared_ingest_proto, edge_proto],
+            &[
+                shared_runtime_proto,
+                shared_agent_proto,
+                shared_ingest_proto,
+                edge_proto,
+            ],
             &[shared_proto_root, edge_proto_root],
         )
         .expect("compile proto contracts");

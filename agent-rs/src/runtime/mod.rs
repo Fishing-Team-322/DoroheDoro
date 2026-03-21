@@ -4,6 +4,10 @@ pub mod heartbeat;
 pub mod sender;
 pub mod state_writer;
 
+pub mod v1 {
+    pub use crate::proto::runtime::v1::*;
+}
+
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},

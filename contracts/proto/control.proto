@@ -3,14 +3,7 @@ syntax = "proto3";
 package dorohedoro.control.v1;
 
 option go_package = "github.com/example/dorohedoro/contracts/controlproto;controlv1";
-
-message ControlReplyEnvelope {
-  string status = 1;
-  string code = 2;
-  string message = 3;
-  bytes payload = 4;
-  string correlation_id = 5;
-}
+import "runtime.proto";
 
 // Policy contracts
 message Policy {
@@ -23,6 +16,9 @@ message Policy {
   string policy_body_json = 7;
   string created_at = 8;
   string updated_at = 9;
+  string created_by = 10;
+  string updated_by = 11;
+  string update_reason = 12;
 }
 
 message PolicyRevision {
@@ -31,14 +27,19 @@ message PolicyRevision {
   string revision = 3;
   string policy_body_json = 4;
   string created_at = 5;
+  string created_by = 6;
+  string reason = 7;
+  string request_id = 8;
 }
 
 message ListPoliciesRequest {
   string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
 }
 
 message ListPoliciesResponse {
   repeated Policy policies = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
 }
 
 message GetPolicyRequest {
@@ -51,6 +52,7 @@ message CreatePolicyRequest {
   string name = 2;
   string description = 3;
   string policy_body_json = 4;
+  dorohedoro.runtime.v1.AuditContext audit = 5;
 }
 
 message UpdatePolicyRequest {
@@ -58,15 +60,18 @@ message UpdatePolicyRequest {
   string policy_id = 2;
   string description = 3;
   string policy_body_json = 4;
+  dorohedoro.runtime.v1.AuditContext audit = 5;
 }
 
 message GetPolicyRevisionsRequest {
   string correlation_id = 1;
   string policy_id = 2;
+  dorohedoro.runtime.v1.PagingRequest paging = 3;
 }
 
 message GetPolicyRevisionsResponse {
   repeated PolicyRevision revisions = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
 }
 
 // Inventory contracts
@@ -79,6 +84,9 @@ message Host {
   map<string, string> labels = 6;
   string created_at = 7;
   string updated_at = 8;
+  string created_by = 9;
+  string updated_by = 10;
+  string update_reason = 11;
 }
 
 message HostInput {
@@ -91,10 +99,12 @@ message HostInput {
 
 message ListHostsRequest {
   string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
 }
 
 message ListHostsResponse {
   repeated Host hosts = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
 }
 
 message GetHostRequest {
@@ -105,12 +115,14 @@ message GetHostRequest {
 message CreateHostRequest {
   string correlation_id = 1;
   HostInput host = 2;
+  dorohedoro.runtime.v1.AuditContext audit = 3;
 }
 
 message UpdateHostRequest {
   string correlation_id = 1;
   string host_id = 2;
   HostInput host = 3;
+  dorohedoro.runtime.v1.AuditContext audit = 4;
 }
 
 message HostGroup {
@@ -120,6 +132,9 @@ message HostGroup {
   string created_at = 4;
   string updated_at = 5;
   repeated HostGroupMember members = 6;
+  string created_by = 7;
+  string updated_by = 8;
+  string update_reason = 9;
 }
 
 message HostGroupMember {
@@ -131,10 +146,12 @@ message HostGroupMember {
 
 message ListHostGroupsRequest {
   string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
 }
 
 message ListHostGroupsResponse {
   repeated HostGroup groups = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
 }
 
 message GetHostGroupRequest {
@@ -146,6 +163,7 @@ message CreateHostGroupRequest {
   string correlation_id = 1;
   string name = 2;
   string description = 3;
+  dorohedoro.runtime.v1.AuditContext audit = 4;
 }
 
 message UpdateHostGroupRequest {
@@ -153,18 +171,21 @@ message UpdateHostGroupRequest {
   string host_group_id = 2;
   string name = 3;
   string description = 4;
+  dorohedoro.runtime.v1.AuditContext audit = 5;
 }
 
 message AddHostGroupMemberRequest {
   string correlation_id = 1;
   string host_group_id = 2;
   string host_id = 3;
+  dorohedoro.runtime.v1.AuditContext audit = 4;
 }
 
 message RemoveHostGroupMemberRequest {
   string correlation_id = 1;
   string host_group_id = 2;
   string host_id = 3;
+  dorohedoro.runtime.v1.AuditContext audit = 4;
 }
 
 // Credential metadata contracts
@@ -176,14 +197,19 @@ message CredentialProfileMetadata {
   string vault_ref = 5;
   string created_at = 6;
   string updated_at = 7;
+  string created_by = 8;
+  string updated_by = 9;
+  string update_reason = 10;
 }
 
 message ListCredentialsRequest {
   string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
 }
 
 message ListCredentialsResponse {
   repeated CredentialProfileMetadata profiles = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
 }
 
 message GetCredentialsRequest {
@@ -197,4 +223,5 @@ message CreateCredentialsRequest {
   string kind = 3;
   string description = 4;
   string vault_ref = 5;
+  dorohedoro.runtime.v1.AuditContext audit = 6;
 }

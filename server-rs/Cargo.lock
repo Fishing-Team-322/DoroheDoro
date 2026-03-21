@@ -246,12 +246,17 @@ dependencies = [
 name = "common"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-nats",
+ "axum",
  "prost",
  "prost-build",
  "protoc-bin-vendored",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror 1.0.69",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -515,6 +520,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "hex",
+ "prost",
  "reqwest",
  "serde",
  "serde_json",

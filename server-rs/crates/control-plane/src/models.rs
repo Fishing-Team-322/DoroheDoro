@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use common::proto::control::{
-    CredentialProfileMetadata, Host, HostGroup, HostGroupMember, Policy, PolicyRevision,
+use common::proto::{
+    control::{CredentialProfileMetadata, Host, HostGroup, HostGroupMember, Policy, PolicyRevision},
+    runtime,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -42,6 +43,9 @@ pub struct PolicyModel {
     pub policy_body_json: Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub created_by: String,
+    pub updated_by: String,
+    pub update_reason: String,
 }
 
 impl PolicyModel {
@@ -56,6 +60,9 @@ impl PolicyModel {
             policy_body_json: self.policy_body_json.to_string(),
             created_at: format_ts(self.created_at),
             updated_at: format_ts(self.updated_at),
+            created_by: self.created_by,
+            updated_by: self.updated_by,
+            update_reason: self.update_reason,
         }
     }
 }
@@ -67,6 +74,9 @@ pub struct PolicyRevisionModel {
     pub revision: String,
     pub body_json: Value,
     pub created_at: DateTime<Utc>,
+    pub created_by: String,
+    pub reason: String,
+    pub request_id: String,
 }
 
 impl PolicyRevisionModel {
@@ -77,6 +87,9 @@ impl PolicyRevisionModel {
             revision: self.revision,
             policy_body_json: self.body_json.to_string(),
             created_at: format_ts(self.created_at),
+            created_by: self.created_by,
+            reason: self.reason,
+            request_id: self.request_id,
         }
     }
 }
@@ -91,6 +104,9 @@ pub struct HostModel {
     pub labels_json: Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub created_by: String,
+    pub updated_by: String,
+    pub update_reason: String,
 }
 
 impl HostModel {
@@ -104,6 +120,9 @@ impl HostModel {
             labels: json_to_map(self.labels_json),
             created_at: format_ts(self.created_at),
             updated_at: format_ts(self.updated_at),
+            created_by: self.created_by,
+            updated_by: self.updated_by,
+            update_reason: self.update_reason,
         }
     }
 }
@@ -134,6 +153,9 @@ pub struct HostGroupModel {
     pub description: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub created_by: String,
+    pub updated_by: String,
+    pub update_reason: String,
     pub members: Vec<HostGroupMemberModel>,
 }
 
@@ -145,6 +167,9 @@ impl HostGroupModel {
             description: self.description,
             created_at: format_ts(self.created_at),
             updated_at: format_ts(self.updated_at),
+            created_by: self.created_by,
+            updated_by: self.updated_by,
+            update_reason: self.update_reason,
             members: self
                 .members
                 .drain(..)
@@ -163,6 +188,9 @@ pub struct CredentialProfileModel {
     pub vault_ref: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub created_by: String,
+    pub updated_by: String,
+    pub update_reason: String,
 }
 
 impl CredentialProfileModel {
@@ -175,6 +203,17 @@ impl CredentialProfileModel {
             vault_ref: self.vault_ref,
             created_at: format_ts(self.created_at),
             updated_at: format_ts(self.updated_at),
+            created_by: self.created_by,
+            updated_by: self.updated_by,
+            update_reason: self.update_reason,
         }
+    }
+}
+
+pub fn paging_response(limit: u32, offset: u64, total: u64) -> runtime::PagingResponse {
+    runtime::PagingResponse {
+        limit,
+        offset,
+        total,
     }
 }

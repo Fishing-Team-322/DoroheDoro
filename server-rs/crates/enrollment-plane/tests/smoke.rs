@@ -8,12 +8,12 @@ use common::{
     },
     proto::{
         agent::{
-            AgentReplyEnvelope, DiagnosticsPayload, EnrollRequest, EnrollResponse,
-            FetchPolicyRequest, FetchPolicyResponse, HeartbeatPayload,
+            DiagnosticsPayload, EnrollRequest, EnrollResponse, FetchPolicyRequest,
+            FetchPolicyResponse, HeartbeatPayload,
         },
-        decode_message, encode_message,
+        decode_message, encode_message, runtime::RuntimeReplyEnvelope,
     },
-    RuntimeConfig,
+    EnrollmentPlaneConfig,
 };
 use enrollment_plane::{
     http::{self, HttpState},
@@ -42,10 +42,10 @@ impl TestHarness {
     async fn start() -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
 
-        let config = RuntimeConfig::from_env()?;
+        let config = EnrollmentPlaneConfig::from_env()?;
         let pool = PgPoolOptions::new()
             .max_connections(5)
-            .connect(&config.postgres_dsn)
+            .connect(&config.shared.postgres_dsn)
             .await?;
         run_migrations(&pool).await?;
         truncate_tables(&pool).await?;
@@ -53,10 +53,10 @@ impl TestHarness {
         let repo = EnrollmentRepository::new(pool.clone());
         let service = Arc::new(EnrollmentService::new(repo));
         service
-            .bootstrap_defaults(&config.enrollment_dev_bootstrap_token)
+            .bootstrap_defaults(&config.dev_bootstrap_token)
             .await?;
 
-        let nats = async_nats::connect(&config.nats_url).await?;
+        let nats = async_nats::connect(&config.shared.nats_url).await?;
         let shutdown = CancellationToken::new();
         let subscriber_tasks =
             transport::spawn_handlers(nats.clone(), service, shutdown.clone()).await?;
@@ -178,7 +178,7 @@ async fn enrollment_policy_heartbeat_and_diagnostics_flow() -> anyhow::Result<()
             encode_message(&enroll_request).into(),
         )
         .await?;
-    let enroll_envelope: AgentReplyEnvelope = decode_message(enroll_message.payload.as_ref())?;
+    let enroll_envelope: RuntimeReplyEnvelope = decode_message(enroll_message.payload.as_ref())?;
     assert_eq!(enroll_envelope.status, "ok");
     let enroll_response: EnrollResponse = decode_message(&enroll_envelope.payload)?;
     assert!(enroll_response.agent_id.starts_with("agent-"));
@@ -210,7 +210,7 @@ async fn enrollment_policy_heartbeat_and_diagnostics_flow() -> anyhow::Result<()
             encode_message(&fetch_request).into(),
         )
         .await?;
-    let fetch_envelope: AgentReplyEnvelope = decode_message(fetch_message.payload.as_ref())?;
+    let fetch_envelope: RuntimeReplyEnvelope = decode_message(fetch_message.payload.as_ref())?;
     assert_eq!(fetch_envelope.status, "ok");
     let fetch_response: FetchPolicyResponse = decode_message(&fetch_envelope.payload)?;
     assert_eq!(fetch_response.agent_id, enroll_response.agent_id);

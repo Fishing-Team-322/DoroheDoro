@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_nats::{Client, Subject, Subscriber};
 use common::{
     nats_subjects::*,
-    proto::{control, control_ok_envelope, decode_message, encode_message},
+    proto::{control, decode_message, empty_ok_envelope, encode_message, ok_envelope, runtime},
     AppError, AppResult,
 };
 use futures::StreamExt;
@@ -14,8 +14,8 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::service::{
-    parse_policy_json, ControlService, CredentialProfileInput, HostGroupInput, HostUpsertInput,
-    PolicyCreateInput, PolicyUpdateInput,
+    parse_policy_json, AuditInfo, ControlService, CredentialProfileInput, HostGroupInput,
+    HostUpsertInput, ListInput, PolicyCreateInput, PolicyUpdateInput,
 };
 
 pub async fn spawn_handlers(
@@ -247,13 +247,15 @@ async fn run_list_policies_handler(
             }
         };
 
-        match service.list_policies().await {
-            Ok(policies) => {
+        let list = ListInput::from_proto(request.paging);
+        match service.list_policies(&list).await {
+            Ok((policies, paging)) => {
                 let response = control::ListPoliciesResponse {
                     policies: policies
                         .into_iter()
                         .map(|policy| policy.into_proto())
                         .collect(),
+                    paging: Some(paging),
                 };
                 send_control_ok(&client, &message.reply, &response, &request.correlation_id).await;
             }
@@ -344,8 +346,13 @@ async fn run_create_policy_handler(
             description: request.description.clone(),
             body_json: body,
         };
+        let audit = AuditInfo::from_proto(
+            &request.correlation_id,
+            request.audit,
+            "policy created",
+        );
 
-        match service.create_policy(input).await {
+        match service.create_policy(input, &audit).await {
             Ok(policy) => {
                 info!(policy_id = %policy.id, "created policy");
                 send_control_ok(
@@ -414,8 +421,13 @@ async fn run_update_policy_handler(
             description: request.description.clone(),
             body_json: body,
         };
+        let audit = AuditInfo::from_proto(
+            &request.correlation_id,
+            request.audit,
+            "policy updated",
+        );
 
-        match service.update_policy(input).await {
+        match service.update_policy(input, &audit).await {
             Ok(policy) => {
                 info!(policy_id = %policy.id, "updated policy");
                 send_control_ok(
@@ -465,13 +477,15 @@ async fn run_policy_revisions_handler(
             }
         };
 
-        match service.list_policy_revisions(policy_id).await {
-            Ok(revisions) => {
+        let list = ListInput::from_proto(request.paging);
+        match service.list_policy_revisions(policy_id, &list).await {
+            Ok((revisions, paging)) => {
                 let response = control::GetPolicyRevisionsResponse {
                     revisions: revisions
                         .into_iter()
                         .map(|revision| revision.into_proto())
                         .collect(),
+                    paging: Some(paging),
                 };
                 send_control_ok(&client, &message.reply, &response, &request.correlation_id).await;
             }
@@ -499,10 +513,12 @@ async fn run_list_hosts_handler(
             }
         };
 
-        match service.list_hosts().await {
-            Ok(hosts) => {
+        let list = ListInput::from_proto(request.paging);
+        match service.list_hosts(&list).await {
+            Ok((hosts, paging)) => {
                 let response = control::ListHostsResponse {
                     hosts: hosts.into_iter().map(|host| host.into_proto()).collect(),
+                    paging: Some(paging),
                 };
                 send_control_ok(&client, &message.reply, &response, &request.correlation_id).await;
             }
@@ -591,8 +607,9 @@ async fn run_create_host_handler(
                 continue;
             }
         };
+        let audit = AuditInfo::from_proto(&request.correlation_id, request.audit, "host created");
 
-        match service.create_host(input).await {
+        match service.create_host(input, &audit).await {
             Ok(host) => {
                 info!(host_id = %host.id, "created host");
                 send_control_ok(
@@ -654,8 +671,9 @@ async fn run_update_host_handler(
                 continue;
             }
         };
+        let audit = AuditInfo::from_proto(&request.correlation_id, request.audit, "host updated");
 
-        match service.update_host(host_id, input).await {
+        match service.update_host(host_id, input, &audit).await {
             Ok(host) => {
                 info!(host_id = %host.id, "updated host");
                 send_control_ok(
@@ -691,10 +709,12 @@ async fn run_list_host_groups_handler(
                 }
             };
 
-        match service.list_host_groups().await {
-            Ok(groups) => {
+        let list = ListInput::from_proto(request.paging);
+        match service.list_host_groups(&list).await {
+            Ok((groups, paging)) => {
                 let response = control::ListHostGroupsResponse {
                     groups: groups.into_iter().map(|group| group.into_proto()).collect(),
+                    paging: Some(paging),
                 };
                 send_control_ok(&client, &message.reply, &response, &request.correlation_id).await;
             }
@@ -776,8 +796,13 @@ async fn run_create_host_group_handler(
             name: request.name.clone(),
             description: request.description.clone(),
         };
+        let audit = AuditInfo::from_proto(
+            &request.correlation_id,
+            request.audit,
+            "host group created",
+        );
 
-        match service.create_host_group(input).await {
+        match service.create_host_group(input, &audit).await {
             Ok(group) => {
                 info!(host_group_id = %group.id, "created host group");
                 send_control_ok(
@@ -831,8 +856,13 @@ async fn run_update_host_group_handler(
             name: request.name.clone(),
             description: request.description.clone(),
         };
+        let audit = AuditInfo::from_proto(
+            &request.correlation_id,
+            request.audit,
+            "host group updated",
+        );
 
-        match service.update_host_group(group_id, input).await {
+        match service.update_host_group(group_id, input, &audit).await {
             Ok(group) => {
                 info!(host_group_id = %group.id, "updated host group");
                 send_control_ok(
@@ -894,8 +924,13 @@ async fn run_add_member_handler(
                 continue;
             }
         };
+        let audit = AuditInfo::from_proto(
+            &request.correlation_id,
+            request.audit,
+            "host group member added",
+        );
 
-        match service.add_host_to_group(group_id, host_id).await {
+        match service.add_host_to_group(group_id, host_id, &audit).await {
             Ok(member) => {
                 send_control_ok(
                     &client,
@@ -957,8 +992,13 @@ async fn run_remove_member_handler(
                 continue;
             }
         };
+        let audit = AuditInfo::from_proto(
+            &request.correlation_id,
+            request.audit,
+            "host group member removed",
+        );
 
-        match service.remove_host_from_group(group_id, host_id).await {
+        match service.remove_host_from_group(group_id, host_id, &audit).await {
             Ok(()) => {
                 send_control_ack(&client, &message.reply, &request.correlation_id).await;
             }
@@ -987,13 +1027,15 @@ async fn run_list_credentials_handler(
                 }
             };
 
-        match service.list_credentials().await {
-            Ok(profiles) => {
+        let list = ListInput::from_proto(request.paging);
+        match service.list_credentials(&list).await {
+            Ok((profiles, paging)) => {
                 let response = control::ListCredentialsResponse {
                     profiles: profiles
                         .into_iter()
                         .map(|profile| profile.into_proto())
                         .collect(),
+                    paging: Some(paging),
                 };
                 send_control_ok(&client, &message.reply, &response, &request.correlation_id).await;
             }
@@ -1078,8 +1120,13 @@ async fn run_create_credentials_handler(
             description: request.description.clone(),
             vault_ref: request.vault_ref.clone(),
         };
+        let audit = AuditInfo::from_proto(
+            &request.correlation_id,
+            request.audit,
+            "credentials metadata created",
+        );
 
-        match service.create_credentials(input).await {
+        match service.create_credentials(input, &audit).await {
             Ok(profile) => {
                 info!(credentials_profile_id = %profile.id, "created credentials profile");
                 send_control_ok(
@@ -1122,19 +1169,12 @@ async fn send_control_ok<T: Message>(
     payload: &T,
     correlation_id: &str,
 ) {
-    let envelope = control_ok_envelope(payload, correlation_id.to_string());
+    let envelope = ok_envelope(payload, correlation_id.to_string());
     send_control_envelope(client, reply_subject, envelope).await;
 }
 
 async fn send_control_ack(client: &Client, reply_subject: &Option<Subject>, correlation_id: &str) {
-    let envelope = control::ControlReplyEnvelope {
-        status: "ok".to_string(),
-        code: "ok".to_string(),
-        message: String::new(),
-        payload: Vec::new(),
-        correlation_id: correlation_id.to_string(),
-    };
-    send_control_envelope(client, reply_subject, envelope).await;
+    send_control_envelope(client, reply_subject, empty_ok_envelope(correlation_id)).await;
 }
 
 async fn send_control_error(
@@ -1143,14 +1183,14 @@ async fn send_control_error(
     error: AppError,
     correlation_id: impl Into<String>,
 ) {
-    let envelope = error.to_control_envelope(correlation_id);
+    let envelope = error.to_envelope(correlation_id);
     send_control_envelope(client, reply_subject, envelope).await;
 }
 
 async fn send_control_envelope(
     client: &Client,
     reply_subject: &Option<Subject>,
-    envelope: control::ControlReplyEnvelope,
+    envelope: runtime::RuntimeReplyEnvelope,
 ) {
     let Some(reply_subject) = reply_subject.clone() else {
         warn!("received request without reply subject");

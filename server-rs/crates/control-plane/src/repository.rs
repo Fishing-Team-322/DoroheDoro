@@ -1,13 +1,16 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
-use serde_json::Value;
-use sqlx::{postgres::PgRow, PgPool, Row};
+use serde_json::{json, Value};
+use sqlx::{postgres::PgRow, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
-use crate::models::{
-    CredentialProfileModel, HostGroupMemberModel, HostGroupModel, HostModel, PolicyModel,
-    PolicyRevisionModel,
+use crate::{
+    models::{
+        CredentialProfileModel, HostGroupMemberModel, HostGroupModel, HostModel, PolicyModel,
+        PolicyRevisionModel,
+    },
+    service::AuditInfo,
 };
 
 #[derive(Clone)]
@@ -40,6 +43,9 @@ impl ControlRepository {
                 p.is_active,
                 p.created_at,
                 p.updated_at,
+                p.created_by,
+                p.updated_by,
+                p.update_reason,
                 pr.id AS latest_revision_id,
                 pr.revision AS latest_revision,
                 pr.body_json AS policy_body_json
@@ -51,7 +57,7 @@ impl ControlRepository {
                 ORDER BY created_at DESC
                 LIMIT 1
              ) pr ON TRUE
-             ORDER BY p.created_at ASC",
+             ORDER BY p.name ASC, p.id ASC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -68,6 +74,9 @@ impl ControlRepository {
                 p.is_active,
                 p.created_at,
                 p.updated_at,
+                p.created_by,
+                p.updated_by,
+                p.update_reason,
                 pr.id AS latest_revision_id,
                 pr.revision AS latest_revision,
                 pr.body_json AS policy_body_json
@@ -94,6 +103,7 @@ impl ControlRepository {
         name: &str,
         description: &str,
         body_json: &Value,
+        audit: &AuditInfo,
     ) -> Result<PolicyModel, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let now = Utc::now();
@@ -101,26 +111,48 @@ impl ControlRepository {
         let revision_id = Uuid::new_v4();
 
         sqlx::query(
-            "INSERT INTO policies (id, name, description, is_active, created_at, updated_at)
-             VALUES ($1, $2, $3, TRUE, $4, $4)",
+            "INSERT INTO policies (
+                id, name, description, is_active, created_at, updated_at,
+                created_by, updated_by, request_id, update_reason
+            )
+            VALUES ($1, $2, $3, TRUE, $4, $4, $5, $5, $6, $7)",
         )
         .bind(policy_id)
         .bind(name)
         .bind(description)
         .bind(now)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
         .execute(&mut *tx)
         .await?;
 
         sqlx::query(
-            "INSERT INTO policy_revisions (id, policy_id, revision, body_json, created_at)
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO policy_revisions (
+                id, policy_id, revision, body_json, created_at,
+                created_by, request_id, reason
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(revision_id)
         .bind(policy_id)
         .bind("rev-1")
         .bind(body_json)
         .bind(now)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
         .execute(&mut *tx)
+        .await?;
+
+        self.record_audit_event(
+            &mut tx,
+            "policy",
+            "policy.create",
+            policy_id,
+            audit,
+            json!({ "name": name, "policy_revision_id": revision_id }),
+        )
         .await?;
 
         tx.commit().await?;
@@ -134,20 +166,33 @@ impl ControlRepository {
         policy_id: Uuid,
         description: &str,
         body_json: &Value,
+        audit: &AuditInfo,
     ) -> Result<Option<PolicyModel>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         let now = Utc::now();
 
-        sqlx::query(
+        let result = sqlx::query(
             "UPDATE policies
-             SET description = $2, updated_at = $3
+             SET description = $2,
+                 updated_at = $3,
+                 updated_by = $4,
+                 request_id = $5,
+                 update_reason = $6
              WHERE id = $1",
         )
         .bind(policy_id)
         .bind(description)
         .bind(now)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
         .execute(&mut *tx)
         .await?;
+
+        if result.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Ok(None);
+        }
 
         let revision_count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM policy_revisions WHERE policy_id = $1")
@@ -155,17 +200,34 @@ impl ControlRepository {
                 .fetch_one(&mut *tx)
                 .await?;
         let revision_label = format!("rev-{}", revision_count + 1);
+        let revision_id = Uuid::new_v4();
 
         sqlx::query(
-            "INSERT INTO policy_revisions (id, policy_id, revision, body_json, created_at)
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO policy_revisions (
+                id, policy_id, revision, body_json, created_at,
+                created_by, request_id, reason
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
-        .bind(Uuid::new_v4())
+        .bind(revision_id)
         .bind(policy_id)
         .bind(&revision_label)
         .bind(body_json)
         .bind(now)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
         .execute(&mut *tx)
+        .await?;
+
+        self.record_audit_event(
+            &mut tx,
+            "policy",
+            "policy.update",
+            policy_id,
+            audit,
+            json!({ "policy_revision_id": revision_id, "revision": revision_label }),
+        )
         .await?;
 
         tx.commit().await?;
@@ -177,10 +239,10 @@ impl ControlRepository {
         policy_id: Uuid,
     ) -> Result<Vec<PolicyRevisionModel>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, policy_id, revision, body_json, created_at
+            "SELECT id, policy_id, revision, body_json, created_at, created_by, reason, request_id
              FROM policy_revisions
              WHERE policy_id = $1
-             ORDER BY created_at DESC",
+             ORDER BY created_at DESC, revision DESC",
         )
         .bind(policy_id)
         .fetch_all(&self.pool)
@@ -191,9 +253,10 @@ impl ControlRepository {
 
     pub async fn list_hosts(&self) -> Result<Vec<HostModel>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, hostname, ip, ssh_port, remote_user, labels_json, created_at, updated_at
+            "SELECT id, hostname, ip, ssh_port, remote_user, labels_json, created_at, updated_at,
+                    created_by, updated_by, update_reason
              FROM hosts
-             ORDER BY hostname ASC",
+             ORDER BY hostname ASC, id ASC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -203,7 +266,8 @@ impl ControlRepository {
 
     pub async fn get_host(&self, host_id: Uuid) -> Result<Option<HostModel>, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT id, hostname, ip, ssh_port, remote_user, labels_json, created_at, updated_at
+            "SELECT id, hostname, ip, ssh_port, remote_user, labels_json, created_at, updated_at,
+                    created_by, updated_by, update_reason
              FROM hosts WHERE id = $1 LIMIT 1",
         )
         .bind(host_id)
@@ -220,11 +284,16 @@ impl ControlRepository {
         ssh_port: i32,
         remote_user: &str,
         labels_json: &Value,
+        audit: &AuditInfo,
     ) -> Result<HostModel, sqlx::Error> {
         let row = sqlx::query(
-            "INSERT INTO hosts (id, hostname, ip, ssh_port, remote_user, labels_json, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-             RETURNING id, hostname, ip, ssh_port, remote_user, labels_json, created_at, updated_at",
+            "INSERT INTO hosts (
+                id, hostname, ip, ssh_port, remote_user, labels_json,
+                created_at, updated_at, created_by, updated_by, request_id, update_reason
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7, $7, $8, $9)
+            RETURNING id, hostname, ip, ssh_port, remote_user, labels_json, created_at, updated_at,
+                      created_by, updated_by, update_reason",
         )
         .bind(Uuid::new_v4())
         .bind(hostname)
@@ -232,10 +301,22 @@ impl ControlRepository {
         .bind(ssh_port)
         .bind(remote_user)
         .bind(labels_json)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(host_from_row(row))
+        let host = host_from_row(row);
+        self.record_audit_event_direct(
+            "host",
+            "host.create",
+            host.id,
+            audit,
+            json!({ "hostname": host.hostname, "ip": host.ip }),
+        )
+        .await?;
+        Ok(host)
     }
 
     pub async fn update_host(
@@ -246,6 +327,7 @@ impl ControlRepository {
         ssh_port: i32,
         remote_user: &str,
         labels_json: &Value,
+        audit: &AuditInfo,
     ) -> Result<Option<HostModel>, sqlx::Error> {
         let row = sqlx::query(
             "UPDATE hosts
@@ -254,9 +336,13 @@ impl ControlRepository {
                  ssh_port = $4,
                  remote_user = $5,
                  labels_json = $6,
-                 updated_at = NOW()
+                 updated_at = NOW(),
+                 updated_by = $7,
+                 request_id = $8,
+                 update_reason = $9
              WHERE id = $1
-             RETURNING id, hostname, ip, ssh_port, remote_user, labels_json, created_at, updated_at",
+             RETURNING id, hostname, ip, ssh_port, remote_user, labels_json, created_at, updated_at,
+                       created_by, updated_by, update_reason",
         )
         .bind(host_id)
         .bind(hostname)
@@ -264,17 +350,33 @@ impl ControlRepository {
         .bind(ssh_port)
         .bind(remote_user)
         .bind(labels_json)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(host_from_row))
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let host = host_from_row(row);
+        self.record_audit_event_direct(
+            "host",
+            "host.update",
+            host.id,
+            audit,
+            json!({ "hostname": host.hostname, "ip": host.ip }),
+        )
+        .await?;
+        Ok(Some(host))
     }
 
     pub async fn list_host_groups(&self) -> Result<Vec<HostGroupModel>, sqlx::Error> {
         let group_rows = sqlx::query(
-            "SELECT id, name, description, created_at, updated_at
+            "SELECT id, name, description, created_at, updated_at, created_by, updated_by, update_reason
              FROM host_groups
-             ORDER BY name ASC",
+             ORDER BY name ASC, id ASC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -291,6 +393,9 @@ impl ControlRepository {
                         description: row.get("description"),
                         created_at: row.get("created_at"),
                         updated_at: row.get("updated_at"),
+                        created_by: row.get("created_by"),
+                        updated_by: row.get("updated_by"),
+                        update_reason: row.get("update_reason"),
                         members: Vec::new(),
                     },
                 )
@@ -324,7 +429,9 @@ impl ControlRepository {
             }
         }
 
-        Ok(groups.into_values().collect())
+        let mut groups = groups.into_values().collect::<Vec<_>>();
+        groups.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        Ok(groups)
     }
 
     pub async fn get_host_group(
@@ -332,7 +439,7 @@ impl ControlRepository {
         host_group_id: Uuid,
     ) -> Result<Option<HostGroupModel>, sqlx::Error> {
         let group_row = sqlx::query(
-            "SELECT id, name, description, created_at, updated_at
+            "SELECT id, name, description, created_at, updated_at, created_by, updated_by, update_reason
              FROM host_groups WHERE id = $1",
         )
         .bind(host_group_id)
@@ -349,6 +456,9 @@ impl ControlRepository {
             description: row.get("description"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
+            created_by: row.get("created_by"),
+            updated_by: row.get("updated_by"),
+            update_reason: row.get("update_reason"),
             members: Vec::new(),
         };
 
@@ -381,26 +491,47 @@ impl ControlRepository {
         &self,
         name: &str,
         description: &str,
+        audit: &AuditInfo,
     ) -> Result<HostGroupModel, sqlx::Error> {
         let row = sqlx::query(
-            "INSERT INTO host_groups (id, name, description, created_at, updated_at)
-             VALUES ($1, $2, $3, NOW(), NOW())
-             RETURNING id, name, description, created_at, updated_at",
+            "INSERT INTO host_groups (
+                id, name, description, created_at, updated_at,
+                created_by, updated_by, request_id, update_reason
+            )
+            VALUES ($1, $2, $3, NOW(), NOW(), $4, $4, $5, $6)
+            RETURNING id, name, description, created_at, updated_at, created_by, updated_by, update_reason",
         )
         .bind(Uuid::new_v4())
         .bind(name)
         .bind(description)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(HostGroupModel {
+        let group = HostGroupModel {
             id: row.get("id"),
             name: row.get("name"),
             description: row.get("description"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
+            created_by: row.get("created_by"),
+            updated_by: row.get("updated_by"),
+            update_reason: row.get("update_reason"),
             members: Vec::new(),
-        })
+        };
+
+        self.record_audit_event_direct(
+            "host_group",
+            "host_group.create",
+            group.id,
+            audit,
+            json!({ "name": group.name }),
+        )
+        .await?;
+
+        Ok(group)
     }
 
     pub async fn update_host_group(
@@ -408,64 +539,52 @@ impl ControlRepository {
         host_group_id: Uuid,
         name: &str,
         description: &str,
+        audit: &AuditInfo,
     ) -> Result<Option<HostGroupModel>, sqlx::Error> {
         let row = sqlx::query(
             "UPDATE host_groups
              SET name = $2,
                  description = $3,
-                 updated_at = NOW()
+                 updated_at = NOW(),
+                 updated_by = $4,
+                 request_id = $5,
+                 update_reason = $6
              WHERE id = $1
-             RETURNING id, name, description, created_at, updated_at",
+             RETURNING id, name, description, created_at, updated_at, created_by, updated_by, update_reason",
         )
         .bind(host_group_id)
         .bind(name)
         .bind(description)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
         .fetch_optional(&self.pool)
         .await?;
 
-        let Some(row) = row else {
+        let Some(_row) = row else {
             return Ok(None);
         };
 
-        let mut group = HostGroupModel {
-            id: row.get("id"),
-            name: row.get("name"),
-            description: row.get("description"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-            members: Vec::new(),
-        };
-
-        let member_rows = sqlx::query(
-            "SELECT hgm.id,
-                    hgm.host_group_id,
-                    hgm.host_id,
-                    hosts.hostname
-             FROM host_group_members hgm
-             LEFT JOIN hosts ON hosts.id = hgm.host_id
-             WHERE hgm.host_group_id = $1",
+        self.record_audit_event_direct(
+            "host_group",
+            "host_group.update",
+            host_group_id,
+            audit,
+            json!({ "name": name }),
         )
-        .bind(host_group_id)
-        .fetch_all(&self.pool)
         .await?;
 
-        for row in member_rows {
-            group.members.push(HostGroupMemberModel {
-                id: row.get("id"),
-                host_group_id,
-                host_id: row.get("host_id"),
-                hostname: row.get::<Option<String>, _>("hostname"),
-            });
-        }
-
-        Ok(Some(group))
+        self.get_host_group(host_group_id).await
     }
 
     pub async fn add_host_group_member(
         &self,
         host_group_id: Uuid,
         host_id: Uuid,
+        audit: &AuditInfo,
     ) -> Result<HostGroupMemberModel, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
         let row = sqlx::query(
             "WITH inserted AS (
                  INSERT INTO host_group_members (id, host_group_id, host_id, created_at)
@@ -482,8 +601,35 @@ impl ControlRepository {
         .bind(Uuid::new_v4())
         .bind(host_group_id)
         .bind(host_id)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
+
+        sqlx::query(
+            "UPDATE host_groups
+             SET updated_at = NOW(),
+                 updated_by = $2,
+                 request_id = $3,
+                 update_reason = $4
+             WHERE id = $1",
+        )
+        .bind(host_group_id)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
+        .execute(&mut *tx)
+        .await?;
+
+        self.record_audit_event(
+            &mut tx,
+            "host_group",
+            "host_group.member.add",
+            host_group_id,
+            audit,
+            json!({ "host_id": host_id }),
+        )
+        .await?;
+
+        tx.commit().await?;
 
         Ok(HostGroupMemberModel {
             id: row.get("id"),
@@ -497,22 +643,56 @@ impl ControlRepository {
         &self,
         host_group_id: Uuid,
         host_id: Uuid,
+        audit: &AuditInfo,
     ) -> Result<bool, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
         let result =
             sqlx::query("DELETE FROM host_group_members WHERE host_group_id = $1 AND host_id = $2")
                 .bind(host_group_id)
                 .bind(host_id)
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await?;
 
-        Ok(result.rows_affected() > 0)
+        if result.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Ok(false);
+        }
+
+        sqlx::query(
+            "UPDATE host_groups
+             SET updated_at = NOW(),
+                 updated_by = $2,
+                 request_id = $3,
+                 update_reason = $4
+             WHERE id = $1",
+        )
+        .bind(host_group_id)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
+        .execute(&mut *tx)
+        .await?;
+
+        self.record_audit_event(
+            &mut tx,
+            "host_group",
+            "host_group.member.remove",
+            host_group_id,
+            audit,
+            json!({ "host_id": host_id }),
+        )
+        .await?;
+
+        tx.commit().await?;
+        Ok(true)
     }
 
     pub async fn list_credentials(&self) -> Result<Vec<CredentialProfileModel>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, name, kind, description, vault_ref, created_at, updated_at
+            "SELECT id, name, kind, description, vault_ref, created_at, updated_at,
+                    created_by, updated_by, update_reason
              FROM credentials_profiles_metadata
-             ORDER BY created_at DESC",
+             ORDER BY name ASC, id ASC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -525,7 +705,8 @@ impl ControlRepository {
         credentials_id: Uuid,
     ) -> Result<Option<CredentialProfileModel>, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT id, name, kind, description, vault_ref, created_at, updated_at
+            "SELECT id, name, kind, description, vault_ref, created_at, updated_at,
+                    created_by, updated_by, update_reason
              FROM credentials_profiles_metadata
              WHERE id = $1",
         )
@@ -542,21 +723,97 @@ impl ControlRepository {
         kind: &str,
         description: &str,
         vault_ref: &str,
+        audit: &AuditInfo,
     ) -> Result<CredentialProfileModel, sqlx::Error> {
         let row = sqlx::query(
-            "INSERT INTO credentials_profiles_metadata (id, name, kind, description, vault_ref, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
-             RETURNING id, name, kind, description, vault_ref, created_at, updated_at",
+            "INSERT INTO credentials_profiles_metadata (
+                id, name, kind, description, vault_ref, created_at, updated_at,
+                created_by, updated_by, request_id, update_reason
+            )
+             VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6, $6, $7, $8)
+             RETURNING id, name, kind, description, vault_ref, created_at, updated_at,
+                       created_by, updated_by, update_reason",
         )
         .bind(Uuid::new_v4())
         .bind(name)
         .bind(kind)
         .bind(description)
         .bind(vault_ref)
+        .bind(&audit.actor_id)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(credential_from_row(row))
+        let profile = credential_from_row(row);
+        self.record_audit_event_direct(
+            "credentials_profile",
+            "credentials.create",
+            profile.id,
+            audit,
+            json!({ "name": profile.name, "kind": profile.kind, "vault_ref": profile.vault_ref }),
+        )
+        .await?;
+        Ok(profile)
+    }
+
+    async fn record_audit_event(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        entity_type: &str,
+        action: &str,
+        entity_id: Uuid,
+        audit: &AuditInfo,
+        payload_json: Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO control_audit_events (
+                id, entity_type, entity_id, action, actor_id, actor_type,
+                request_id, reason, payload_json, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())",
+        )
+        .bind(Uuid::new_v4())
+        .bind(entity_type)
+        .bind(entity_id.to_string())
+        .bind(action)
+        .bind(&audit.actor_id)
+        .bind(&audit.actor_type)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
+        .bind(payload_json)
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
+    }
+
+    async fn record_audit_event_direct(
+        &self,
+        entity_type: &str,
+        action: &str,
+        entity_id: Uuid,
+        audit: &AuditInfo,
+        payload_json: Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO control_audit_events (
+                id, entity_type, entity_id, action, actor_id, actor_type,
+                request_id, reason, payload_json, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())",
+        )
+        .bind(Uuid::new_v4())
+        .bind(entity_type)
+        .bind(entity_id.to_string())
+        .bind(action)
+        .bind(&audit.actor_id)
+        .bind(&audit.actor_type)
+        .bind(&audit.request_id)
+        .bind(&audit.reason)
+        .bind(payload_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 
@@ -571,6 +828,9 @@ fn policy_from_row(row: PgRow) -> PolicyModel {
         policy_body_json: row.get("policy_body_json"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        created_by: row.get("created_by"),
+        updated_by: row.get("updated_by"),
+        update_reason: row.get("update_reason"),
     }
 }
 
@@ -581,6 +841,9 @@ fn policy_revision_from_row(row: PgRow) -> PolicyRevisionModel {
         revision: row.get("revision"),
         body_json: row.get("body_json"),
         created_at: row.get("created_at"),
+        created_by: row.get("created_by"),
+        reason: row.get("reason"),
+        request_id: row.get("request_id"),
     }
 }
 
@@ -594,6 +857,9 @@ fn host_from_row(row: PgRow) -> HostModel {
         labels_json: row.get("labels_json"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        created_by: row.get("created_by"),
+        updated_by: row.get("updated_by"),
+        update_reason: row.get("update_reason"),
     }
 }
 
@@ -606,5 +872,8 @@ fn credential_from_row(row: PgRow) -> CredentialProfileModel {
         vault_ref: row.get("vault_ref"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        created_by: row.get("created_by"),
+        updated_by: row.get("updated_by"),
+        update_reason: row.get("update_reason"),
     }
 }
