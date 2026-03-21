@@ -20,6 +20,7 @@ pub fn router(state: HttpState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/status/anomaly", get(anomaly_status))
         .with_state(state)
 }
 
@@ -30,5 +31,17 @@ async fn healthz() -> Json<serde_json::Value> {
 async fn readyz(State(state): State<HttpState>) -> Json<serde_json::Value> {
     Json(json!({
         "status": if state.service.is_ready() { "ready" } else { "starting" }
+    }))
+}
+
+async fn anomaly_status(State(state): State<HttpState>) -> Json<serde_json::Value> {
+    let snapshot = state.service.detection_snapshot();
+    Json(json!({
+        "mode": snapshot.mode.as_str(),
+        "safe_mode": snapshot.safe_mode,
+        "signals_total": snapshot.signals_total,
+        "anomalies_total": snapshot.anomalies_total,
+        "resolved_total": snapshot.resolved_total,
+        "rejected_total": snapshot.rejected_total,
     }))
 }

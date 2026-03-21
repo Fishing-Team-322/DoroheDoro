@@ -432,10 +432,16 @@ function getSidebarIcon(item: Pick<NavItem, "key">) {
       return GridIcon;
     case "policies":
       return ShieldIcon;
+    case "security":
+      return ShieldIcon;
     case "credentials":
       return GridIcon;
     case "deployments":
       return RocketIcon;
+    case "anomalies":
+      return ActivityIcon;
+    case "integrations":
+      return GridIcon;
     case "agents":
       return PulseIcon;
     case "logs":

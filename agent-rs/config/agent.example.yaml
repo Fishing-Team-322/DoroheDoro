@@ -1,7 +1,7 @@
 edge_url: "http://localhost:8080"
 edge_grpc_addr: "localhost:9090"
 bootstrap_token: "dev-bootstrap-token"
-state_dir: "/tmp/doro-agent"
+state_dir: "./.tmp/doro-agent"
 log_level: "info"
 
 transport:
@@ -29,6 +29,20 @@ heartbeat:
 diagnostics:
   interval_sec: 30
 
+security_scan:
+  enabled: true
+  interval_sec: 3600
+  jitter_sec: 60
+  timeout_sec: 30
+  max_parallel_checks: 4
+  profile: "balanced"
+  allowed_ports: [22]
+  blocked_ports: [23, 2375]
+  package_watchlist: ["openssl", "openssh", "nginx", "docker"]
+  version_rules_path: "./config/security-rules.example.yaml"
+  publish_as_diagnostics: true
+  persist_last_report: true
+
 batch:
   max_events: 250
   max_bytes: 262144
@@ -51,13 +65,13 @@ degraded:
 
 spool:
   enabled: true
-  dir: "/tmp/doro-agent/spool"
+  dir: "./.tmp/doro-agent/spool"
   max_disk_bytes: 67108864
 
 sources:
   - type: "file"
-    source_id: "file:/tmp/doro-test.log"
-    path: "/tmp/doro-test.log"
+    source_id: "file:./.tmp/doro-test.log"
+    path: "./.tmp/doro-test.log"
     start_at: "end"
     source: "local-test"
     service: "unknown"

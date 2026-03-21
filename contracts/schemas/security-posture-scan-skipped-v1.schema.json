@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dorohedoro/contracts/security-posture-scan-skipped-v1.schema.json",
+  "title": "SecurityPostureScanSkippedV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_name",
+    "event_id",
+    "created_at",
+    "agent_id",
+    "hostname",
+    "profile",
+    "reason_code",
+    "reason_message"
+  ],
+  "properties": {
+    "schema_version": { "const": "v1" },
+    "event_name": { "const": "security.posture.scan.skipped.v1" },
+    "event_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "agent_id": { "type": "string", "minLength": 1 },
+    "hostname": { "type": "string", "minLength": 1 },
+    "profile": { "enum": ["light", "balanced", "deep"] },
+    "reason_code": { "type": "string", "minLength": 1 },
+    "reason_message": { "type": "string", "minLength": 1 },
+    "retry_after_sec": { "type": ["integer", "null"], "minimum": 0 }
+  }
+}

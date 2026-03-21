@@ -3,6 +3,10 @@ subjects:
   agents_policy_fetch: agents.policy.fetch
   agents_heartbeat: agents.heartbeat
   agents_diagnostics: agents.diagnostics
+  agents_security_posture_report: agents.security.posture.report
+  agents_security_posture_scan_failed: agents.security.posture.scan.failed
+  agents_security_posture_scan_skipped: agents.security.posture.scan.skipped
+  agents_security_posture_rules_loaded: agents.security.posture.rules.loaded
   agents_list: agents.list
   agents_get: agents.get
   agents_diagnostics_get: agents.diagnostics.get

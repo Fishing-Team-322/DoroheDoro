@@ -43,6 +43,7 @@ Private Rust runtime for the internal `SERVER` domains.
   - query handlers for logs and overview
   - alert rule and instance API
   - alert evaluation over stored log data
+  - anomaly rule engine (rare fingerprint + threshold + baseline detectors backed by Postgres/ClickHouse)
   - publishes `ui.stream.alerts`
   - publishes audit events for alert lifecycle
 
@@ -67,7 +68,7 @@ Canonical subjects live in [`../contracts/subjects/registry.yaml`](../contracts/
 - `control-plane` owns `control.*`, tickets, anomalies and audit read-side
 - `deployment-plane` owns `deployments.*`
 - `ingestion-plane` owns raw->normalized ingest and storage fan-out
-- `query-alert-plane` owns `query.*` and `alerts.*`
+- `query-alert-plane` owns `query.*`, `alerts.*`, и потоковый алгоритмический детект редких fingerprint-ов
 
 ## Health and readiness
 
@@ -156,6 +157,12 @@ Shared:
 - `CLICKHOUSE_DSN`
 - `CLICKHOUSE_DATABASE`
 - `CLICKHOUSE_TABLE`
+- `RARE_FINGERPRINT_ENABLED`
+- `RARE_FINGERPRINT_WINDOW_MINUTES`
+- `RARE_FINGERPRINT_MAX_COUNT`
+- `RARE_FINGERPRINT_SEVERITY`
+- `ANOMALY_EVALUATION_INTERVAL_SECS`
+- `ANOMALY_RULE_CACHE_TTL_SECS`
 
 See [`./.env.example`](./.env.example).
 

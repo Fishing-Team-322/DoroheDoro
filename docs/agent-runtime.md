@@ -135,6 +135,11 @@ Important defaults:
 
 - `policy.refresh_interval_sec` defaults to `30`
 - `diagnostics.interval_sec` defaults to `heartbeat.interval_sec`
+- `security_scan.enabled` defaults to `true`
+- `security_scan.interval_sec` defaults to `86400`
+- `security_scan.jitter_sec` defaults to `900`
+- `security_scan.timeout_sec` defaults to `120`
+- `security_scan.max_parallel_checks` defaults to `4`
 - `spool.dir` defaults to `<state_dir>/spool`
 - `install.mode` defaults to `auto`
 - `platform.allow_machine_id` defaults to `false`
@@ -210,10 +215,15 @@ Important persisted state:
 - last TLS error
 - last handshake success timestamp
 - degraded and blocked-delivery markers
+- security posture last-run state and finding summary
 - source offsets
 - spool metadata
 
 This is why reinstall and upgrade flows should preserve `state_dir`.
+
+The last successful security posture report is also optionally mirrored to:
+
+- `state_dir/security/last-report.json`
 
 ## Install, reinstall, and upgrade semantics
 
@@ -245,6 +255,47 @@ Most important top-level fields:
 - `degraded_mode`
 - `blocked_delivery`
 - `source_statuses`
+- `security_posture`
+
+### `security_posture`
+
+- `enabled`
+- `profile`
+- `interval_sec`
+- `jitter_sec`
+- `timeout_sec`
+- `last_started_at`
+- `last_finished_at`
+- `last_status`
+- `last_status_reason`
+- `last_report_id`
+- `last_delivery_status`
+- `last_delivery_error`
+- `last_rules_loaded_at`
+- `last_rules_digest`
+- `last_report_path`
+- `backoff_until`
+- `consecutive_failures`
+- `summary`
+
+## Security posture worker
+
+The runtime now starts an additional background worker for periodic host security posture scans.
+
+Current checks:
+
+- listening TCP/UDP sockets from `/proc/net/*` with best-effort process attribution from `/proc/<pid>/fd`
+- watched package and binary versions with native `dpkg`/`rpm`/`apk` comparison where available
+- world-writable critical file checks
+- firewall state checks via `nftables`, `iptables`, `firewalld`, `ufw`, and `systemctl`
+- root SSH login policy checks via `sshd -T` with `sshd_config` fallback
+
+Behavior notes:
+
+- the worker is isolated from the log hot path and does not block ingestion
+- non-Linux hosts publish a skipped event and stop the worker
+- reports reuse diagnostics transport so no extra edge API surface was required
+- report persistence is local to `state_dir/security/last-report.json`
 
 ### `policy_state`
 
