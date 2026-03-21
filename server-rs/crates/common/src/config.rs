@@ -170,6 +170,9 @@ mod tests {
     #[test]
     fn collect_vars_normalizes_env_pairs() {
         let vars = collect_vars([("POSTGRES_DSN", "postgres://example")]);
-        assert_eq!(vars.get("POSTGRES_DSN").map(String::as_str), Some("postgres://example"));
+        assert_eq!(
+            vars.get("POSTGRES_DSN").map(String::as_str),
+            Some("postgres://example")
+        );
     }
 }

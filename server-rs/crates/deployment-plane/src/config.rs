@@ -47,8 +47,7 @@ impl DeploymentConfig {
 
         let ansible_runner_bin = optional_trimmed(&vars, "ANSIBLE_RUNNER_BIN");
         let ansible_playbook_path = optional_trimmed(&vars, "ANSIBLE_PLAYBOOK_PATH");
-        let deployment_temp_dir =
-            optional_trimmed(&vars, "DEPLOYMENT_TEMP_DIR").map(PathBuf::from);
+        let deployment_temp_dir = optional_trimmed(&vars, "DEPLOYMENT_TEMP_DIR").map(PathBuf::from);
         let mock_executor_step_delay_ms = optional_trimmed(&vars, "MOCK_EXECUTOR_STEP_DELAY_MS")
             .map(|value| {
                 value
@@ -135,7 +134,10 @@ mod tests {
             "/tmp/doro"
         );
         assert_eq!(config.mock_executor_step_delay_ms, 25);
-        assert_eq!(config.mock_executor_fail_mode, crate::executor::MockFailMode::Partial);
+        assert_eq!(
+            config.mock_executor_fail_mode,
+            crate::executor::MockFailMode::Partial
+        );
         assert_eq!(
             config.mock_executor_fail_hosts,
             vec!["host-a".to_string(), "host-b".to_string()]

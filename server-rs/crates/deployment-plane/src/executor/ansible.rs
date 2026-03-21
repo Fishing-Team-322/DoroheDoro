@@ -67,9 +67,10 @@ impl AnsibleRunnerExecutor {
     }
 
     fn prepare_workspace(&self, snapshot: &ExecutionSnapshot) -> AppResult<PreparedWorkspace> {
-        let workspace_dir = self
-            .temp_dir
-            .join(format!("deployment-{}", snapshot.deployment_attempt_id.simple()));
+        let workspace_dir = self.temp_dir.join(format!(
+            "deployment-{}",
+            snapshot.deployment_attempt_id.simple()
+        ));
         fs::create_dir_all(&workspace_dir).map_err(|error| {
             AppError::internal(format!(
                 "create ansible workspace {}: {error}",
@@ -124,14 +125,20 @@ impl AnsibleRunnerExecutor {
         let stdout_path = workspace_dir.join("ansible.stdout.log");
         let stderr_path = workspace_dir.join("ansible.stderr.log");
         fs::write(&stdout_path, "").map_err(|error| {
-            AppError::internal(format!("write stdout log {}: {error}", stdout_path.display()))
+            AppError::internal(format!(
+                "write stdout log {}: {error}",
+                stdout_path.display()
+            ))
         })?;
         fs::write(
             &stderr_path,
             "ansible runner execution is not implemented yet; render outputs are prepared\n",
         )
         .map_err(|error| {
-            AppError::internal(format!("write stderr log {}: {error}", stderr_path.display()))
+            AppError::internal(format!(
+                "write stderr log {}: {error}",
+                stderr_path.display()
+            ))
         })?;
 
         Ok(PreparedWorkspace {
@@ -195,35 +202,31 @@ impl DeploymentExecutor for AnsibleRunnerExecutor {
         let rendered_targets = workspace
             .rendered_targets
             .iter()
-            .map(|target| {
-                ExecutionTargetResult {
-                    deployment_target_id: target.deployment_target_id,
-                    status: DeploymentTargetStatus::Failed,
-                    error_message: Some(
-                        "ansible runner execution is not implemented yet".to_string(),
-                    ),
-                    steps: vec![
-                        StepExecutionResult {
-                            step_name: "ansible.rendered".to_string(),
-                            status: DeploymentStepStatus::Succeeded,
-                            message: "inventory, vars and bootstrap artifacts rendered".to_string(),
-                            payload_json: json!({
-                                "hostname": target.hostname,
-                                "vars_path": target.vars_path,
-                                "bootstrap_path": target.bootstrap_path,
-                            }),
-                        },
-                        StepExecutionResult {
-                            step_name: "ansible.runner.pending".to_string(),
-                            status: DeploymentStepStatus::Failed,
-                            message: "ansible runner execution is not implemented yet".to_string(),
-                            payload_json: json!({
-                                "runner_bin": self.runner_bin,
-                                "playbook_path": self.playbook_path,
-                            }),
-                        },
-                    ],
-                }
+            .map(|target| ExecutionTargetResult {
+                deployment_target_id: target.deployment_target_id,
+                status: DeploymentTargetStatus::Failed,
+                error_message: Some("ansible runner execution is not implemented yet".to_string()),
+                steps: vec![
+                    StepExecutionResult {
+                        step_name: "ansible.rendered".to_string(),
+                        status: DeploymentStepStatus::Succeeded,
+                        message: "inventory, vars and bootstrap artifacts rendered".to_string(),
+                        payload_json: json!({
+                            "hostname": target.hostname,
+                            "vars_path": target.vars_path,
+                            "bootstrap_path": target.bootstrap_path,
+                        }),
+                    },
+                    StepExecutionResult {
+                        step_name: "ansible.runner.pending".to_string(),
+                        status: DeploymentStepStatus::Failed,
+                        message: "ansible runner execution is not implemented yet".to_string(),
+                        payload_json: json!({
+                            "runner_bin": self.runner_bin,
+                            "playbook_path": self.playbook_path,
+                        }),
+                    },
+                ],
             })
             .collect::<Vec<_>>();
 
@@ -268,10 +271,7 @@ fn render_inventory(snapshot: &ExecutionSnapshot) -> String {
     for target in &snapshot.targets {
         inventory.push_str(&format!(
             "{} ansible_host={} ansible_port={} ansible_user={}\n",
-            target.host.hostname,
-            target.host.ip,
-            target.host.ssh_port,
-            target.host.remote_user
+            target.host.hostname, target.host.ip, target.host.ssh_port, target.host.remote_user
         ));
     }
     inventory

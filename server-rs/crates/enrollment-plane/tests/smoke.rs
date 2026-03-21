@@ -11,7 +11,8 @@ use common::{
             DiagnosticsPayload, EnrollRequest, EnrollResponse, FetchPolicyRequest,
             FetchPolicyResponse, HeartbeatPayload,
         },
-        decode_message, encode_message, runtime::RuntimeReplyEnvelope,
+        decode_message, encode_message,
+        runtime::RuntimeReplyEnvelope,
     },
     EnrollmentPlaneConfig,
 };

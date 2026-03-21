@@ -17,9 +17,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::repository::{
-    AgentRecord, EnrollmentRepository, PolicyRecord, PolicyRevisionRecord,
-};
+use crate::repository::{AgentRecord, EnrollmentRepository, PolicyRecord, PolicyRevisionRecord};
 
 #[derive(Debug, Clone)]
 pub struct ListInput {

@@ -564,7 +564,10 @@ impl DeploymentService {
             .map_err(map_db_error)?;
         self.publish_status(&job).await;
 
-        let execution_result = match self.executor.execute(&execution_snapshot, &cancellation).await
+        let execution_result = match self
+            .executor
+            .execute(&execution_snapshot, &cancellation)
+            .await
         {
             Ok(result) => result,
             Err(error) => executor_failure_result(&running, error),
@@ -658,7 +661,12 @@ impl DeploymentService {
 
         let job = self
             .repo
-            .finalize_attempt(job_id, attempt_id, final_status, &execution_result.current_phase)
+            .finalize_attempt(
+                job_id,
+                attempt_id,
+                final_status,
+                &execution_result.current_phase,
+            )
             .await
             .map_err(map_db_error)?;
         self.publish_status(&job).await;

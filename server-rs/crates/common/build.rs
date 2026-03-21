@@ -30,7 +30,13 @@ fn main() {
 
     config
         .compile_protos(
-            &[ingest_proto, runtime_proto, agent_proto, control_proto, deployment_proto],
+            &[
+                ingest_proto,
+                runtime_proto,
+                agent_proto,
+                control_proto,
+                deployment_proto,
+            ],
             &[proto_root],
         )
         .expect("compile proto contracts");

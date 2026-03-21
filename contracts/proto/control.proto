@@ -225,3 +225,476 @@ message CreateCredentialsRequest {
   string vault_ref = 5;
   dorohedoro.runtime.v1.AuditContext audit = 6;
 }
+
+// Cluster governance contracts
+message Cluster {
+  string cluster_id = 1;
+  string name = 2;
+  string slug = 3;
+  string description = 4;
+  bool is_active = 5;
+  string created_at = 6;
+  string updated_at = 7;
+  string created_by = 8;
+  string updated_by = 9;
+  string metadata_json = 10;
+  uint32 host_count = 11;
+  uint32 agent_count = 12;
+}
+
+message ClusterHostBinding {
+  string cluster_host_id = 1;
+  string host_id = 2;
+  string hostname = 3;
+  string created_at = 4;
+}
+
+message ClusterAgentBinding {
+  string cluster_agent_id = 1;
+  string agent_id = 2;
+  string created_at = 3;
+}
+
+message ClusterDetails {
+  Cluster cluster = 1;
+  repeated ClusterHostBinding hosts = 2;
+  repeated ClusterAgentBinding agents = 3;
+}
+
+message ListClustersRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+  string query = 3;
+  string host_id = 4;
+  bool include_members = 5;
+}
+
+message ListClustersResponse {
+  repeated Cluster clusters = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message GetClusterRequest {
+  string correlation_id = 1;
+  string cluster_id = 2;
+  bool include_members = 3;
+}
+
+message GetClusterResponse {
+  ClusterDetails cluster = 1;
+}
+
+message CreateClusterRequest {
+  string correlation_id = 1;
+  string name = 2;
+  string slug = 3;
+  string description = 4;
+  bool is_active = 5;
+  string metadata_json = 6;
+  dorohedoro.runtime.v1.AuditContext audit = 7;
+}
+
+message UpdateClusterRequest {
+  string correlation_id = 1;
+  string cluster_id = 2;
+  string name = 3;
+  string slug = 4;
+  string description = 5;
+  bool is_active = 6;
+  string metadata_json = 7;
+  dorohedoro.runtime.v1.AuditContext audit = 8;
+}
+
+message ClusterHostMutationRequest {
+  string correlation_id = 1;
+  string cluster_id = 2;
+  string host_id = 3;
+  dorohedoro.runtime.v1.AuditContext audit = 4;
+}
+
+// RBAC contracts
+message Role {
+  string role_id = 1;
+  string name = 2;
+  string slug = 3;
+  string description = 4;
+  bool is_system = 5;
+  string created_at = 6;
+  string updated_at = 7;
+  string created_by = 8;
+  string updated_by = 9;
+}
+
+message Permission {
+  string permission_id = 1;
+  string code = 2;
+  string description = 3;
+}
+
+message RoleWithPermissions {
+  Role role = 1;
+  repeated Permission permissions = 2;
+}
+
+message RoleBinding {
+  string role_binding_id = 1;
+  string user_id = 2;
+  string role_id = 3;
+  string scope_type = 4;
+  string scope_id = 5;
+  string created_at = 6;
+}
+
+message ListRolesRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+  string query = 3;
+}
+
+message ListRolesResponse {
+  repeated Role roles = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message GetRoleRequest {
+  string correlation_id = 1;
+  string role_id = 2;
+}
+
+message CreateRoleRequest {
+  string correlation_id = 1;
+  string name = 2;
+  string slug = 3;
+  string description = 4;
+  dorohedoro.runtime.v1.AuditContext audit = 5;
+}
+
+message UpdateRoleRequest {
+  string correlation_id = 1;
+  string role_id = 2;
+  string name = 3;
+  string description = 4;
+  dorohedoro.runtime.v1.AuditContext audit = 5;
+}
+
+message GetRolePermissionsRequest {
+  string correlation_id = 1;
+  string role_id = 2;
+}
+
+message GetRolePermissionsResponse {
+  Role role = 1;
+  repeated Permission permissions = 2;
+}
+
+message SetRolePermissionsRequest {
+  string correlation_id = 1;
+  string role_id = 2;
+  repeated string permission_codes = 3;
+  dorohedoro.runtime.v1.AuditContext audit = 4;
+}
+
+message ListRoleBindingsRequest {
+  string correlation_id = 1;
+  string user_id = 2;
+  string role_id = 3;
+  string scope_type = 4;
+  string scope_id = 5;
+  dorohedoro.runtime.v1.PagingRequest paging = 6;
+}
+
+message ListRoleBindingsResponse {
+  repeated RoleBinding bindings = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message CreateRoleBindingRequest {
+  string correlation_id = 1;
+  string user_id = 2;
+  string role_id = 3;
+  string scope_type = 4;
+  string scope_id = 5;
+  dorohedoro.runtime.v1.AuditContext audit = 6;
+}
+
+message DeleteRoleBindingRequest {
+  string correlation_id = 1;
+  string role_binding_id = 2;
+  dorohedoro.runtime.v1.AuditContext audit = 3;
+}
+
+// Integration contracts
+message Integration {
+  string integration_id = 1;
+  string name = 2;
+  string kind = 3;
+  string description = 4;
+  string config_json = 5;
+  bool is_active = 6;
+  string created_at = 7;
+  string updated_at = 8;
+  string created_by = 9;
+  string updated_by = 10;
+}
+
+message IntegrationBinding {
+  string integration_binding_id = 1;
+  string integration_id = 2;
+  string scope_type = 3;
+  string scope_id = 4;
+  string event_types_json = 5;
+  string severity_threshold = 6;
+  bool is_active = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message ListIntegrationsRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+}
+
+message ListIntegrationsResponse {
+  repeated Integration integrations = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message GetIntegrationRequest {
+  string correlation_id = 1;
+  string integration_id = 2;
+}
+
+message GetIntegrationResponse {
+  Integration integration = 1;
+  repeated IntegrationBinding bindings = 2;
+}
+
+message CreateIntegrationRequest {
+  string correlation_id = 1;
+  string name = 2;
+  string kind = 3;
+  string description = 4;
+  string config_json = 5;
+  bool is_active = 6;
+  dorohedoro.runtime.v1.AuditContext audit = 7;
+}
+
+message UpdateIntegrationRequest {
+  string correlation_id = 1;
+  string integration_id = 2;
+  string name = 3;
+  string description = 4;
+  string config_json = 5;
+  bool is_active = 6;
+  dorohedoro.runtime.v1.AuditContext audit = 7;
+}
+
+message BindIntegrationRequest {
+  string correlation_id = 1;
+  string integration_id = 2;
+  string scope_type = 3;
+  string scope_id = 4;
+  string event_types_json = 5;
+  string severity_threshold = 6;
+  bool is_active = 7;
+  dorohedoro.runtime.v1.AuditContext audit = 8;
+}
+
+message UnbindIntegrationRequest {
+  string correlation_id = 1;
+  string integration_binding_id = 2;
+  dorohedoro.runtime.v1.AuditContext audit = 3;
+}
+
+// Ticket contracts
+message Ticket {
+  string ticket_id = 1;
+  string ticket_key = 2;
+  string title = 3;
+  string description = 4;
+  string cluster_id = 5;
+  string cluster_name = 6;
+  string source_type = 7;
+  string source_id = 8;
+  string severity = 9;
+  string status = 10;
+  string assignee_user_id = 11;
+  string created_by = 12;
+  string resolution = 13;
+  string created_at = 14;
+  string updated_at = 15;
+  string resolved_at = 16;
+  string closed_at = 17;
+}
+
+message TicketComment {
+  string ticket_comment_id = 1;
+  string ticket_id = 2;
+  string author_user_id = 3;
+  string body = 4;
+  string created_at = 5;
+}
+
+message TicketEvent {
+  string ticket_event_id = 1;
+  string ticket_id = 2;
+  string event_type = 3;
+  string payload_json = 4;
+  string created_at = 5;
+}
+
+message TicketDetails {
+  Ticket ticket = 1;
+  repeated TicketComment comments = 2;
+  repeated TicketEvent events = 3;
+}
+
+message ListTicketsRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+  string cluster_id = 3;
+  string status = 4;
+  string severity = 5;
+  string assignee_user_id = 6;
+}
+
+message ListTicketsResponse {
+  repeated Ticket tickets = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message GetTicketRequest {
+  string correlation_id = 1;
+  string ticket_id = 2;
+}
+
+message GetTicketResponse {
+  TicketDetails ticket = 1;
+}
+
+message CreateTicketRequest {
+  string correlation_id = 1;
+  string title = 2;
+  string description = 3;
+  string cluster_id = 4;
+  string source_type = 5;
+  string source_id = 6;
+  string severity = 7;
+  dorohedoro.runtime.v1.AuditContext audit = 8;
+}
+
+message AssignTicketRequest {
+  string correlation_id = 1;
+  string ticket_id = 2;
+  string assignee_user_id = 3;
+  dorohedoro.runtime.v1.AuditContext audit = 4;
+}
+
+message UnassignTicketRequest {
+  string correlation_id = 1;
+  string ticket_id = 2;
+  dorohedoro.runtime.v1.AuditContext audit = 3;
+}
+
+message AddTicketCommentRequest {
+  string correlation_id = 1;
+  string ticket_id = 2;
+  string body = 3;
+  dorohedoro.runtime.v1.AuditContext audit = 4;
+}
+
+message ChangeTicketStatusRequest {
+  string correlation_id = 1;
+  string ticket_id = 2;
+  string status = 3;
+  string resolution = 4;
+  dorohedoro.runtime.v1.AuditContext audit = 5;
+}
+
+message CloseTicketRequest {
+  string correlation_id = 1;
+  string ticket_id = 2;
+  string resolution = 3;
+  dorohedoro.runtime.v1.AuditContext audit = 4;
+}
+
+// Anomaly contracts
+message AnomalyRule {
+  string anomaly_rule_id = 1;
+  string name = 2;
+  string kind = 3;
+  string scope_type = 4;
+  string scope_id = 5;
+  string config_json = 6;
+  bool is_active = 7;
+  string created_at = 8;
+  string updated_at = 9;
+  string created_by = 10;
+  string updated_by = 11;
+}
+
+message AnomalyInstance {
+  string anomaly_instance_id = 1;
+  string anomaly_rule_id = 2;
+  string cluster_id = 3;
+  string severity = 4;
+  string status = 5;
+  string started_at = 6;
+  string resolved_at = 7;
+  string payload_json = 8;
+}
+
+message ListAnomalyRulesRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+  string scope_type = 3;
+  string scope_id = 4;
+}
+
+message ListAnomalyRulesResponse {
+  repeated AnomalyRule rules = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message GetAnomalyRuleRequest {
+  string correlation_id = 1;
+  string anomaly_rule_id = 2;
+}
+
+message CreateAnomalyRuleRequest {
+  string correlation_id = 1;
+  string name = 2;
+  string kind = 3;
+  string scope_type = 4;
+  string scope_id = 5;
+  string config_json = 6;
+  bool is_active = 7;
+  dorohedoro.runtime.v1.AuditContext audit = 8;
+}
+
+message UpdateAnomalyRuleRequest {
+  string correlation_id = 1;
+  string anomaly_rule_id = 2;
+  string name = 3;
+  string config_json = 4;
+  bool is_active = 5;
+  dorohedoro.runtime.v1.AuditContext audit = 6;
+}
+
+message ListAnomalyInstancesRequest {
+  string correlation_id = 1;
+  dorohedoro.runtime.v1.PagingRequest paging = 2;
+  string anomaly_rule_id = 3;
+  string cluster_id = 4;
+  string status = 5;
+}
+
+message ListAnomalyInstancesResponse {
+  repeated AnomalyInstance instances = 1;
+  dorohedoro.runtime.v1.PagingResponse paging = 2;
+}
+
+message GetAnomalyInstanceRequest {
+  string correlation_id = 1;
+  string anomaly_instance_id = 2;
+}

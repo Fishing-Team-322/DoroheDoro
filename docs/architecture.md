@@ -372,14 +372,18 @@ Persistent source-of-truth для management-доменов.
 ### Чем владеет
 - users
 - roles
+- scoped role bindings
 - inventory
 - host groups
+- clusters и членство хостов/агентов
 - credentials metadata
 - policies
 - policy revisions
 - agent registry
 - audit log
-- metadata alert definitions
+- integration catalog + cluster bindings
+- ticket/problem tracking + комментарии/таймлайны
+- anomaly rule и instance registry
 
 ### Что читает и пишет
 - PostgreSQL

@@ -84,7 +84,10 @@ impl AppError {
         self.to_envelope(correlation_id)
     }
 
-    pub fn to_deployment_envelope(&self, correlation_id: impl Into<String>) -> RuntimeReplyEnvelope {
+    pub fn to_deployment_envelope(
+        &self,
+        correlation_id: impl Into<String>,
+    ) -> RuntimeReplyEnvelope {
         self.to_envelope(correlation_id)
     }
 }

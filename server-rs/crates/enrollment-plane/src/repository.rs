@@ -68,21 +68,21 @@ impl EnrollmentRepository {
                 None => {
                     let policy_id = Uuid::new_v4();
                     sqlx::query(
-                    "INSERT INTO policies (
+                        "INSERT INTO policies (
                         id, name, description, is_active, created_at, updated_at,
                         created_by, updated_by, request_id, update_reason
                      )
                      VALUES ($1, $2, $3, TRUE, $4, $4, $5, $5, $6, $7)",
-                )
-                .bind(policy_id)
-                .bind(DEFAULT_POLICY_NAME)
-                .bind(DEFAULT_POLICY_DESCRIPTION)
-                .bind(now)
-                .bind(DEFAULT_AUDIT_ACTOR)
-                .bind(DEFAULT_AUDIT_REQUEST_ID)
-                .bind(DEFAULT_AUDIT_REASON)
-                .execute(&mut *tx)
-                .await?;
+                    )
+                    .bind(policy_id)
+                    .bind(DEFAULT_POLICY_NAME)
+                    .bind(DEFAULT_POLICY_DESCRIPTION)
+                    .bind(now)
+                    .bind(DEFAULT_AUDIT_ACTOR)
+                    .bind(DEFAULT_AUDIT_REQUEST_ID)
+                    .bind(DEFAULT_AUDIT_REASON)
+                    .execute(&mut *tx)
+                    .await?;
                     policy_id
                 }
             };

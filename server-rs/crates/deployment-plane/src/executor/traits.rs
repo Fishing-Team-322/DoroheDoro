@@ -6,9 +6,7 @@ use uuid::Uuid;
 
 use common::AppResult;
 
-use crate::models::{
-    ExecutionResult, ExecutionSnapshot, ExecutorKind,
-};
+use crate::models::{ExecutionResult, ExecutionSnapshot, ExecutorKind};
 
 #[async_trait]
 pub trait DeploymentExecutor: Send + Sync {

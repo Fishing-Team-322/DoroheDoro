@@ -23,7 +23,13 @@ pub async fn run(config: ControlPlaneConfig) -> anyhow::Result<()> {
     let repo = ControlRepository::new(pool.clone());
     repo.ping().await.context("ping postgres")?;
 
-    let service = Arc::new(ControlService::new(repo));
+    let service_inner = ControlService::new(repo);
+    service_inner
+        .bootstrap()
+        .await
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+        .context("bootstrap control-plane state")?;
+    let service = Arc::new(service_inner);
 
     let shutdown = CancellationToken::new();
     let subscriber_tasks =

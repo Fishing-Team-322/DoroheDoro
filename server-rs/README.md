@@ -19,6 +19,9 @@ Private Rust runtime for the internal `SERVER` domains.
   - `control.hosts.*`
   - `control.host-groups.*`
   - `control.credentials.*`
+  - `control.clusters.*`
+  - `control.roles.*` and `control.role-bindings.*`
+  - `control.integrations.*`
 - `deployment-plane` owns all `deployments.*`:
   - `deployments.jobs.create|get|list|retry|cancel`
   - `deployments.plan.create`
@@ -44,6 +47,11 @@ Private Rust runtime for the internal `SERVER` domains.
   - hosts with deterministic list/paging/query
   - host groups with explicit membership mutations
   - credentials metadata only
+  - cluster registry + membership read/command-side
+  - custom roles, permissions, and scoped bindings
+  - cluster-aware integration catalog + bindings
+  - ticket/problem tracking with comments and events
+  - anomaly rule/instance persistence with cluster scoping
   - audit-ready columns and `control_audit_events`
 - `deployment-plane`
   - immutable deployment snapshot generation
@@ -107,6 +115,10 @@ Current migration highlights:
   - audit columns on control entities
   - `control_audit_events`
   - latest-binding and latest-diagnostics indexes
+- `0006_control_clusters_rbac_integrations_tickets_anomalies.sql`
+  - clusters, cluster membership, and metadata
+  - custom roles/permissions/bindings + integration catalog/bindings
+  - ticket/comment/event stores and anomaly rule/instance tables
 
 ## Environment
 
@@ -170,6 +182,14 @@ Minimum demo smoke after all three planes are running:
 - `control.hosts.list|create|get|update`
 - `control.host-groups.list|create|get|update|add-member|remove-member`
 - `control.credentials.list|create|get`
+- `control.clusters.list|get|create|update|add-host|remove-host`
+- `control.roles.list|get|create|update`
+- `control.roles.permissions.get|set`
+- `control.role-bindings.list|create|delete`
+- `control.integrations.list|get|create|update|bind|unbind`
+- `tickets.list|get|create|assign|unassign|comment.add|status.change|close`
+- `anomalies.rules.list|get|create|update`
+- `anomalies.instances.list|get`
 - `agents.list|get|diagnostics.get|policy.get`
 - `deployments.plan.create`
 - `deployments.jobs.create|list|get|retry|cancel`
