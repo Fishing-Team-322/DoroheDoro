@@ -132,6 +132,36 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 		api.Get("/audit", runtimeUnavailable(deps.Config.NATS.Subjects.AuditList, "audit-plane is served by server-rs runtime"))
 
+		api.Get("/clusters", runtimeUnavailable(deps.Config.NATS.Subjects.ControlClustersList, "cluster control-plane is served by server-rs runtime"))
+		api.Get("/clusters/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlClustersGet, "cluster control-plane is served by server-rs runtime"))
+		api.Post("/clusters", runtimeUnavailable(deps.Config.NATS.Subjects.ControlClustersCreate, "cluster control-plane is served by server-rs runtime"))
+		api.Patch("/clusters/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlClustersUpdate, "cluster control-plane is served by server-rs runtime"))
+
+		api.Get("/roles", runtimeUnavailable(deps.Config.NATS.Subjects.ControlRolesList, "roles and permissions runtime is served by server-rs runtime"))
+		api.Get("/roles/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlRolesGet, "roles and permissions runtime is served by server-rs runtime"))
+		api.Post("/roles", runtimeUnavailable(deps.Config.NATS.Subjects.ControlRolesCreate, "roles and permissions runtime is served by server-rs runtime"))
+		api.Patch("/roles/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlRolesUpdate, "roles and permissions runtime is served by server-rs runtime"))
+
+		api.Get("/permissions", runtimeUnavailable(deps.Config.NATS.Subjects.ControlPermissionsList, "roles and permissions runtime is served by server-rs runtime"))
+		api.Get("/permissions/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlPermissionsGet, "roles and permissions runtime is served by server-rs runtime"))
+		api.Post("/permissions", runtimeUnavailable(deps.Config.NATS.Subjects.ControlPermissionsCreate, "roles and permissions runtime is served by server-rs runtime"))
+		api.Patch("/permissions/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.ControlPermissionsUpdate, "roles and permissions runtime is served by server-rs runtime"))
+
+		api.Get("/integrations", runtimeUnavailable(deps.Config.NATS.Subjects.IntegrationsList, "integration runtime is served by server-rs runtime"))
+		api.Get("/integrations/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.IntegrationsGet, "integration runtime is served by server-rs runtime"))
+		api.Post("/integrations", runtimeUnavailable(deps.Config.NATS.Subjects.IntegrationsCreate, "integration runtime is served by server-rs runtime"))
+		api.Patch("/integrations/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.IntegrationsUpdate, "integration runtime is served by server-rs runtime"))
+
+		api.Get("/tickets", runtimeUnavailable(deps.Config.NATS.Subjects.TicketsList, "ticket runtime is served by server-rs runtime"))
+		api.Get("/tickets/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.TicketsGet, "ticket runtime is served by server-rs runtime"))
+		api.Post("/tickets", runtimeUnavailable(deps.Config.NATS.Subjects.TicketsCreate, "ticket runtime is served by server-rs runtime"))
+		api.Patch("/tickets/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.TicketsUpdate, "ticket runtime is served by server-rs runtime"))
+
+		api.Get("/anomalies", runtimeUnavailable(deps.Config.NATS.Subjects.AnomaliesList, "anomaly runtime is served by server-rs runtime"))
+		api.Get("/anomalies/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.AnomaliesGet, "anomaly runtime is served by server-rs runtime"))
+		api.Post("/anomalies", runtimeUnavailable(deps.Config.NATS.Subjects.AnomaliesCreate, "anomaly runtime is served by server-rs runtime"))
+		api.Patch("/anomalies/{id}", runtimeUnavailable(deps.Config.NATS.Subjects.AnomaliesUpdate, "anomaly runtime is served by server-rs runtime"))
+
 		api.Get("/stream/logs", func(w http.ResponseWriter, r *http.Request) {
 			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamLogs, Event: "log"})
 		})
@@ -146,6 +176,15 @@ func NewRouter(deps RouterDeps) http.Handler {
 		})
 		api.Get("/stream/agents", func(w http.ResponseWriter, r *http.Request) {
 			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamAgents, Event: "agent"})
+		})
+		api.Get("/stream/clusters", func(w http.ResponseWriter, r *http.Request) {
+			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamClusters, Event: "cluster"})
+		})
+		api.Get("/stream/tickets", func(w http.ResponseWriter, r *http.Request) {
+			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamTickets, Event: "ticket"})
+		})
+		api.Get("/stream/anomalies", func(w http.ResponseWriter, r *http.Request) {
+			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamAnomalies, Event: "anomaly"})
 		})
 	})
 

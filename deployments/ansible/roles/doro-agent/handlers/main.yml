@@ -1,0 +1,9 @@
+---
+- name: Reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Restart doro-agent
+  ansible.builtin.systemd_service:
+    name: "{{ doro_agent_service_name }}"
+    state: restarted

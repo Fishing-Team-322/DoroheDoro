@@ -1,4 +1,4 @@
-.PHONY: build run test tidy fmt compose-config stack-up stack-down stack-logs edge-config edge-up edge-down swagger
+.PHONY: build run test tidy fmt compose-config stack-up stack-down stack-logs edge-config edge-up edge-down swagger agent-release agent-manifest pki-dev-ca pki-edge-cert pki-agent-cert
 
 APP_DIR := edge_api
 
@@ -40,3 +40,18 @@ edge-up:
 
 edge-down:
 	docker compose -f docker-compose.server.yml down
+
+agent-release:
+	bash scripts/release/build-agent-artifacts.sh
+
+agent-manifest:
+	bash scripts/release/generate-manifest.sh --version "$(VERSION)"
+
+pki-dev-ca:
+	bash scripts/pki/dev-ca.sh
+
+pki-edge-cert:
+	bash scripts/pki/issue-edge-cert.sh
+
+pki-agent-cert:
+	bash scripts/pki/issue-agent-cert.sh

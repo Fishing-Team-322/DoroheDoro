@@ -2,6 +2,12 @@
 
 This document describes the VPS-friendly stack and Nginx layout for the current demo/staging deployment.
 
+Related docs:
+
+- local/server stack overview: [`docs/demo-stack.md`](./demo-stack.md)
+- agent distribution contract: [`docs/agent-distribution.md`](./agent-distribution.md)
+- dev/test PKI flow: [`docs/dev-pki.md`](./dev-pki.md)
+
 ## 1. Start the server stack
 
 Use the server compose file:

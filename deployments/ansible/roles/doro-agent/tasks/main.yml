@@ -1,0 +1,309 @@
+---
+- name: Derive target platform metadata
+  ansible.builtin.set_fact:
+    doro_agent_target_arch: >-
+      {% if ansible_architecture in ['x86_64', 'amd64'] %}amd64{% elif ansible_architecture in ['aarch64', 'arm64'] %}arm64{% else %}{{ ansible_architecture }}{% endif %}
+    doro_agent_target_distro_family: >-
+      {% if 'astra' in (ansible_distribution | lower) %}astra-linux{% elif ansible_os_family == 'Debian' %}debian{% else %}generic-glibc{% endif %}
+
+- name: Ensure manifest source is configured
+  ansible.builtin.fail:
+    msg: doro_agent_artifact_manifest_path or doro_agent_artifact_manifest_url must be provided when state=present
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_artifact_manifest_path | trim == ''
+    - doro_agent_artifact_manifest_url | trim == ''
+
+- name: Download release manifest from URL
+  ansible.builtin.get_url:
+    url: "{{ doro_agent_artifact_manifest_url }}"
+    dest: /tmp/doro-agent-release-manifest.json
+    mode: "0644"
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_artifact_manifest_url | trim != ''
+
+- name: Resolve manifest path
+  ansible.builtin.set_fact:
+    doro_agent_manifest_path_resolved: >-
+      {{ '/tmp/doro-agent-release-manifest.json' if (doro_agent_artifact_manifest_url | trim) != '' else doro_agent_artifact_manifest_path }}
+  when: doro_agent_state == 'present'
+
+- name: Read release manifest
+  ansible.builtin.slurp:
+    src: "{{ doro_agent_manifest_path_resolved }}"
+  register: doro_agent_manifest_raw
+  when: doro_agent_state == 'present'
+
+- name: Parse release manifest
+  ansible.builtin.set_fact:
+    doro_agent_manifest: "{{ doro_agent_manifest_raw.content | b64decode | from_json }}"
+  when: doro_agent_state == 'present'
+
+- name: Select preferred package type
+  ansible.builtin.set_fact:
+    doro_agent_preferred_package_type: >-
+      {% if doro_agent_install_mode == 'deb' %}deb{% elif doro_agent_install_mode == 'tar.gz' %}tar.gz{% elif doro_agent_target_distro_family in ['debian', 'astra-linux'] %}deb{% else %}tar.gz{% endif %}
+  when: doro_agent_state == 'present'
+
+- name: Gather artifacts for current arch
+  ansible.builtin.set_fact:
+    doro_agent_arch_artifacts: >-
+      {{
+        doro_agent_manifest.artifacts
+        | selectattr('platform', 'equalto', 'linux')
+        | selectattr('arch', 'equalto', doro_agent_target_arch)
+        | list
+      }}
+  when: doro_agent_state == 'present'
+
+- name: Select best matching artifact
+  ansible.builtin.set_fact:
+    doro_agent_selected_artifact: >-
+      {{
+        (
+          doro_agent_arch_artifacts
+          | selectattr('package_type', 'equalto', doro_agent_preferred_package_type)
+          | selectattr('distro_family', 'equalto', doro_agent_target_distro_family)
+          | sort(attribute='packaging_preference', reverse=true)
+          | list
+          | first
+        )
+        | default(
+          (
+            doro_agent_arch_artifacts
+            | selectattr('package_type', 'equalto', doro_agent_preferred_package_type)
+            | selectattr('distro_family', 'equalto', 'generic-glibc')
+            | sort(attribute='packaging_preference', reverse=true)
+            | list
+            | first
+          ),
+          true
+        )
+        | default(
+          (
+            doro_agent_arch_artifacts
+            | sort(attribute='packaging_preference', reverse=true)
+            | list
+            | first
+          ),
+          true
+        )
+      }}
+  when: doro_agent_state == 'present'
+
+- name: Ensure selected artifact exists
+  ansible.builtin.fail:
+    msg: >-
+      No matching doro-agent artifact found for arch={{ doro_agent_target_arch }}
+      distro_family={{ doro_agent_target_distro_family }}
+      install_mode={{ doro_agent_install_mode }}
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact is not mapping
+
+- name: Resolve runtime binary path
+  ansible.builtin.set_fact:
+    doro_agent_runtime_binary_path: >-
+      {{ doro_agent_package_binary_path if doro_agent_selected_artifact.package_type == 'deb' else doro_agent_tarball_binary_path }}
+  when: doro_agent_state == 'present'
+
+- name: Resolve artifact sources
+  ansible.builtin.set_fact:
+    doro_agent_selected_artifact_url: >-
+      {% if doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' %}
+      {{ doro_agent_selected_artifact.artifact_path }}
+      {% elif doro_agent_release_base_url | trim != '' %}
+      {{ doro_agent_release_base_url }}/{{ doro_agent_selected_artifact.artifact_path | regex_replace('^\\./', '') | regex_replace('^/', '') }}
+      {% else %}
+      {{ '' }}
+      {% endif %}
+    doro_agent_selected_artifact_local_path: >-
+      {% if doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' or doro_agent_release_base_url | trim != '' %}
+      {{ '' }}
+      {% else %}
+      {{ doro_agent_selected_artifact.artifact_path }}
+      {% endif %}
+  when: doro_agent_state == 'present'
+
+- name: Ensure service group exists
+  ansible.builtin.group:
+    name: "{{ doro_agent_group }}"
+    state: present
+  when: doro_agent_state == 'present'
+
+- name: Ensure service user exists
+  ansible.builtin.user:
+    name: "{{ doro_agent_user }}"
+    group: "{{ doro_agent_group }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+  when: doro_agent_state == 'present'
+
+- name: Ensure runtime directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ doro_agent_user }}"
+    group: "{{ doro_agent_group }}"
+    mode: "0750"
+  loop:
+    - "{{ doro_agent_config_dir }}"
+    - "{{ doro_agent_state_dir }}"
+    - "{{ doro_agent_log_dir }}"
+    - "{{ doro_agent_docs_dir }}"
+  when: doro_agent_state == 'present'
+
+- name: Ensure spool directory exists
+  ansible.builtin.file:
+    path: "{{ doro_agent_spool_dir }}"
+    state: directory
+    owner: "{{ doro_agent_user }}"
+    group: "{{ doro_agent_group }}"
+    mode: "0750"
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_spool_enabled | bool
+
+- name: Create temp work directory
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: doro-agent
+  register: doro_agent_tmp_dir
+  when: doro_agent_state == 'present'
+
+- name: Download artifact from release URL
+  ansible.builtin.get_url:
+    url: "{{ doro_agent_selected_artifact_url }}"
+    dest: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
+    mode: "0644"
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact_url | trim != ''
+
+- name: Copy artifact from local controller path
+  ansible.builtin.copy:
+    src: "{{ doro_agent_selected_artifact_local_path }}"
+    dest: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
+    mode: "0644"
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact_url | trim == ''
+
+- name: Install agent deb package
+  ansible.builtin.apt:
+    deb: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
+    state: present
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact.package_type == 'deb'
+
+- name: Create unpack directory for tarball install
+  ansible.builtin.file:
+    path: "{{ doro_agent_tmp_dir.path }}/bundle"
+    state: directory
+    mode: "0755"
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact.package_type == 'tar.gz'
+
+- name: Unpack tarball bundle
+  ansible.builtin.unarchive:
+    src: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
+    dest: "{{ doro_agent_tmp_dir.path }}/bundle"
+    remote_src: true
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact.package_type == 'tar.gz'
+
+- name: Install tarball binary
+  ansible.builtin.copy:
+    src: "{{ doro_agent_tmp_dir.path }}/bundle/{{ doro_agent_selected_artifact.bundle_root }}/bin/doro-agent"
+    dest: "{{ doro_agent_tarball_binary_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact.package_type == 'tar.gz'
+
+- name: Install tarball docs
+  ansible.builtin.copy:
+    src: "{{ doro_agent_tmp_dir.path }}/bundle/{{ doro_agent_selected_artifact.bundle_root }}/docs/INSTALL.md"
+    dest: "{{ doro_agent_docs_dir }}/INSTALL.md"
+    owner: root
+    group: root
+    mode: "0644"
+    remote_src: true
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_selected_artifact.package_type == 'tar.gz'
+
+- name: Render agent config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ doro_agent_config_path }}"
+    owner: root
+    group: "{{ doro_agent_group }}"
+    mode: "0640"
+  notify: Restart doro-agent
+  when: doro_agent_state == 'present'
+
+- name: Render agent env file
+  ansible.builtin.template:
+    src: agent.env.j2
+    dest: "{{ doro_agent_env_path }}"
+    owner: root
+    group: "{{ doro_agent_group }}"
+    mode: "0640"
+  notify: Restart doro-agent
+  when: doro_agent_state == 'present'
+
+- name: Render systemd unit
+  ansible.builtin.template:
+    src: doro-agent.service.j2
+    dest: "{{ doro_agent_systemd_unit_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart doro-agent
+  when: doro_agent_state == 'present'
+
+- name: Ensure agent service is enabled and started
+  ansible.builtin.systemd_service:
+    name: "{{ doro_agent_service_name }}"
+    enabled: true
+    state: started
+  when: doro_agent_state == 'present'
+
+- name: Stop agent service
+  ansible.builtin.systemd_service:
+    name: "{{ doro_agent_service_name }}"
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: doro_agent_state == 'absent'
+
+- name: Remove packaged agent
+  ansible.builtin.apt:
+    name: doro-agent
+    state: absent
+    purge: false
+  failed_when: false
+  when:
+    - doro_agent_state == 'absent'
+    - ansible_os_family == 'Debian'
+
+- name: Remove agent service unit and binaries
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ doro_agent_systemd_unit_path }}"
+    - "{{ doro_agent_tarball_binary_path }}"
+    - "{{ doro_agent_package_binary_path }}"
+  when: doro_agent_state == 'absent'

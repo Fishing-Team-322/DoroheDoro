@@ -48,6 +48,27 @@ func TestRuntimeUnavailableRoutesExposeBoundaryMetadata(t *testing.T) {
 	}
 }
 
+func TestFutureBoundaryGroupsExposeControlledPlaceholderMetadata(t *testing.T) {
+	router := NewRouter(RouterDeps{
+		Config: testRouterConfig(),
+		Logger: zap.NewNop(),
+	})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", nil)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d body=%s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("X-NATS-Subject"); got != "control.clusters.list" {
+		t.Fatalf("expected X-NATS-Subject control.clusters.list, got %q", got)
+	}
+	if got := response.Header().Get("X-Boundary-State"); got != "awaiting-runtime" {
+		t.Fatalf("expected X-Boundary-State awaiting-runtime, got %q", got)
+	}
+}
+
 func testRouterConfig() config.Config {
 	return config.Config{
 		ServiceName: "edge-api",

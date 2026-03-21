@@ -31,6 +31,36 @@ type Registry struct {
 	ControlCredentialsGet    string
 	ControlCredentialsCreate string
 
+	ControlClustersList   string
+	ControlClustersGet    string
+	ControlClustersCreate string
+	ControlClustersUpdate string
+
+	ControlRolesList   string
+	ControlRolesGet    string
+	ControlRolesCreate string
+	ControlRolesUpdate string
+
+	ControlPermissionsList   string
+	ControlPermissionsGet    string
+	ControlPermissionsCreate string
+	ControlPermissionsUpdate string
+
+	IntegrationsList   string
+	IntegrationsGet    string
+	IntegrationsCreate string
+	IntegrationsUpdate string
+
+	TicketsList   string
+	TicketsGet    string
+	TicketsCreate string
+	TicketsUpdate string
+
+	AnomaliesList   string
+	AnomaliesGet    string
+	AnomaliesCreate string
+	AnomaliesUpdate string
+
 	DeploymentsJobsCreate string
 	DeploymentsJobsGet    string
 	DeploymentsJobsList   string
@@ -65,6 +95,9 @@ type Registry struct {
 	StreamDeployments string
 	StreamAlerts      string
 	StreamAgents      string
+	StreamClusters    string
+	StreamTickets     string
+	StreamAnomalies   string
 }
 
 func Defaults() Registry {
@@ -98,6 +131,36 @@ func Defaults() Registry {
 		ControlCredentialsList:   "control.credentials.list",
 		ControlCredentialsGet:    "control.credentials.get",
 		ControlCredentialsCreate: "control.credentials.create",
+
+		ControlClustersList:   "control.clusters.list",
+		ControlClustersGet:    "control.clusters.get",
+		ControlClustersCreate: "control.clusters.create",
+		ControlClustersUpdate: "control.clusters.update",
+
+		ControlRolesList:   "control.roles.list",
+		ControlRolesGet:    "control.roles.get",
+		ControlRolesCreate: "control.roles.create",
+		ControlRolesUpdate: "control.roles.update",
+
+		ControlPermissionsList:   "control.permissions.list",
+		ControlPermissionsGet:    "control.permissions.get",
+		ControlPermissionsCreate: "control.permissions.create",
+		ControlPermissionsUpdate: "control.permissions.update",
+
+		IntegrationsList:   "integrations.list",
+		IntegrationsGet:    "integrations.get",
+		IntegrationsCreate: "integrations.create",
+		IntegrationsUpdate: "integrations.update",
+
+		TicketsList:   "tickets.list",
+		TicketsGet:    "tickets.get",
+		TicketsCreate: "tickets.create",
+		TicketsUpdate: "tickets.update",
+
+		AnomaliesList:   "anomalies.list",
+		AnomaliesGet:    "anomalies.get",
+		AnomaliesCreate: "anomalies.create",
+		AnomaliesUpdate: "anomalies.update",
 
 		DeploymentsJobsCreate: "deployments.jobs.create",
 		DeploymentsJobsGet:    "deployments.jobs.get",
@@ -133,5 +196,8 @@ func Defaults() Registry {
 		StreamDeployments: "ui.stream.deployments",
 		StreamAlerts:      "ui.stream.alerts",
 		StreamAgents:      "ui.stream.agents",
+		StreamClusters:    "ui.stream.clusters",
+		StreamTickets:     "ui.stream.tickets",
+		StreamAnomalies:   "ui.stream.anomalies",
 	}
 }

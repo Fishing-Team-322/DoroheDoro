@@ -107,3 +107,53 @@ go test ./...
 
 cargo test --manifest-path ../server-rs/Cargo.toml -p common -p enrollment-plane -p control-plane -p deployment-plane
 ```
+
+## Agent release and delivery
+
+The repository now includes a delivery layer for `AGENT` artifacts without changing `agent-rs` runtime code.
+
+Available pieces:
+
+- release scripts:
+  - [`scripts/release/build-agent-artifacts.sh`](./scripts/release/build-agent-artifacts.sh)
+  - [`scripts/release/generate-manifest.sh`](./scripts/release/generate-manifest.sh)
+- manifest contract:
+  - [`deployments/artifacts/manifest.schema.json`](./deployments/artifacts/manifest.schema.json)
+  - [`deployments/artifacts/example.manifest.json`](./deployments/artifacts/example.manifest.json)
+- packaging/install contract:
+  - [`deployments/packaging/INSTALL.md`](./deployments/packaging/INSTALL.md)
+- Ansible install layer:
+  - [`deployments/ansible/playbooks/install-agent.yml`](./deployments/ansible/playbooks/install-agent.yml)
+
+Build local artifacts:
+
+```bash
+bash scripts/release/build-agent-artifacts.sh --version 0.2.0
+bash scripts/release/generate-manifest.sh --version 0.2.0
+```
+
+Details:
+
+- [`docs/agent-distribution.md`](./docs/agent-distribution.md)
+
+## Dev/test mTLS
+
+The local compose stack already starts `edge-api` with mTLS enabled for AGENT ingress.
+
+Standalone PKI scripts:
+
+```bash
+bash scripts/pki/dev-ca.sh
+bash scripts/pki/issue-edge-cert.sh
+bash scripts/pki/issue-agent-cert.sh
+```
+
+Details:
+
+- [`docs/dev-pki.md`](./docs/dev-pki.md)
+
+## Demo docs
+
+- stack overview: [`docs/demo-stack.md`](./docs/demo-stack.md)
+- end-to-end smoke: [`docs/demo-smoke.md`](./docs/demo-smoke.md)
+- VPS/Nginx deploy: [`docs/server-deploy.md`](./docs/server-deploy.md)
