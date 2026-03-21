@@ -149,7 +149,7 @@ export function LiveLogsPage() {
         <div className="space-y-8">
           <div className="space-y-3">
             <h2 className="text-3xl font-semibold tracking-tight text-[color:var(--foreground)] md:text-5xl">
-              Поток логов
+              поток логов
             </h2>
 
             <p className="max-w-3xl text-base leading-7 text-[color:var(--muted-foreground)] md:text-lg">
@@ -226,7 +226,7 @@ export function LiveLogsPage() {
                         direction={sortDirection}
                         onClick={() => handleSort("timestamp")}
                       >
-                        Время
+                        время
                       </TableSortButton>
                     </TableHead>
 
@@ -236,7 +236,7 @@ export function LiveLogsPage() {
                         direction={sortDirection}
                         onClick={() => handleSort("severity")}
                       >
-                        Severity
+                        severity
                       </TableSortButton>
                     </TableHead>
 
@@ -246,7 +246,7 @@ export function LiveLogsPage() {
                         direction={sortDirection}
                         onClick={() => handleSort("host")}
                       >
-                        Host
+                        host
                       </TableSortButton>
                     </TableHead>
 
@@ -256,7 +256,7 @@ export function LiveLogsPage() {
                         direction={sortDirection}
                         onClick={() => handleSort("service")}
                       >
-                        Service
+                        service
                       </TableSortButton>
                     </TableHead>
 
@@ -266,7 +266,7 @@ export function LiveLogsPage() {
                         direction={sortDirection}
                         onClick={() => handleSort("message")}
                       >
-                        Сообщение
+                        сообщение
                       </TableSortButton>
                     </TableHead>
                   </TableRow>

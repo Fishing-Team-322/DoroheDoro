@@ -1,0 +1,1 @@
+export { DashboardSidebarLanguageSwitch } from "./ui/lang-switch";

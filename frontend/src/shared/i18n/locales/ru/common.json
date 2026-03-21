@@ -81,18 +81,18 @@
   "profile": {
     "title": "Профиль",
     "description": "Обновите видимые данные профиля. Этот запрос использует fetch-обёртку с поддержкой CSRF.",
-    "editTitle": "Редактирование профиля",
+    "editTitle": "редактирование профиля",
     "editDescription": "Сохранение отправляет `PATCH /profile` с текущим CSRF-токеном.",
-    "displayNameLabel": "Отображаемое имя",
+    "displayNameLabel": "отображаемое имя",
     "save": "Сохранить изменения",
     "success": "Профиль успешно обновлен.",
     "fallbackError": "Не удалось обновить профиль.",
     "currentAccountTitle": "Текущий аккаунт",
     "currentAccountDescription": "Данные пользователя загружены из `GET /auth/me`.",
     "fields": {
-      "email": "Email",
-      "login": "Логин",
-      "displayName": "Отображаемое имя"
+      "email": "email",
+      "login": "логин",
+      "displayName": "отображаемое имя"
     },
     "validation": {
       "displayNameMin": "Отображаемое имя должно содержать минимум 2 символа",

@@ -125,22 +125,22 @@ export function SystemStatusPage() {
           <div className="space-y-8">
             <div className="space-y-3">
               <h2 className="text-3xl font-semibold tracking-tight text-[color:var(--foreground)] md:text-5xl">
-                Состояние системы
+                состояние системы
               </h2>
             </div>
 
             <div className="border-t border-[color:var(--border)] pt-2">
               <InfoRow
-                label="Публичный API"
+                label="публичный API"
                 value={<StatusValue tone={health.tone}>{health.text}</StatusValue>}
               />
               <InfoRow
-                label="Backend"
+                label="backend"
                 value={<StatusValue tone={readiness.tone}>{readiness.text}</StatusValue>}
               />
-              <InfoRow label="Пользователь текущей сессии" value={subject} />
-              <InfoRow label="Роль" value={role} />
-              <InfoRow label="Режим авторизации" value={authMode} />
+              <InfoRow label="пользователь текущей сессии" value={subject} />
+              <InfoRow label="роль" value={role} />
+              <InfoRow label="режим авторизации" value={authMode} />
             </div>
 
             <div className="border-t border-[color:var(--border)] pt-6">
