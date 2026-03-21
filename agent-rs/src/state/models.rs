@@ -18,6 +18,8 @@ pub struct RuntimeStateRecord {
     pub last_successful_send_at_unix_ms: Option<i64>,
     pub last_known_edge_url: Option<String>,
     pub degraded_mode: bool,
+    pub blocked_delivery: bool,
+    pub blocked_reason: Option<String>,
     pub spool_enabled: bool,
     pub consecutive_send_failures: u32,
     pub updated_at_unix_ms: i64,
@@ -31,6 +33,8 @@ impl Default for RuntimeStateRecord {
             last_successful_send_at_unix_ms: None,
             last_known_edge_url: None,
             degraded_mode: false,
+            blocked_delivery: false,
+            blocked_reason: None,
             spool_enabled: true,
             consecutive_send_failures: 0,
             updated_at_unix_ms: 0,
@@ -42,7 +46,9 @@ impl Default for RuntimeStateRecord {
 pub struct FileOffsetRecord {
     pub path: String,
     pub file_key: Option<String>,
-    pub read_offset: u64,
+    // Persisted sqlite column is still named `read_offset`, but semantically this is the
+    // highest durable local progress: acknowledged or safely written to fallback spool.
+    pub durable_read_offset: u64,
     pub acked_offset: u64,
     pub updated_at_unix_ms: i64,
 }
@@ -51,7 +57,7 @@ pub struct FileOffsetRecord {
 pub struct FileOffsetUpdate {
     pub path: String,
     pub file_key: Option<String>,
-    pub read_offset: u64,
+    pub durable_read_offset: u64,
     pub acked_offset: u64,
 }
 

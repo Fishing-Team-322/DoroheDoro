@@ -77,8 +77,8 @@ impl SqliteStateStore {
             .query_row(
                 "SELECT applied_policy_revision, policy_body_json,
                         last_successful_send_at_unix_ms, last_known_edge_url,
-                        degraded_mode, spool_enabled, consecutive_send_failures,
-                        updated_at_unix_ms
+                        degraded_mode, blocked_delivery, blocked_reason,
+                        spool_enabled, consecutive_send_failures, updated_at_unix_ms
                  FROM agent_runtime_state WHERE singleton_id = 1",
                 [],
                 |row| {
@@ -88,9 +88,11 @@ impl SqliteStateStore {
                         last_successful_send_at_unix_ms: row.get(2)?,
                         last_known_edge_url: row.get(3)?,
                         degraded_mode: row.get::<_, i64>(4)? != 0,
-                        spool_enabled: row.get::<_, i64>(5)? != 0,
-                        consecutive_send_failures: row.get::<_, u32>(6)?,
-                        updated_at_unix_ms: row.get(7)?,
+                        blocked_delivery: row.get::<_, i64>(5)? != 0,
+                        blocked_reason: row.get(6)?,
+                        spool_enabled: row.get::<_, i64>(7)? != 0,
+                        consecutive_send_failures: row.get::<_, u32>(8)?,
+                        updated_at_unix_ms: row.get(9)?,
                     })
                 },
             )
@@ -110,14 +112,17 @@ impl SqliteStateStore {
             "INSERT INTO agent_runtime_state (
                 singleton_id, applied_policy_revision, policy_body_json,
                 last_successful_send_at_unix_ms, last_known_edge_url,
-                degraded_mode, spool_enabled, consecutive_send_failures, updated_at_unix_ms
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                degraded_mode, blocked_delivery, blocked_reason,
+                spool_enabled, consecutive_send_failures, updated_at_unix_ms
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(singleton_id) DO UPDATE SET
                 applied_policy_revision = excluded.applied_policy_revision,
                 policy_body_json = excluded.policy_body_json,
                 last_successful_send_at_unix_ms = excluded.last_successful_send_at_unix_ms,
                 last_known_edge_url = excluded.last_known_edge_url,
                 degraded_mode = excluded.degraded_mode,
+                blocked_delivery = excluded.blocked_delivery,
+                blocked_reason = excluded.blocked_reason,
                 spool_enabled = excluded.spool_enabled,
                 consecutive_send_failures = excluded.consecutive_send_failures,
                 updated_at_unix_ms = excluded.updated_at_unix_ms",
@@ -127,6 +132,8 @@ impl SqliteStateStore {
                 state.last_successful_send_at_unix_ms,
                 state.last_known_edge_url,
                 if state.degraded_mode { 1_i64 } else { 0_i64 },
+                if state.blocked_delivery { 1_i64 } else { 0_i64 },
+                state.blocked_reason,
                 if state.spool_enabled { 1_i64 } else { 0_i64 },
                 state.consecutive_send_failures,
                 updated_at_unix_ms
@@ -147,7 +154,7 @@ impl SqliteStateStore {
                     Ok(FileOffsetRecord {
                         path: row.get(0)?,
                         file_key: row.get(1)?,
-                        read_offset: row.get::<_, u64>(2)?,
+                        durable_read_offset: row.get::<_, u64>(2)?,
                         acked_offset: row.get::<_, u64>(3)?,
                         updated_at_unix_ms: row.get(4)?,
                     })
@@ -167,7 +174,7 @@ impl SqliteStateStore {
             Ok(FileOffsetRecord {
                 path: row.get(0)?,
                 file_key: row.get(1)?,
-                read_offset: row.get::<_, u64>(2)?,
+                durable_read_offset: row.get::<_, u64>(2)?,
                 acked_offset: row.get::<_, u64>(3)?,
                 updated_at_unix_ms: row.get(4)?,
             })
@@ -200,7 +207,7 @@ impl SqliteStateStore {
                 params![
                     update.path,
                     update.file_key,
-                    update.read_offset,
+                    update.durable_read_offset,
                     update.acked_offset,
                     now
                 ],
@@ -208,6 +215,42 @@ impl SqliteStateStore {
         }
         transaction.commit()?;
         Ok(())
+    }
+
+    pub fn list_spool_batches(&self) -> AppResult<Vec<SpoolBatchRecord>> {
+        let conn = self.open()?;
+        let mut statement = conn.prepare(
+            "SELECT batch_id, payload_path, codec, created_at_unix_ms,
+                    attempt_count, next_retry_at_unix_ms, approx_bytes, source_offsets_json
+             FROM spool_batches
+             ORDER BY created_at_unix_ms ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let source_offsets_json: String = row.get(7)?;
+            let source_offsets = serde_json::from_str(&source_offsets_json).map_err(|err| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    7,
+                    rusqlite::types::Type::Text,
+                    Box::new(err),
+                )
+            })?;
+            Ok(SpoolBatchRecord {
+                batch_id: row.get(0)?,
+                payload_path: PathBuf::from(row.get::<_, String>(1)?),
+                codec: row.get(2)?,
+                created_at_unix_ms: row.get(3)?,
+                attempt_count: row.get::<_, u32>(4)?,
+                next_retry_at_unix_ms: row.get(5)?,
+                approx_bytes: row.get::<_, i64>(6)? as usize,
+                source_offsets,
+            })
+        })?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(row?);
+        }
+        Ok(records)
     }
 
     pub fn insert_spool_batch(&self, record: &SpoolBatchRecord) -> AppResult<()> {
@@ -327,6 +370,8 @@ impl SqliteStateStore {
                 last_successful_send_at_unix_ms INTEGER NULL,
                 last_known_edge_url TEXT NULL,
                 degraded_mode INTEGER NOT NULL DEFAULT 0,
+                blocked_delivery INTEGER NOT NULL DEFAULT 0,
+                blocked_reason TEXT NULL,
                 spool_enabled INTEGER NOT NULL DEFAULT 1,
                 consecutive_send_failures INTEGER NOT NULL DEFAULT 0,
                 updated_at_unix_ms INTEGER NOT NULL DEFAULT 0
@@ -357,6 +402,8 @@ impl SqliteStateStore {
     fn migrate_runtime_state(&self, conn: &Connection) -> AppResult<()> {
         for (column, definition) in [
             ("degraded_mode", "INTEGER NOT NULL DEFAULT 0"),
+            ("blocked_delivery", "INTEGER NOT NULL DEFAULT 0"),
+            ("blocked_reason", "TEXT NULL"),
             ("spool_enabled", "INTEGER NOT NULL DEFAULT 1"),
             ("consecutive_send_failures", "INTEGER NOT NULL DEFAULT 0"),
         ] {
@@ -494,7 +541,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(record.read_offset, 128);
+        assert_eq!(record.durable_read_offset, 128);
         assert_eq!(record.acked_offset, 128);
     }
 
@@ -509,7 +556,7 @@ mod tests {
             .commit_file_offsets(&[FileOffsetUpdate {
                 path: "/tmp/demo.log".to_string(),
                 file_key: Some("1:2".to_string()),
-                read_offset: 128,
+                durable_read_offset: 128,
                 acked_offset: 64,
             }])
             .unwrap();
@@ -520,6 +567,8 @@ mod tests {
                 last_successful_send_at_unix_ms: Some(42),
                 last_known_edge_url: Some("https://edge.local".to_string()),
                 degraded_mode: true,
+                blocked_delivery: true,
+                blocked_reason: Some("permanent transport failure".to_string()),
                 spool_enabled: true,
                 consecutive_send_failures: 3,
                 updated_at_unix_ms: 77,
@@ -535,9 +584,14 @@ mod tests {
         let runtime = reopened.load_runtime_state().unwrap();
 
         assert_eq!(identity.agent_id, "agent-1");
-        assert_eq!(offset.read_offset, 128);
+        assert_eq!(offset.durable_read_offset, 128);
         assert_eq!(offset.acked_offset, 64);
         assert!(runtime.degraded_mode);
+        assert!(runtime.blocked_delivery);
+        assert_eq!(
+            runtime.blocked_reason.as_deref(),
+            Some("permanent transport failure")
+        );
         assert_eq!(runtime.consecutive_send_failures, 3);
     }
 

@@ -109,8 +109,43 @@ impl AppError {
             Self::Json(_) | Self::Yaml(_) | Self::ProstEncode(_) | Self::ProstDecode(_) => {
                 TransportErrorKind::SerializationError
             }
-            Self::Protocol(_) => TransportErrorKind::Unknown,
+            Self::Protocol(message) => {
+                let normalized = message.to_ascii_lowercase();
+                if normalized.contains("unauthorized") || normalized.contains("forbidden") {
+                    TransportErrorKind::Unauthorized
+                } else if normalized.contains("reject")
+                    || normalized.contains("invalid")
+                    || normalized.contains("denied")
+                {
+                    TransportErrorKind::ServerRejected
+                } else {
+                    TransportErrorKind::Unknown
+                }
+            }
             _ => TransportErrorKind::Unknown,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppError, TransportErrorKind};
+
+    #[test]
+    fn classifies_protocol_rejections_as_server_rejected() {
+        let error = AppError::protocol("edge ingest response rejected the batch");
+        assert_eq!(
+            error.transport_error_kind(),
+            TransportErrorKind::ServerRejected
+        );
+    }
+
+    #[test]
+    fn classifies_protocol_unauthorized_as_unauthorized() {
+        let error = AppError::protocol("unauthorized bootstrap token");
+        assert_eq!(
+            error.transport_error_kind(),
+            TransportErrorKind::Unauthorized
+        );
     }
 }

@@ -53,6 +53,10 @@ pub fn build_heartbeat_payload(
         snapshot.degraded_mode.to_string(),
     );
     host_metadata.insert(
+        "blocked_delivery".to_string(),
+        snapshot.blocked_delivery.to_string(),
+    );
+    host_metadata.insert(
         "event_queue_len".to_string(),
         snapshot.event_queue_len.to_string(),
     );

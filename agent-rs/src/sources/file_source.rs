@@ -293,7 +293,7 @@ pub fn detect_start_offset(
 ) -> u64 {
     match stored_offset {
         Some(record) if record.file_key.as_deref() == current_file_key => {
-            let durable_read_offset = record.read_offset.max(record.acked_offset);
+            let durable_read_offset = record.durable_read_offset.max(record.acked_offset);
             if durable_read_offset <= file_len {
                 durable_read_offset
             } else {
@@ -345,7 +345,7 @@ mod tests {
         let record = FileOffsetRecord {
             path: "/tmp/demo.log".to_string(),
             file_key: Some("1:2".to_string()),
-            read_offset: 50,
+            durable_read_offset: 50,
             acked_offset: 25,
             updated_at_unix_ms: 0,
         };
@@ -369,7 +369,7 @@ mod tests {
         let record = FileOffsetRecord {
             path: "/tmp/demo.log".to_string(),
             file_key: Some("1:2".to_string()),
-            read_offset: 200,
+            durable_read_offset: 200,
             acked_offset: 100,
             updated_at_unix_ms: 0,
         };
