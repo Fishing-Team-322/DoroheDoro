@@ -6,17 +6,11 @@ const siteUrl = (
 ).replace(/\/$/, "");
 const appRoutes = [
   "",
-  "/demo",
+  "/login",
   "/overview",
   "/inventory",
-  "/deployments",
-  "/alerts",
-  "/logs",
-  "/ui-kit",
-  "/forms",
-  "/api-demo",
-  "/query-demo",
-  "/table",
+  "/policies",
+  "/profile",
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {

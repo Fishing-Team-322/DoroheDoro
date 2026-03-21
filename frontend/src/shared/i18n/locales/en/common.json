@@ -1,0 +1,283 @@
+{
+  "app": {
+    "name": "DoroheDoro Dashboard",
+    "metadata": {
+      "title": "DoroheDoro Dashboard",
+      "description": "A solid dashboard for infrastructure, sessions, and operational control."
+    },
+    "loading": "Loading...",
+    "notFound": {
+      "title": "404",
+      "description": "The page could not be found."
+    },
+    "error": {
+      "title": "Something went wrong",
+      "description": "An unexpected error occurred.",
+      "retry": "Try again"
+    }
+  },
+  "common": {
+    "dashboard": "Dashboard",
+    "close": "Close",
+    "open": "Open",
+    "loadingButton": "Loading...",
+    "signedIn": "Signed in",
+    "sessionActive": "Session active"
+  },
+  "select": {
+    "placeholder": "Select a value",
+    "searchPlaceholder": "Search...",
+    "emptyTitle": "Nothing found",
+    "emptyDescription": "Try changing the query or choosing another option.",
+    "emptyAction": "Clear search"
+  },
+  "auth": {
+    "entry": {
+      "checkingSession": "Checking your session...",
+      "redirectingAuthenticated": "Opening your dashboard...",
+      "redirectingUnauthenticated": "Redirecting to login..."
+    },
+    "guard": {
+      "checkingSession": "Checking your session...",
+      "redirectingToLogin": "Redirecting to login..."
+    },
+    "login": {
+      "title": "Sign in",
+      "localeLabel": "Language",
+      "localeOptions": {
+        "ru": "Русский",
+        "en": "English"
+      },
+      "identifierLabel": "Login or email",
+      "passwordLabel": "Password",
+      "continue": "Continue",
+      "submit": "Sign in",
+      "back": "Back",
+      "checkingSession": "Checking your session...",
+      "errors": {
+        "identifierRequired": "Enter your login or email.",
+        "passwordRequired": "Enter your password.",
+        "loginUnavailable": "Login is unavailable. Check useAuth.",
+        "invalidCredentials": "Could not sign in. Check your login and password."
+      },
+      "footerTeam": "Fishing Team",
+      "footerProduct": "Logovisor Aeza"
+    },
+    "logout": {
+      "full": "Sign out",
+      "compact": "Out"
+    }
+  },
+  "navigation": {
+    "eyebrow": "Control panel",
+    "title": "Infrastructure console",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar",
+    "overview": {
+      "label": "Overview",
+      "description": "High-level system summary"
+    },
+    "inventory": {
+      "label": "Inventory",
+      "description": "Hosts and infrastructure resources"
+    },
+    "policies": {
+      "label": "Policies",
+      "description": "Rules, controls, and checks"
+    },
+    "profile": {
+      "label": "Profile",
+      "description": "Current account and session settings"
+    }
+  },
+  "statuses": {
+    "host": {
+      "online": "Online",
+      "offline": "Offline",
+      "degraded": "Degraded",
+      "enrolling": "Enrolling"
+    },
+    "health": {
+      "healthy": "Healthy",
+      "warning": "Warning",
+      "critical": "Critical",
+      "unknown": "Unknown"
+    }
+  },
+  "filters": {
+    "environment": {
+      "all": "All environments",
+      "prod": "Prod",
+      "staging": "Staging",
+      "dev": "Development"
+    }
+  },
+  "overview": {
+    "title": "Overview",
+    "description": "Operational workspace for infrastructure, active incidents, releases, and the current event flow.",
+    "createReport": "Create report",
+    "metricsAriaLabel": "Summary metrics",
+    "metrics": {
+      "metric-availability": {
+        "label": "Fleet availability",
+        "description": "Share of healthy hosts over the last 24 hours"
+      },
+      "metric-ingest": {
+        "label": "Log ingest",
+        "description": "Events processed in the selected window"
+      },
+      "metric-alerts": {
+        "label": "Open alerts",
+        "description": "Active and acknowledged alerts"
+      },
+      "metric-deployments": {
+        "label": "Deployment success",
+        "description": "Successful jobs this week"
+      }
+    },
+    "operations": {
+      "title": "Operational scope",
+      "description": "A summary of hosts, incidents, and logs as part of one working surface.",
+      "managedHosts": "Managed hosts",
+      "openIncidents": "Open incidents",
+      "jobsToday": "Jobs today",
+      "onlineSuffix": "online",
+      "offlineSuffix": "offline",
+      "activeAndAcknowledged": "Active and acknowledged alerts",
+      "successfulSuffix": "successful",
+      "failedSuffix": "failed"
+    },
+    "logs": {
+      "title": "Log stream",
+      "description": "A dense working area for monitoring signal volume, latency, and loss.",
+      "stream": "Stream",
+      "volume": "Volume",
+      "latency": "P95",
+      "drops": "Drops"
+    },
+    "activity": {
+      "title": "Latest activity",
+      "description": "Recent operational events across the platform.",
+      "items": [
+        {
+          "title": "Job job-1201 is still rolling out",
+          "description": "The edge gateway release has completed 11 of 18 targets."
+        },
+        {
+          "title": "Critical storage alert on db-shadow-1",
+          "description": "The on-duty DBA confirmed a rising disk saturation risk."
+        },
+        {
+          "title": "Collector pulse recovered on staging",
+          "description": "A short-lived delay disappeared automatically after restart."
+        }
+      ]
+    }
+  },
+  "inventory": {
+    "title": "Inventory",
+    "description": "A table-first screen for managed hosts, filtering, and operational analysis.",
+    "addFilters": "Add filter set",
+    "detailsTitle": "Host details",
+    "detailsDescription": "Select a host in the table to open the inspector.",
+    "stateTitle": "State",
+    "stateDescription": "The right column shows operational context, signals, and load for the selected node without leaving the screen.",
+    "sections": {
+      "context": "Context",
+      "load": "Load",
+      "relations": "Tags and relationships"
+    },
+    "fields": {
+      "environment": "Environment",
+      "provider": "Provider",
+      "region": "Region",
+      "policies": "Policies",
+      "ipAddress": "IP address",
+      "cpu": "CPU load",
+      "memory": "Memory usage",
+      "lastSeen": "Last signal",
+      "tags": "Tags",
+      "cluster": "Cluster",
+      "platform": "Platform"
+    },
+    "table": {
+      "title": "Host inventory",
+      "description": "Filter the fleet by status, environment, or host identifier.",
+      "export": "Export",
+      "searchPlaceholder": "Search by host, region, cluster, or IP",
+      "statusPlaceholder": "Select status",
+      "environmentPlaceholder": "Select environment",
+      "headers": {
+        "host": "Host",
+        "status": "Status",
+        "health": "Health",
+        "environment": "Environment",
+        "cluster": "Cluster",
+        "load": "Load",
+        "lastSeen": "Last signal",
+        "action": "Action"
+      },
+      "statusOptions": {
+        "all": "All statuses",
+        "online": "Online",
+        "offline": "Offline",
+        "degraded": "Degraded",
+        "enrolling": "Enrolling"
+      },
+      "loading": "Loading hosts...",
+      "emptyTitle": "No hosts match the selected filters",
+      "emptyDescription": "Change the search query or widen the status filter.",
+      "open": "Open"
+    }
+  },
+  "policies": {
+    "title": "Policies",
+    "description": "A reserved module for compliance rules, rollout status, and detailed policy inspection.",
+    "planModule": "Plan module",
+    "plannedModuleTitle": "Planned module",
+    "plannedModuleDescription": "The content area is already built into the shell and ready for working tables, rollout policies, and deviation analysis.",
+    "statusTitle": "Status",
+    "statusDescription": "The module is reserved and waiting for the domain model of rules and rollout states.",
+    "whatWillAppearTitle": "What will appear here",
+    "whatWillAppearDescription": "A registry of policies, rollout states, deployment targets, violations, and a drilldown panel for each rule.",
+    "nextStepTitle": "Next step",
+    "nextStepDescription": "Connect policy inventory, a compliance summary, and a detailed inspector for the selected rule.",
+    "areaSkeletonTitle": "Area skeleton",
+    "areaSkeletonDescription": "Working zones that are already ready for data.",
+    "rows": [
+      {
+        "label": "Row 01",
+        "description": "Policy table and rollout statuses"
+      },
+      {
+        "label": "Row 02",
+        "description": "Filters by service, environment, and violation type"
+      },
+      {
+        "label": "Row 03",
+        "description": "Inspector for the selected policy and change history"
+      }
+    ]
+  },
+  "profile": {
+    "title": "Profile",
+    "description": "Update your visible profile data. This request uses the CSRF-aware fetch wrapper.",
+    "editTitle": "Edit profile",
+    "editDescription": "Saving sends `PATCH /profile` with the current CSRF token.",
+    "displayNameLabel": "Display name",
+    "save": "Save changes",
+    "success": "Profile updated successfully.",
+    "fallbackError": "Unable to update profile.",
+    "currentAccountTitle": "Current account",
+    "currentAccountDescription": "Current user data loaded from `GET /auth/me`.",
+    "fields": {
+      "email": "Email",
+      "login": "Login",
+      "displayName": "Display name"
+    },
+    "validation": {
+      "displayNameMin": "Display name must contain at least 2 characters",
+      "displayNameMax": "Display name must be 80 characters or fewer"
+    }
+  }
+}

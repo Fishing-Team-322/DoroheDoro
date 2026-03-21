@@ -28,7 +28,17 @@ export function SearchInput({
         {...props}
       />
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--muted-foreground)]">
-        ?
+        <svg
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          className="h-4 w-4"
+          aria-hidden="true"
+        >
+          <circle cx="9" cy="9" r="4.5" />
+          <path d="M12.5 12.5L16 16" strokeLinecap="round" />
+        </svg>
       </span>
       {loading ? (
         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[color:var(--muted-foreground)]">

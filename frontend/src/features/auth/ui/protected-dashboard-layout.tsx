@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { Locale } from "@/src/shared/config";
 import { buildLoginPath } from "@/src/shared/lib/auth";
+import { useI18n } from "@/src/shared/lib/i18n";
 import { Spinner } from "@/src/shared/ui";
 import { DashboardLayout } from "@/src/widgets/dashboard-layout";
 import { useAuth } from "../model/use-auth";
@@ -20,6 +21,7 @@ export function ProtectedDashboardLayout({
 }: ProtectedDashboardLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const { dictionary } = useI18n();
   const { status } = useAuth();
 
   useEffect(() => {
@@ -34,8 +36,8 @@ export function ProtectedDashboardLayout({
         <div className="inline-flex items-center gap-3 rounded-full border border-[color:var(--border)] bg-[color:var(--surface-elevated)] px-5 py-3 text-sm text-[color:var(--muted-foreground)]">
           <Spinner size="sm" />
           {status === "loading"
-            ? "Checking your session..."
-            : "Redirecting to login..."}
+            ? dictionary.auth.guard.checkingSession
+            : dictionary.auth.guard.redirectingToLogin}
         </div>
       </div>
     );

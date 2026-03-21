@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { defaultLocale } from "@/src/shared/config";
 import "./globals.css";
 
 const inter = localFont({
@@ -21,9 +22,8 @@ const inter = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Balvanka Starter",
-  description:
-    "Universal Next.js starter with i18n, UI-kit demos, forms, API client and table base.",
+  title: "DoroheDoro Dashboard",
+  description: "Infrastructure dashboard with localized routes and authenticated entry flow.",
 };
 
 export default function RootLayout({
@@ -32,7 +32,7 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang={defaultLocale}>
       <body className={`${inter.className} antialiased text-[color:var(--foreground)]`}>
         {children}
       </body>

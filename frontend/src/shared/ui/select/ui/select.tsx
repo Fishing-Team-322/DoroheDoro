@@ -9,6 +9,8 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "motion/react";
+import { useOptionalI18n } from "@/src/shared/lib/i18n";
 import { cn } from "@/src/shared/lib/cn";
 
 export interface SelectOption {
@@ -56,9 +58,12 @@ function getInitialActiveIndex(
   return firstEnabledIndex >= 0 ? firstEnabledIndex : null;
 }
 
-const triggerSizeClasses: Record<NonNullable<SelectProps["selectSize"]>, string> = {
-  sm: "h-8 px-2 text-sm",
-  md: "h-10 px-3 text-sm",
+const triggerSizeClasses: Record<
+  NonNullable<SelectProps["selectSize"]>,
+  string
+> = {
+  sm: "h-8 px-2 text-base",
+  md: "h-10 px-3 text-base",
   lg: "h-11 px-4 text-base",
 };
 
@@ -66,24 +71,26 @@ export function Select({
   value,
   onChange,
   options,
-  placeholder = "Выберите значение",
+  placeholder,
   className,
   disabled = false,
   selectSize = "md",
   searchable = false,
-  searchPlaceholder = "Поиск...",
-  emptyTitle = "Ничего не найдено",
-  emptyDescription = "Попробуйте изменить запрос или выбрать другой вариант.",
-  emptyActionLabel = "Очистить поиск",
+  searchPlaceholder,
+  emptyTitle,
+  emptyDescription,
+  emptyActionLabel,
   onEmptyAction,
   name,
   id,
   renderOption,
   ...props
 }: SelectProps) {
+  const i18n = useOptionalI18n();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [openDirection, setOpenDirection] = useState<"up" | "down">("down");
 
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -100,7 +107,23 @@ export function Select({
     width: 0,
   });
 
-  const selectedOption = options.find((option) => option.value === value) ?? null;
+  const resolvedPlaceholder =
+    placeholder ?? i18n?.dictionary.select.placeholder ?? "Select a value";
+  const resolvedSearchPlaceholder =
+    searchPlaceholder ??
+    i18n?.dictionary.select.searchPlaceholder ??
+    "Search...";
+  const resolvedEmptyTitle =
+    emptyTitle ?? i18n?.dictionary.select.emptyTitle ?? "Nothing found";
+  const resolvedEmptyDescription =
+    emptyDescription ??
+    i18n?.dictionary.select.emptyDescription ??
+    "Try changing the query or choosing another option.";
+  const resolvedEmptyActionLabel =
+    emptyActionLabel ?? i18n?.dictionary.select.emptyAction ?? "Clear search";
+
+  const selectedOption =
+    options.find((option) => option.value === value) ?? null;
 
   const filteredOptions =
     searchable && search.trim()
@@ -112,6 +135,7 @@ export function Select({
           );
         })
       : options;
+
   const initialActiveIndex = getInitialActiveIndex(filteredOptions, value);
 
   function getScrollParents(node: Element | null): Array<Element | Window> {
@@ -141,13 +165,16 @@ export function Select({
     const scrollX = window.scrollX;
 
     const dropdownHeight =
-      listRef.current?.getBoundingClientRect().height ?? FALLBACK_DROPDOWN_HEIGHT;
+      listRef.current?.getBoundingClientRect().height ??
+      FALLBACK_DROPDOWN_HEIGHT;
 
     const spaceBelow = viewportHeight - triggerRect.bottom - GAP;
     const spaceAbove = triggerRect.top - GAP;
 
     const shouldOpenUpward =
       spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+
+    setOpenDirection(shouldOpenUpward ? "up" : "down");
 
     let top = 0;
 
@@ -327,122 +354,146 @@ export function Select({
     updatePosition();
   }, [open, search, searchable, options.length]);
 
-  const dropdown = typeof document !== "undefined" && open
-    ? createPortal(
-        <div
-          ref={listRef}
-          role="listbox"
-          aria-label={props["aria-label"] ?? placeholder}
-          style={{
-            position: "absolute",
-            top: position.top,
-            left: position.left,
-            width: position.width,
-            zIndex: 10000,
-          }}
-          className={cn(
-            "overflow-hidden rounded-xl border border-[color:var(--border)]",
-            "bg-[color:var(--surface)] shadow-[0_18px_48px_rgba(0,0,0,0.45)]"
-          )}
-        >
-          {searchable ? (
-            <div className="border-b border-[color:var(--border)] bg-[color:var(--surface)] p-2">
-              <div className="flex items-center gap-2 rounded-lg border border-[color:var(--input-border)] bg-[color:var(--input-background)] px-3">
-                <SearchIcon className="h-4 w-4 shrink-0 text-[color:var(--muted-foreground)]" />
-                <input
-                  ref={searchInputRef}
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={searchPlaceholder}
-                  className={cn(
-                    "h-9 w-full border-0 bg-transparent text-sm text-[color:var(--foreground)] outline-none",
-                    "placeholder:text-[color:var(--muted-foreground)]"
+  const dropdownAnimation =
+    openDirection === "up"
+      ? {
+          initial: { opacity: 0, scale: 0.98, y: 8 },
+          animate: { opacity: 1, scale: 1, y: 0 },
+          exit: { opacity: 0, scale: 0.98, y: 8 },
+          origin: "bottom center",
+        }
+      : {
+          initial: { opacity: 0, scale: 0.98, y: -8 },
+          animate: { opacity: 1, scale: 1, y: 0 },
+          exit: { opacity: 0, scale: 0.98, y: -8 },
+          origin: "top center",
+        };
+
+  const dropdown =
+    typeof document !== "undefined"
+      ? createPortal(
+          <AnimatePresence>
+            {open ? (
+              <motion.div
+                ref={listRef}
+                role="listbox"
+                aria-label={props["aria-label"] ?? resolvedPlaceholder}
+                initial={dropdownAnimation.initial}
+                animate={dropdownAnimation.animate}
+                exit={dropdownAnimation.exit}
+                transition={{
+                  duration: 0.18,
+                  ease: [0.22, 1, 0.36, 1],
+                }}
+                style={{
+                  position: "absolute",
+                  top: position.top,
+                  left: position.left,
+                  width: position.width,
+                  zIndex: 10000,
+                  transformOrigin: dropdownAnimation.origin,
+                }}
+                className={cn(
+                  "overflow-hidden rounded-md border border-[color:var(--border)]",
+                  "bg-[color:var(--surface)] shadow-[0_18px_48px_rgba(0,0,0,0.45)]"
+                )}
+              >
+                {searchable ? (
+                  <div className="border-b border-[color:var(--border)] bg-black p-2">
+                    <div className="flex items-center gap-2 rounded-lg border border-[color:var(--input-border)] bg-[color:var(--input-background)] px-3">
+                      <SearchIcon className="h-4 w-4 shrink-0 text-[color:var(--muted-foreground)]" />
+                      <input
+                        ref={searchInputRef}
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                        placeholder={resolvedSearchPlaceholder}
+                        className={cn(
+                          "h-9 w-full border-0 bg-transparent text-base text-white outline-none",
+                          "placeholder:text-[color:var(--muted-foreground)]"
+                        )}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="max-h-60 overflow-auto">
+                  {filteredOptions.length === 0 ? (
+                    <div className="px-4 py-6">
+                      <div className="flex min-h-[136px] flex-col items-center justify-center gap-2 text-center">
+                        <div className="text-base font-medium text-white">
+                          {resolvedEmptyTitle}
+                        </div>
+
+                        <div className="max-w-[26rem] text-base text-[color:var(--muted-foreground)]">
+                          {resolvedEmptyDescription}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSearch("");
+                            requestAnimationFrame(() => {
+                              searchInputRef.current?.focus();
+                            });
+                            onEmptyAction?.();
+                          }}
+                          className={cn(
+                            "mt-2 inline-flex h-9 items-center justify-center rounded-lg border",
+                            "border-[color:var(--button-secondary-border)] bg-[color:var(--button-secondary-bg)]",
+                            "px-3 text-base font-medium text-[color:var(--button-secondary-fg)] transition-colors",
+                            "hover:bg-[color:var(--button-secondary-bg-hover)]"
+                          )}
+                        >
+                          {resolvedEmptyActionLabel}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    filteredOptions.map((option, index) => {
+                      const isSelected = option.value === value;
+                      const isDisabled = !!option.disabled;
+
+                      return (
+                        <button
+                          key={option.value}
+                          ref={(element) => {
+                            optionRefs.current[index] = element;
+                          }}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          disabled={isDisabled}
+                          onClick={() => {
+                            if (!isDisabled) {
+                              handleSelect(option.value);
+                            }
+                          }}
+                          onKeyDown={handleOptionKeyDown(index, option)}
+                          className={cn(
+                            "flex h-10 w-full items-center px-4 text-left text-base transition-colors focus:outline-none",
+                            isDisabled
+                              ? "cursor-not-allowed opacity-50 text-[rgba(255,255,255,0.45)]"
+                              : "cursor-pointer text-[rgba(255,255,255,0.78)] hover:text-white",
+                            isSelected && "bg-white !text-black",
+                            !isSelected && "focus-visible:text-white"
+                          )}
+                        >
+                          <span className="truncate">
+                            {renderOption
+                              ? renderOption(option, isSelected)
+                              : option.label}
+                          </span>
+                        </button>
+                      );
+                    })
                   )}
-                />
-              </div>
-            </div>
-          ) : null}
-
-          <div className="max-h-60 overflow-auto">
-            {filteredOptions.length === 0 ? (
-              <div className="px-4 py-6">
-                <div className="flex min-h-[136px] flex-col items-center justify-center gap-2 text-center">
-                  <div className="text-sm font-medium text-[color:var(--foreground)]">
-                    {emptyTitle}
-                  </div>
-
-                  <div className="max-w-[26rem] text-sm text-[color:var(--muted-foreground)]">
-                    {emptyDescription}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearch("");
-                      requestAnimationFrame(() => {
-                        searchInputRef.current?.focus();
-                      });
-                      onEmptyAction?.();
-                    }}
-                    className={cn(
-                      "mt-2 inline-flex h-9 items-center justify-center rounded-lg border",
-                      "border-[color:var(--button-secondary-border)] bg-[color:var(--button-secondary-bg)]",
-                      "px-3 text-sm font-medium text-[color:var(--button-secondary-fg)] transition-colors",
-                      "hover:bg-[color:var(--button-secondary-bg-hover)]"
-                    )}
-                  >
-                    {emptyActionLabel}
-                  </button>
                 </div>
-              </div>
-            ) : (
-              filteredOptions.map((option, index) => {
-                const isSelected = option.value === value;
-                const isDisabled = !!option.disabled;
-
-                return (
-                  <button
-                    key={option.value}
-                    ref={(element) => {
-                      optionRefs.current[index] = element;
-                    }}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    disabled={isDisabled}
-                    onClick={() => {
-                      if (!isDisabled) {
-                        handleSelect(option.value);
-                      }
-                    }}
-                    onKeyDown={handleOptionKeyDown(index, option)}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-3 border-t border-[color:var(--border)] px-3 py-2.5 text-left text-sm transition-colors",
-                      index === 0 && "border-t-0",
-                      isDisabled
-                        ? "cursor-not-allowed opacity-50"
-                        : "cursor-pointer hover:bg-[color:var(--surface-elevated)]",
-                      isSelected &&
-                        "bg-[color:var(--surface-elevated)] text-[color:var(--foreground)]",
-                      "focus:outline-none focus-visible:bg-[color:var(--surface-elevated)]"
-                    )}
-                  >
-                    <span className="truncate">
-                      {renderOption ? renderOption(option, isSelected) : option.label}
-                    </span>
-
-                    {isSelected ? (
-                      <CheckIcon className="h-4 w-4 shrink-0 text-[color:var(--foreground)]" />
-                    ) : null}
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>,
-        document.body
-      )
-    : null;
+              </motion.div>
+            ) : null}
+          </AnimatePresence>,
+          document.body
+        )
+      : null;
 
   return (
     <div ref={rootRef} className={cn("relative w-full", className)}>
@@ -455,29 +506,32 @@ export function Select({
         disabled={disabled}
         aria-expanded={open}
         aria-haspopup="listbox"
-        aria-label={props["aria-label"] ?? (selectedOption
-          ? `Выбрано: ${selectedOption.label}`
-          : placeholder)}
+        aria-label={
+          props["aria-label"] ??
+          (selectedOption ? selectedOption.label : resolvedPlaceholder)
+        }
         onClick={handleToggle}
         onKeyDown={handleTriggerKeyDown}
         className={cn(
-          "flex w-full items-center justify-between rounded-md border",
-          "border-[color:var(--input-border)] bg-[color:var(--input-background)]",
-          "text-[color:var(--foreground)] transition-[border-color,box-shadow,background-color]",
-          "hover:border-[color:var(--input-border-hover)]",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)]",
+          "flex w-full items-center justify-between rounded-md border-0",
+          "bg-[color:var(--input-background)]",
+          "text-[color:var(--foreground)] transition-colors",
+          "hover:bg-[rgba(255,255,255,0.06)]",
+          "focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-50",
           triggerSizeClasses[selectSize],
-          open && "border-[color:var(--input-border-hover)] ring-2 ring-[color:var(--ring)]"
+          open && "bg-[rgba(255,255,255,0.06)]"
         )}
       >
         <span
           className={cn(
             "truncate text-left",
-            selectedOption ? "text-[color:var(--foreground)]" : "text-[color:var(--muted-foreground)]"
+            selectedOption
+              ? "text-[color:var(--foreground)]"
+              : "text-[color:var(--muted-foreground)]"
           )}
         >
-          {selectedOption ? selectedOption.label : placeholder}
+          {selectedOption ? selectedOption.label : resolvedPlaceholder}
         </span>
 
         <ChevronDownIcon
@@ -505,23 +559,6 @@ function SearchIcon({ className }: { className?: string }) {
     >
       <circle cx="9" cy="9" r="4.5" />
       <path d="M12.5 12.5L16 16" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function CheckIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <path d="M4 10.5L8 14.5L16 6.5" />
     </svg>
   );
 }

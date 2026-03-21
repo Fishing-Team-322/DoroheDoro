@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Locale } from "@/src/shared/config";
 import { buildLoginPath } from "@/src/shared/lib/auth";
+import { useI18n } from "@/src/shared/lib/i18n";
 import { Button, type ButtonProps } from "@/src/shared/ui";
 import { useAuth } from "../model/use-auth";
 
@@ -13,10 +14,11 @@ type LogoutButtonProps = Omit<ButtonProps, "onClick" | "loading"> & {
 
 export function LogoutButton({
   locale,
-  children = "Sign out",
+  children,
   ...props
 }: LogoutButtonProps) {
   const router = useRouter();
+  const { dictionary } = useI18n();
   const { logout } = useAuth();
   const [isPending, setIsPending] = useState(false);
 
@@ -34,7 +36,7 @@ export function LogoutButton({
 
   return (
     <Button {...props} onClick={handleLogout} loading={isPending}>
-      {children}
+      {children ?? dictionary.auth.logout.full}
     </Button>
   );
 }

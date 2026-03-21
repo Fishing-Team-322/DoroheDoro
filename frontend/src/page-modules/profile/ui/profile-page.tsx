@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { useAuth } from "@/src/features/auth";
 import { createZodResolver } from "@/src/shared/lib/forms";
+import { useI18n } from "@/src/shared/lib/i18n";
 import {
   Button,
   Card,
@@ -16,20 +17,23 @@ import {
 } from "@/src/shared/ui";
 import { PageHeader, Section } from "@/src/widgets/dashboard-layout";
 
-const profileSchema = z.object({
-  displayName: z
-    .string()
-    .trim()
-    .min(2, "Display name must be at least 2 characters")
-    .max(80, "Display name must be 80 characters or fewer"),
-});
-
-type ProfileFormValues = z.infer<typeof profileSchema>;
+type ProfileFormValues = {
+  displayName: string;
+};
 
 export function ProfilePage() {
+  const { dictionary } = useI18n();
+  const copy = dictionary.profile;
   const { user, updateProfile } = useAuth();
   const [formError, setFormError] = useState<string>();
   const [successMessage, setSuccessMessage] = useState<string>();
+  const profileSchema = z.object({
+    displayName: z
+      .string()
+      .trim()
+      .min(2, copy.validation.displayNameMin)
+      .max(80, copy.validation.displayNameMax),
+  });
 
   const form = useForm<ProfileFormValues>({
     defaultValues: {
@@ -61,36 +65,32 @@ export function ProfilePage() {
       form.reset({
         displayName: updatedUser.displayName,
       });
-      setSuccessMessage("Profile updated successfully.");
+      setSuccessMessage(copy.success);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to update profile.";
+      const message = error instanceof Error ? error.message : copy.fallbackError;
       setFormError(message);
     }
   });
 
   return (
-    <main className="space-y-6">
-      <PageHeader
-        title="Profile"
-        description="Update your visible profile data. This request uses the CSRF-aware fetch wrapper."
-      />
+    <div className="space-y-6">
+      <PageHeader title={copy.title} description={copy.description} />
 
       <Section className="border-t-0 py-0">
         <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
           <Card className="space-y-5">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold text-[color:var(--foreground)]">
-                Edit profile
+                {copy.editTitle}
               </h2>
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                Saving sends a `PATCH /profile` request with the current CSRF token.
+                {copy.editDescription}
               </p>
             </div>
 
             <form className="space-y-5" onSubmit={onSubmit}>
               <FormField>
-                <FormLabel htmlFor="displayName">Display name</FormLabel>
+                <FormLabel htmlFor="displayName">{copy.displayNameLabel}</FormLabel>
                 <FormControl hasError={Boolean(form.formState.errors.displayName)}>
                   <Input id="displayName" {...form.register("displayName")} />
                 </FormControl>
@@ -108,7 +108,7 @@ export function ProfilePage() {
                 loading={form.formState.isSubmitting}
                 className="w-full sm:w-auto"
               >
-                Save changes
+                {copy.save}
               </Button>
             </form>
           </Card>
@@ -116,30 +116,32 @@ export function ProfilePage() {
           <Card className="space-y-4">
             <div className="space-y-1">
               <h2 className="text-lg font-semibold text-[color:var(--foreground)]">
-                Current account
+                {copy.currentAccountTitle}
               </h2>
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                Current user data loaded from `GET /auth/me`.
+                {copy.currentAccountDescription}
               </p>
             </div>
 
             <dl className="space-y-3 text-sm">
               <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--background)] px-4 py-3">
-                <dt className="text-[color:var(--muted-foreground)]">Email</dt>
+                <dt className="text-[color:var(--muted-foreground)]">{copy.fields.email}</dt>
                 <dd className="mt-1 font-medium text-[color:var(--foreground)]">
                   {user.email}
                 </dd>
               </div>
 
               <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--background)] px-4 py-3">
-                <dt className="text-[color:var(--muted-foreground)]">Login</dt>
+                <dt className="text-[color:var(--muted-foreground)]">{copy.fields.login}</dt>
                 <dd className="mt-1 font-medium text-[color:var(--foreground)]">
                   {user.login}
                 </dd>
               </div>
 
               <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--background)] px-4 py-3">
-                <dt className="text-[color:var(--muted-foreground)]">Display name</dt>
+                <dt className="text-[color:var(--muted-foreground)]">
+                  {copy.fields.displayName}
+                </dt>
                 <dd className="mt-1 font-medium text-[color:var(--foreground)]">
                   {user.displayName}
                 </dd>
@@ -148,6 +150,6 @@ export function ProfilePage() {
           </Card>
         </div>
       </Section>
-    </main>
+    </div>
   );
 }

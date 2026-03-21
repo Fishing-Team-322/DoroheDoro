@@ -1,6 +1,7 @@
 "use client";
 
 import { ButtonHTMLAttributes } from "react";
+import { useOptionalI18n } from "@/src/shared/lib/i18n";
 import { cn } from "@/src/shared/lib/cn";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -37,7 +38,9 @@ export function Button({
   children,
   ...props
 }: ButtonProps) {
+  const i18n = useOptionalI18n();
   const isDisabled = disabled || loading;
+  const loadingLabel = i18n?.dictionary.common.loadingButton ?? "Loading...";
 
   return (
     <button
@@ -51,7 +54,7 @@ export function Button({
       aria-disabled={isDisabled}
       {...props}
     >
-      {loading ? "Loading..." : children}
+      {loading ? loadingLabel : children}
     </button>
   );
 }
