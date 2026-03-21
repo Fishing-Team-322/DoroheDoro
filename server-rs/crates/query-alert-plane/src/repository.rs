@@ -4,7 +4,7 @@ use sqlx::{postgres::PgRow, PgPool, Row};
 use uuid::Uuid;
 
 use crate::models::{
-    AlertInstanceRecord, AlertRuleRecord, AnomalyBaselineRecord, AnomalyScoreRecord,
+    AlertInstanceRecord, AlertRuleRecord, AnomalyInstanceRecord, AnomalyRuleRecord,
     AuditActivityRecord,
 };
 
@@ -158,6 +158,87 @@ impl QueryAlertRepository {
              ORDER BY updated_at DESC, name ASC",
         )
         .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn list_active_anomaly_rules(&self) -> Result<Vec<AnomalyRuleRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyRuleRecord>(
+            "SELECT id, name, kind, scope_type, scope_id, config_json, is_active,
+                    created_at, updated_at, created_by, updated_by
+             FROM anomaly_rules
+             WHERE is_active = TRUE
+             ORDER BY updated_at DESC, name ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn upsert_system_rule(
+        &self,
+        name: &str,
+        description: &str,
+        severity: &str,
+        status: &str,
+        condition_json: &Value,
+    ) -> Result<AlertRuleRecord, sqlx::Error> {
+        if let Some(existing) = sqlx::query_as::<_, AlertRuleRecord>(
+            "SELECT id, name, description, status, severity, scope_type, scope_id,
+                    condition_json, created_by, updated_by, created_at, updated_at
+             FROM alert_rules
+             WHERE name = $1 AND created_by = 'system'
+             LIMIT 1",
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            if existing.severity == severity
+                && existing.status == status
+                && existing.description == description
+                && existing.condition_json == *condition_json
+            {
+                return Ok(existing);
+            }
+
+            return sqlx::query_as::<_, AlertRuleRecord>(
+                "UPDATE alert_rules
+                 SET description = $2,
+                     status = $3,
+                     severity = $4,
+                     condition_json = $5,
+                     scope_type = 'global',
+                     scope_id = NULL,
+                     updated_by = 'system',
+                     updated_at = NOW()
+                 WHERE id = $1
+                 RETURNING id, name, description, status, severity, scope_type, scope_id,
+                           condition_json, created_by, updated_by, created_at, updated_at",
+            )
+            .bind(existing.id)
+            .bind(description)
+            .bind(status)
+            .bind(severity)
+            .bind(condition_json)
+            .fetch_one(&self.pool)
+            .await;
+        }
+
+        sqlx::query_as::<_, AlertRuleRecord>(
+            "INSERT INTO alert_rules (
+                id, name, description, status, severity, scope_type, scope_id,
+                condition_json, created_by, updated_by, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, 'global', NULL, $6, 'system', 'system', NOW(), NOW())
+            RETURNING id, name, description, status, severity, scope_type, scope_id,
+                      condition_json, created_by, updated_by, created_at, updated_at",
+        )
+        .bind(Uuid::new_v4())
+        .bind(name)
+        .bind(description)
+        .bind(status)
+        .bind(severity)
+        .bind(condition_json)
+        .fetch_one(&self.pool)
         .await
     }
 
@@ -409,117 +490,106 @@ impl QueryAlertRepository {
         .await
     }
 
-    pub async fn upsert_anomaly_baseline(
+    pub async fn find_open_anomaly_instance(
         &self,
-        host: &str,
-        service: &str,
-        signal_kind: &str,
-        window_minutes: i32,
-        samples: i32,
-        mean: f64,
-        stddev: f64,
-        p95: Option<f64>,
+        rule_id: Uuid,
+        dedupe_key: &str,
+    ) -> Result<Option<AnomalyInstanceRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyInstanceRecord>(
+            "SELECT id, rule_id, cluster_id, severity, status, started_at, resolved_at, payload_json
+             FROM anomaly_instances
+             WHERE rule_id = $1
+               AND status = 'open'
+               AND payload_json ->> 'dedupe_key' = $2
+             ORDER BY started_at DESC
+             LIMIT 1",
+        )
+        .bind(rule_id)
+        .bind(dedupe_key)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn create_anomaly_instance(
+        &self,
+        rule_id: Uuid,
+        cluster_id: Option<Uuid>,
+        severity: &str,
         payload_json: &Value,
-    ) -> Result<AnomalyBaselineRecord, sqlx::Error> {
-        sqlx::query_as::<_, AnomalyBaselineRecord>(
-            "INSERT INTO anomaly_baselines (
-                id, host, service, signal_kind, window_minutes, samples, mean, stddev, p95,
-                payload_json, last_refreshed_at, created_at, updated_at
+    ) -> Result<AnomalyInstanceRecord, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyInstanceRecord>(
+            "INSERT INTO anomaly_instances (
+                id, rule_id, cluster_id, severity, status, started_at, payload_json
             )
-            VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, NOW(), NOW(), NOW()
-            )
-            ON CONFLICT (host, service, signal_kind, window_minutes)
-            DO UPDATE SET
-                samples = EXCLUDED.samples,
-                mean = EXCLUDED.mean,
-                stddev = EXCLUDED.stddev,
-                p95 = EXCLUDED.p95,
-                payload_json = EXCLUDED.payload_json,
-                last_refreshed_at = NOW(),
-                updated_at = NOW()
-            RETURNING id, tenant_id, host, service, signal_kind, window_minutes, samples,
-                      mean, stddev, p95, payload_json, last_refreshed_at, created_at, updated_at",
+            VALUES ($1, $2, $3, $4, 'open', NOW(), $5)
+            RETURNING id, rule_id, cluster_id, severity, status, started_at, resolved_at, payload_json",
         )
         .bind(Uuid::new_v4())
-        .bind(host)
-        .bind(service)
-        .bind(signal_kind)
-        .bind(window_minutes)
-        .bind(samples)
-        .bind(mean)
-        .bind(stddev)
-        .bind(p95)
+        .bind(rule_id)
+        .bind(cluster_id)
+        .bind(severity)
         .bind(payload_json)
         .fetch_one(&self.pool)
         .await
     }
 
-    pub async fn get_anomaly_baseline(
+    pub async fn touch_anomaly_instance(
         &self,
-        host: &str,
-        service: &str,
-        signal_kind: &str,
-        window_minutes: i32,
-    ) -> Result<Option<AnomalyBaselineRecord>, sqlx::Error> {
-        sqlx::query_as::<_, AnomalyBaselineRecord>(
-            "SELECT id, tenant_id, host, service, signal_kind, window_minutes, samples,
-                    mean, stddev, p95, payload_json, last_refreshed_at, created_at, updated_at
-             FROM anomaly_baselines
-             WHERE host = $1
-               AND service = $2
-               AND signal_kind = $3
-               AND window_minutes = $4
-             LIMIT 1",
+        anomaly_instance_id: Uuid,
+        payload_json: &Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE anomaly_instances
+             SET payload_json = payload_json || $2::jsonb
+             WHERE id = $1",
         )
-        .bind(host)
-        .bind(service)
-        .bind(signal_kind)
-        .bind(window_minutes)
+        .bind(anomaly_instance_id)
+        .bind(payload_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn resolve_anomaly_instance_by_key(
+        &self,
+        rule_id: Uuid,
+        dedupe_key: &str,
+        payload_json: &Value,
+    ) -> Result<Option<AnomalyInstanceRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyInstanceRecord>(
+            "UPDATE anomaly_instances
+             SET status = 'resolved',
+                 resolved_at = NOW(),
+                 payload_json = payload_json || $3::jsonb
+             WHERE rule_id = $1
+               AND status = 'open'
+               AND payload_json ->> 'dedupe_key' = $2
+             RETURNING id, rule_id, cluster_id, severity, status, started_at, resolved_at, payload_json",
+        )
+        .bind(rule_id)
+        .bind(dedupe_key)
+        .bind(payload_json)
         .fetch_optional(&self.pool)
         .await
     }
 
-    pub async fn insert_anomaly_score(
+    pub async fn resolve_anomaly_instance(
         &self,
-        rule_id: Option<Uuid>,
-        detector: &str,
-        signal_kind: &str,
-        host: &str,
-        service: &str,
-        correlation_key: &str,
-        detection_mode: &str,
-        signal_id: &str,
-        score: f64,
-        threshold: f64,
-        evidence_json: &Value,
-    ) -> Result<AnomalyScoreRecord, sqlx::Error> {
-        sqlx::query_as::<_, AnomalyScoreRecord>(
-            "INSERT INTO anomaly_scores (
-                id, rule_id, detector, signal_kind, host, service, correlation_key,
-                detection_mode, signal_id, score, threshold, evidence_json, created_at
-            )
-            VALUES (
-                $1, $2, $3, $4, $5, $6, $7,
-                $8, $9, $10, $11, $12, NOW()
-            )
-            RETURNING id, rule_id, detector, signal_kind, host, service, correlation_key,
-                      detection_mode, signal_id, score, threshold, evidence_json, created_at",
+        anomaly_instance_id: Uuid,
+        payload_json: &Value,
+    ) -> Result<Option<AnomalyInstanceRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyInstanceRecord>(
+            "UPDATE anomaly_instances
+             SET status = 'resolved',
+                 resolved_at = NOW(),
+                 payload_json = payload_json || $2::jsonb
+             WHERE id = $1
+               AND status = 'open'
+             RETURNING id, rule_id, cluster_id, severity, status, started_at, resolved_at, payload_json",
         )
-        .bind(Uuid::new_v4())
-        .bind(rule_id)
-        .bind(detector)
-        .bind(signal_kind)
-        .bind(host)
-        .bind(service)
-        .bind(correlation_key)
-        .bind(detection_mode)
-        .bind(signal_id)
-        .bind(score)
-        .bind(threshold)
-        .bind(evidence_json)
-        .fetch_one(&self.pool)
+        .bind(anomaly_instance_id)
+        .bind(payload_json)
+        .fetch_optional(&self.pool)
         .await
     }
 

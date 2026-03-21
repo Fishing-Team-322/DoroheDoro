@@ -161,6 +161,8 @@ impl AuditActivityRecord {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AlertRuleCondition {
     #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
     pub query: Option<String>,
     #[serde(default)]
     pub host: Option<String>,
@@ -181,6 +183,7 @@ pub struct AlertRuleCondition {
 impl Default for AlertRuleCondition {
     fn default() -> Self {
         Self {
+            mode: None,
             query: None,
             host: None,
             service: None,
@@ -199,4 +202,41 @@ fn default_threshold() -> u64 {
 
 fn default_window_minutes() -> u32 {
     5
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct AnomalyRuleRecord {
+    pub id: Uuid,
+    pub name: String,
+    pub kind: String,
+    pub scope_type: String,
+    pub scope_id: Option<Uuid>,
+    pub config_json: Value,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub created_by: String,
+    pub updated_by: String,
+}
+
+impl AnomalyRuleRecord {
+    pub fn cluster_id(&self) -> Option<Uuid> {
+        if self.scope_type == "cluster" {
+            self.scope_id
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct AnomalyInstanceRecord {
+    pub id: Uuid,
+    pub rule_id: Uuid,
+    pub cluster_id: Option<Uuid>,
+    pub severity: String,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
+    pub payload_json: Value,
 }

@@ -1,9 +1,12 @@
-use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration as StdDuration, Instant},
 };
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use async_nats::Client;
 use chrono::{DateTime, Duration, Utc};
 use common::{
@@ -16,16 +19,24 @@ use common::{
     AppError, AppResult,
 };
 use serde_json::{json, Value};
-use tracing::{info, warn};
+use tokio::sync::RwLock;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::{
-    config::DetectionConfig,
+    anomaly::{
+        parse_anomaly_rule, BaselineRule, ParsedAnomalyRule, RareFingerprintRule, ThresholdRule,
+    },
+    config::{AnomalyEngineConfig, RareFingerprintConfig},
     models::{format_ts, AlertRuleCondition, AlertRuleRecord},
     pipeline::DetectionMode,
     repository::QueryAlertRepository,
     storage::{ClickHouseClient, OpenSearchClient},
 };
+
+const SYSTEM_RARE_RULE_NAME: &str = "[system] rare fingerprint detector";
+const SYSTEM_RARE_RULE_DESCRIPTION: &str =
+    "Automatically flags log fingerprints that rarely appear within the configured window";
 
 #[derive(Debug, Clone)]
 pub struct AuditActor {
@@ -81,6 +92,9 @@ pub struct QueryAlertService {
     clickhouse: ClickHouseClient,
     detection: DetectionRuntime,
     ready: Arc<AtomicBool>,
+    rare_config: RareFingerprintConfig,
+    anomaly_cache: Arc<RwLock<AnomalyRuleCache>>,
+    anomaly_config: AnomalyEngineConfig,
 }
 
 impl QueryAlertService {
@@ -89,7 +103,8 @@ impl QueryAlertService {
         nats: Client,
         opensearch: OpenSearchClient,
         clickhouse: ClickHouseClient,
-        detection_config: DetectionConfig,
+        rare_config: RareFingerprintConfig,
+        anomaly_config: AnomalyEngineConfig,
     ) -> Self {
         Self {
             repo,
@@ -101,6 +116,9 @@ impl QueryAlertService {
                 metrics: DetectionMetrics::default(),
             },
             ready: Arc::new(AtomicBool::new(false)),
+            rare_config,
+            anomaly_cache: Arc::new(RwLock::new(AnomalyRuleCache::new())),
+            anomaly_config,
         }
     }
 
@@ -108,7 +126,34 @@ impl QueryAlertService {
         self.repo.ping().await.context("ping postgres")?;
         self.opensearch.ping().await.context("ping opensearch")?;
         self.clickhouse.ping().await.context("ping clickhouse")?;
+        self.bootstrap_system_rules().await?;
         self.ready.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    async fn bootstrap_system_rules(&self) -> anyhow::Result<()> {
+        let condition = AlertRuleCondition {
+            mode: Some("rare_fingerprint".to_string()),
+            threshold: self.rare_config.max_count,
+            window_minutes: self.rare_config.window_minutes,
+            ..AlertRuleCondition::default()
+        };
+        let condition_json = serde_json::to_value(&condition)
+            .map_err(|error| anyhow!("serialize rare fingerprint rule: {error}"))?;
+        let status = if self.rare_config.enabled {
+            "active"
+        } else {
+            "paused"
+        };
+        self.repo
+            .upsert_system_rule(
+                SYSTEM_RARE_RULE_NAME,
+                SYSTEM_RARE_RULE_DESCRIPTION,
+                &self.rare_config.severity,
+                status,
+                &condition_json,
+            )
+            .await?;
         Ok(())
     }
 
@@ -643,7 +688,8 @@ impl QueryAlertService {
                 continue;
             }
 
-            let since = event_ts - Duration::minutes(condition.window_minutes as i64);
+            let since = parse_event_timestamp(&event.timestamp)?
+                - Duration::minutes(condition.window_minutes as i64);
             let hit_count = self
                 .clickhouse
                 .matching_count(
@@ -656,7 +702,7 @@ impl QueryAlertService {
                 )
                 .await
                 .map_err(map_integration_error)?;
-            if hit_count < condition.threshold {
+            if !meets_condition(condition.mode.as_deref(), hit_count, condition.threshold) {
                 continue;
             }
 
@@ -768,196 +814,63 @@ impl QueryAlertService {
             .await;
         }
 
+        self.evaluate_rare_anomalies(&event).await
+    }
+
+    async fn evaluate_rare_anomalies(&self, event: &NormalizedLogEvent) -> AppResult<()> {
+        let rules = self.anomaly_rules().await?;
+        for parsed in rules.iter() {
+            if let ParsedAnomalyRule::RareFingerprint(rule) = parsed {
+                self.process_rare_rule(rule, event).await?;
+            }
+        }
         Ok(())
     }
 
-    pub async fn handle_heartbeat_signal(&self, payload: Value) -> AppResult<()> {
-        self.record_signal();
-        let host = payload
-            .get("host")
-            .and_then(Value::as_str)
-            .map(|v| v.trim().to_string())
-            .unwrap_or_default();
-        if host.is_empty() {
-            self.record_rejected();
-            warn!("heartbeat signal missing host");
+    async fn process_rare_rule(
+        &self,
+        rule: &RareFingerprintRule,
+        event: &NormalizedLogEvent,
+    ) -> AppResult<()> {
+        if !rule.matches(event) {
             return Ok(());
         }
-        let service = payload
-            .get("service")
-            .and_then(Value::as_str)
-            .map(|v| v.trim().to_string())
-            .unwrap_or_else(|| "agent".to_string());
-        let gap = payload
-            .get("heartbeat_gap_sec")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
-        self.record_baseline(&host, &service, "heartbeat", gap)
-            .await?;
-        let threshold = self.detection.config.cooldown_sec as f64;
-        if gap < threshold {
-            return Ok(());
-        }
-        let signal_id = payload
-            .get("signal_id")
-            .and_then(Value::as_str)
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let correlation_key = format!("heartbeat:{host}:{service}");
-        let evidence = json!({ "heartbeat_gap_sec": gap });
-        self.repo
-            .insert_anomaly_score(
-                None,
-                "heartbeat_gap",
-                "heartbeat",
-                &host,
-                &service,
-                &correlation_key,
-                self.detection.config.mode.as_str(),
-                &signal_id,
-                gap / threshold,
-                threshold,
-                &evidence,
-            )
+        let event_ts = parse_event_timestamp(&event.timestamp)?;
+        let since = event_ts - Duration::minutes(rule.window_minutes as i64);
+        let filter = rule
+            .resolved_filter(event)
+            .with_fingerprint(event.fingerprint.clone());
+        let hit_count = self
+            .clickhouse
+            .count_events(&filter, since, event_ts)
             .await
-            .map_err(map_db_error)?;
-        info!(
-            host = %host,
-            service = %service,
-            gap = gap,
-            "heartbeat anomaly recorded"
-        );
-        Ok(())
-    }
-
-    pub async fn handle_diagnostics_signal(&self, payload: Value) -> AppResult<()> {
-        self.record_signal();
-        let host = payload
-            .get("host")
-            .and_then(Value::as_str)
-            .map(|v| v.trim().to_string())
-            .unwrap_or_default();
-        if host.is_empty() {
-            self.record_rejected();
-            warn!("diagnostics signal missing host");
+            .map_err(map_integration_error)?;
+        if hit_count > rule.max_count {
             return Ok(());
         }
-        let service = payload
-            .get("service")
-            .and_then(Value::as_str)
-            .map(|v| v.trim().to_string())
-            .unwrap_or_else(|| "agent".to_string());
-        let queue_depth = payload
-            .get("queue_depth")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
-        self.record_baseline(&host, &service, "diagnostics", queue_depth)
-            .await?;
-        if queue_depth < 100.0 {
-            return Ok(());
-        }
-        let signal_id = payload
-            .get("signal_id")
-            .and_then(Value::as_str)
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let correlation_key = format!("diag:{host}:{service}");
-        let evidence = json!({ "queue_depth": queue_depth });
-        self.repo
-            .insert_anomaly_score(
-                None,
-                "queue_depth",
-                "diagnostics",
-                &host,
-                &service,
-                &correlation_key,
-                self.detection.config.mode.as_str(),
-                &signal_id,
-                queue_depth / 100.0,
-                100.0,
-                &evidence,
-            )
-            .await
-            .map_err(map_db_error)?;
-        info!(
-            host = %host,
-            service = %service,
-            depth = queue_depth,
-            "diagnostics anomaly recorded"
-        );
-        Ok(())
-    }
-
-    pub async fn handle_security_signal(&self, payload: Value) -> AppResult<()> {
-        self.record_signal();
-        let host = payload
-            .get("host")
-            .and_then(Value::as_str)
-            .map(|v| v.trim().to_string())
-            .unwrap_or_default();
-        if host.is_empty() {
-            self.record_rejected();
-            warn!("security signal missing host");
-            return Ok(());
-        }
-        let service = payload
-            .get("service")
-            .and_then(Value::as_str)
-            .map(|v| v.trim().to_string())
-            .unwrap_or_else(|| "agent".to_string());
-        let findings = payload
-            .get("findings")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        if findings.is_empty() {
-            return Ok(());
-        }
-        let severe_count = findings
-            .iter()
-            .filter(|finding| {
-                finding
-                    .get("severity")
-                    .and_then(Value::as_str)
-                    .map(|v| matches!(v.to_ascii_lowercase().as_str(), "high" | "critical"))
-                    .unwrap_or(false)
-            })
-            .count();
-        if severe_count == 0 {
-            return Ok(());
-        }
-        self.record_baseline(&host, &service, "security_posture", severe_count as f64)
-            .await?;
-        let signal_id = payload
-            .get("report_id")
-            .and_then(Value::as_str)
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let correlation_key = format!("security:{host}:{service}");
-        let evidence = json!({ "findings": findings });
-        self.repo
-            .insert_anomaly_score(
-                None,
-                "security_finding",
-                "security_posture",
-                &host,
-                &service,
-                &correlation_key,
-                self.detection.config.mode.as_str(),
-                &signal_id,
-                severe_count as f64,
-                1.0,
-                &evidence,
-            )
-            .await
-            .map_err(map_db_error)?;
-        info!(
-            host = %host,
-            service = %service,
-            count = severe_count,
-            "security posture anomaly recorded"
-        );
-        Ok(())
+        let dedupe_key = rule.dedupe_key(event);
+        let payload = json!({
+            "dedupe_key": dedupe_key,
+            "kind": "rare_fingerprint",
+            "host": event.host,
+            "service": event.service,
+            "fingerprint": event.fingerprint,
+            "message": event.message,
+            "window_minutes": rule.window_minutes,
+            "max_count": rule.max_count,
+            "observed_count": hit_count,
+            "event_timestamp": event.timestamp,
+            "last_seen_at": format_ts(event_ts),
+        });
+        self.ensure_anomaly_open(
+            rule.record.id,
+            rule.record.cluster_id(),
+            &rule.severity,
+            &dedupe_key,
+            payload,
+            "rare fingerprint detected",
+        )
+        .await
     }
 
     pub async fn resolve_stale_alerts(&self) -> AppResult<()> {
@@ -982,7 +895,7 @@ impl QueryAlertService {
                 )
                 .await
                 .map_err(map_integration_error)?;
-            if count >= condition.threshold {
+            if meets_condition(condition.mode.as_deref(), count, condition.threshold) {
                 continue;
             }
 
@@ -1031,6 +944,25 @@ impl QueryAlertService {
         Ok(())
     }
 
+    pub async fn evaluate_anomaly_rules(&self) -> AppResult<()> {
+        let now = Utc::now();
+        let rules = self.anomaly_rules().await?;
+        for parsed in rules.iter() {
+            match parsed {
+                ParsedAnomalyRule::Threshold(rule) => {
+                    self.evaluate_threshold_rule(rule, now).await?
+                }
+                ParsedAnomalyRule::Baseline(rule) => self.evaluate_baseline_rule(rule, now).await?,
+                ParsedAnomalyRule::RareFingerprint(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub fn anomaly_interval(&self) -> StdDuration {
+        StdDuration::from_secs(self.anomaly_config.evaluation_interval_secs.max(10))
+    }
+
     async fn publish_alert_stream(&self, instance: &crate::models::AlertInstanceRecord) {
         let payload = AlertStreamEvent {
             event_type: instance.status.clone(),
@@ -1073,6 +1005,252 @@ impl QueryAlertService {
             Err(error) => {
                 warn!(error = %error, entity_type = %event.entity_type, entity_id = %event.entity_id, "failed to encode audit append event")
             }
+        }
+    }
+
+    async fn evaluate_threshold_rule(
+        &self,
+        rule: &ThresholdRule,
+        now: DateTime<Utc>,
+    ) -> AppResult<()> {
+        let window_start = now - Duration::minutes(rule.window_minutes as i64);
+        let filter = rule.filter.as_resolved();
+        let count = self
+            .clickhouse
+            .count_events(&filter, window_start, now)
+            .await
+            .map_err(map_integration_error)?;
+        let dedupe_key = rule.dedupe_key();
+        if count >= rule.threshold {
+            let payload = json!({
+                "dedupe_key": dedupe_key,
+                "kind": "threshold",
+                "window_minutes": rule.window_minutes,
+                "threshold": rule.threshold,
+                "observed_count": count,
+                "evaluated_at": format_ts(now),
+            });
+            self.ensure_anomaly_open(
+                rule.record.id,
+                rule.record.cluster_id(),
+                &rule.severity,
+                &dedupe_key,
+                payload,
+                "threshold anomaly detected",
+            )
+            .await
+        } else {
+            let payload = json!({
+                "dedupe_key": dedupe_key,
+                "kind": "threshold",
+                "window_minutes": rule.window_minutes,
+                "threshold": rule.threshold,
+                "observed_count": count,
+                "evaluated_at": format_ts(now),
+            });
+            self.resolve_anomaly_by_key(
+                rule.record.id,
+                &dedupe_key,
+                payload,
+                "threshold normalized",
+            )
+            .await
+        }
+    }
+
+    async fn evaluate_baseline_rule(
+        &self,
+        rule: &BaselineRule,
+        now: DateTime<Utc>,
+    ) -> AppResult<()> {
+        let window_start = now - Duration::minutes(rule.window_minutes as i64);
+        let baseline_end = window_start;
+        let baseline_start = baseline_end - Duration::minutes(rule.baseline_minutes as i64);
+        let filter = rule.filter.as_resolved();
+        let current = self
+            .clickhouse
+            .count_events(&filter, window_start, now)
+            .await
+            .map_err(map_integration_error)?;
+        let baseline_total = self
+            .clickhouse
+            .count_events(&filter, baseline_start, baseline_end)
+            .await
+            .map_err(map_integration_error)?;
+        let windows = rule.baseline_windows() as f64;
+        let baseline_avg = if windows > 0.0 {
+            baseline_total as f64 / windows
+        } else {
+            0.0
+        };
+        let dedupe_key = rule.dedupe_key();
+        let significant = baseline_total >= rule.min_baseline_total
+            && current >= rule.min_count
+            && baseline_avg > 0.0;
+        let exceeds = (current as f64) >= baseline_avg * rule.multiplier;
+        if significant && exceeds {
+            let payload = json!({
+                "dedupe_key": dedupe_key,
+                "kind": "baseline",
+                "window_minutes": rule.window_minutes,
+                "baseline_minutes": rule.baseline_minutes,
+                "multiplier": rule.multiplier,
+                "observed_count": current,
+                "baseline_total": baseline_total,
+                "baseline_average": baseline_avg,
+                "evaluated_at": format_ts(now),
+            });
+            self.ensure_anomaly_open(
+                rule.record.id,
+                rule.record.cluster_id(),
+                &rule.severity,
+                &dedupe_key,
+                payload,
+                "baseline deviation detected",
+            )
+            .await
+        } else {
+            let payload = json!({
+                "dedupe_key": dedupe_key,
+                "kind": "baseline",
+                "window_minutes": rule.window_minutes,
+                "baseline_minutes": rule.baseline_minutes,
+                "multiplier": rule.multiplier,
+                "observed_count": current,
+                "baseline_total": baseline_total,
+                "baseline_average": baseline_avg,
+                "evaluated_at": format_ts(now),
+            });
+            self.resolve_anomaly_by_key(
+                rule.record.id,
+                &dedupe_key,
+                payload,
+                "baseline deviation resolved",
+            )
+            .await
+        }
+    }
+
+    async fn anomaly_rules(&self) -> AppResult<Vec<ParsedAnomalyRule>> {
+        let ttl = StdDuration::from_secs(self.anomaly_config.rule_cache_ttl_secs.max(5));
+        {
+            let cache = self.anomaly_cache.read().await;
+            if !cache.is_stale(ttl) {
+                return Ok(cache.items.clone());
+            }
+        }
+
+        let records = self
+            .repo
+            .list_active_anomaly_rules()
+            .await
+            .map_err(map_db_error)?;
+        let mut parsed = Vec::new();
+        for record in records {
+            match parse_anomaly_rule(record) {
+                Ok(rule) => parsed.push(rule),
+                Err(error) => {
+                    warn!(error = %error, "skipping invalid anomaly rule configuration");
+                }
+            }
+        }
+
+        let mut cache = self.anomaly_cache.write().await;
+        cache.items = parsed.clone();
+        cache.loaded_at = Some(Instant::now());
+        Ok(parsed)
+    }
+
+    async fn ensure_anomaly_open(
+        &self,
+        rule_id: Uuid,
+        cluster_id: Option<Uuid>,
+        severity: &str,
+        dedupe_key: &str,
+        payload: Value,
+        reason: &str,
+    ) -> AppResult<()> {
+        if let Some(existing) = self
+            .repo
+            .find_open_anomaly_instance(rule_id, dedupe_key)
+            .await
+            .map_err(map_db_error)?
+        {
+            self.repo
+                .touch_anomaly_instance(existing.id, &payload)
+                .await
+                .map_err(map_db_error)?;
+            return Ok(());
+        }
+
+        let created = self
+            .repo
+            .create_anomaly_instance(rule_id, cluster_id, severity, &payload)
+            .await
+            .map_err(map_db_error)?;
+        self.publish_audit_event(AuditAppendEvent {
+            event_type: "anomaly.instance.opened".to_string(),
+            entity_type: "anomaly_instance".to_string(),
+            entity_id: created.id.to_string(),
+            actor_id: "system".to_string(),
+            actor_type: "system".to_string(),
+            request_id: format!("anomaly-open-{}", created.id),
+            reason: reason.to_string(),
+            payload_json: payload,
+            created_at: None,
+        })
+        .await;
+        Ok(())
+    }
+
+    async fn resolve_anomaly_by_key(
+        &self,
+        rule_id: Uuid,
+        dedupe_key: &str,
+        payload: Value,
+        reason: &str,
+    ) -> AppResult<()> {
+        if let Some(resolved) = self
+            .repo
+            .resolve_anomaly_instance_by_key(rule_id, dedupe_key, &payload)
+            .await
+            .map_err(map_db_error)?
+        {
+            self.publish_audit_event(AuditAppendEvent {
+                event_type: "anomaly.instance.resolved".to_string(),
+                entity_type: "anomaly_instance".to_string(),
+                entity_id: resolved.id.to_string(),
+                actor_id: "system".to_string(),
+                actor_type: "system".to_string(),
+                request_id: format!("anomaly-resolve-{}", resolved.id),
+                reason: reason.to_string(),
+                payload_json: payload,
+                created_at: None,
+            })
+            .await;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct AnomalyRuleCache {
+    items: Vec<ParsedAnomalyRule>,
+    loaded_at: Option<Instant>,
+}
+
+impl AnomalyRuleCache {
+    fn new() -> Self {
+        Self {
+            items: Vec::new(),
+            loaded_at: None,
+        }
+    }
+
+    fn is_stale(&self, ttl: StdDuration) -> bool {
+        match self.loaded_at {
+            Some(instant) => instant.elapsed() >= ttl,
+            None => true,
         }
     }
 }
@@ -1155,6 +1333,11 @@ fn validate_alert_rule_input(
 ) -> AppResult<()> {
     if name.trim().is_empty() {
         return Err(AppError::invalid_argument("name is required"));
+    }
+    if condition.mode.is_some() {
+        return Err(AppError::invalid_argument(
+            "condition_json.mode is reserved",
+        ));
     }
     let severity = normalize_severity(severity);
     if !matches!(
@@ -1267,6 +1450,13 @@ fn event_matches_rule(
     }
 
     true
+}
+
+fn meets_condition(mode: Option<&str>, hit_count: u64, threshold: u64) -> bool {
+    match mode.unwrap_or("threshold") {
+        "rare_fingerprint" => hit_count <= threshold,
+        _ => hit_count >= threshold,
+    }
 }
 
 fn parse_event_timestamp(value: &str) -> AppResult<DateTime<Utc>> {

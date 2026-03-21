@@ -122,7 +122,8 @@ pub struct QueryAlertPlaneConfig {
     pub http_addr: String,
     pub opensearch: OpenSearchConfig,
     pub clickhouse: ClickHouseConfig,
-    pub detection: DetectionConfig,
+    pub rare_fingerprint: RareFingerprintConfig,
+    pub anomaly: AnomalyEngineConfig,
 }
 
 impl QueryAlertPlaneConfig {
@@ -151,8 +152,87 @@ impl QueryAlertPlaneConfig {
                 database: required_string(&vars, "CLICKHOUSE_DATABASE")?,
                 table: required_string(&vars, "CLICKHOUSE_TABLE")?,
             },
-            detection: DetectionConfig::from_vars(&vars)?,
+            rare_fingerprint: RareFingerprintConfig::from_vars(&vars)?,
+            anomaly: AnomalyEngineConfig::from_vars(&vars)?,
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RareFingerprintConfig {
+    pub enabled: bool,
+    pub window_minutes: u32,
+    pub max_count: u64,
+    pub severity: String,
+}
+
+impl RareFingerprintConfig {
+    fn from_vars(vars: &HashMap<String, String>) -> Result<Self, ConfigError> {
+        let enabled = parse_bool(vars, "RARE_FINGERPRINT_ENABLED", true);
+        let window_minutes = parse_number(vars, "RARE_FINGERPRINT_WINDOW_MINUTES", 60)?;
+        let max_count = parse_number(vars, "RARE_FINGERPRINT_MAX_COUNT", 1)?;
+        if window_minutes == 0 || window_minutes > 24 * 60 {
+            return Err(ConfigError::InvalidNumber(
+                "RARE_FINGERPRINT_WINDOW_MINUTES".to_string(),
+            ));
+        }
+        let severity = vars
+            .get("RARE_FINGERPRINT_SEVERITY")
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "medium".to_string());
+        Ok(Self {
+            enabled,
+            window_minutes,
+            max_count,
+            severity,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnomalyEngineConfig {
+    pub evaluation_interval_secs: u64,
+    pub rule_cache_ttl_secs: u64,
+}
+
+impl AnomalyEngineConfig {
+    fn from_vars(vars: &HashMap<String, String>) -> Result<Self, ConfigError> {
+        Ok(Self {
+            evaluation_interval_secs: parse_number(
+                vars,
+                "ANOMALY_EVALUATION_INTERVAL_SECS",
+                60u64,
+            )?,
+            rule_cache_ttl_secs: parse_number(vars, "ANOMALY_RULE_CACHE_TTL_SECS", 30u64)?,
+        })
+    }
+}
+
+fn parse_bool(vars: &HashMap<String, String>, key: &str, default: bool) -> bool {
+    vars.get(key)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
+}
+
+fn parse_number<T>(vars: &HashMap<String, String>, key: &str, default: T) -> Result<T, ConfigError>
+where
+    T: std::str::FromStr,
+{
+    match vars
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        Some(raw) => raw
+            .parse::<T>()
+            .map_err(|_| ConfigError::InvalidNumber(key.to_string())),
+        None => Ok(default),
     }
 }
 
@@ -172,73 +252,22 @@ mod tests {
             ("CLICKHOUSE_DSN", "http://localhost:8123"),
             ("CLICKHOUSE_DATABASE", "doro"),
             ("CLICKHOUSE_TABLE", "logs"),
+            ("RARE_FINGERPRINT_ENABLED", "true"),
+            ("RARE_FINGERPRINT_WINDOW_MINUTES", "30"),
+            ("RARE_FINGERPRINT_MAX_COUNT", "2"),
+            ("RARE_FINGERPRINT_SEVERITY", "low"),
+            ("ANOMALY_EVALUATION_INTERVAL_SECS", "45"),
+            ("ANOMALY_RULE_CACHE_TTL_SECS", "20"),
         ])
         .unwrap();
 
         assert_eq!(config.http_addr, "0.0.0.0:9095");
         assert_eq!(config.shared.nats_url, "nats://localhost:4222");
-        assert_eq!(config.detection.mode, DetectionMode::Medium);
-    }
-
-    #[test]
-    fn detection_config_uses_defaults() {
-        let vars = minimal_vars();
-        let detection = DetectionConfig::from_vars(&vars).unwrap();
-        assert_eq!(detection.mode, DetectionMode::Medium);
-        assert_eq!(detection.light_window_min, 5);
-        assert_eq!(detection.medium_window_min, 15);
-        assert_eq!(detection.heavy_window_min, 60);
-        assert_eq!(detection.min_samples, 20);
-        assert_eq!(detection.cooldown_sec, 900);
-        assert_eq!(detection.auto_resolve_sec, 1800);
-        assert_eq!(detection.max_groups_per_cycle, 1000);
-        assert!(detection.security_findings_enabled);
-        assert!(detection.agent_health_enabled);
-        assert!(detection.log_pattern_enabled);
-        assert!(!detection.safe_mode);
-    }
-
-    #[test]
-    fn detection_config_respects_overrides() {
-        let mut vars = minimal_vars();
-        vars.insert("DETECTION_MODE".into(), "heavy".into());
-        vars.insert("DETECTION_LIGHT_WINDOW_MIN".into(), "10".into());
-        vars.insert("DETECTION_MEDIUM_WINDOW_MIN".into(), "20".into());
-        vars.insert("DETECTION_HEAVY_WINDOW_MIN".into(), "120".into());
-        vars.insert("DETECTION_MIN_SAMPLES".into(), "50".into());
-        vars.insert("DETECTION_COOLDOWN_SEC".into(), "60".into());
-        vars.insert("DETECTION_AUTO_RESOLVE_SEC".into(), "600".into());
-        vars.insert("DETECTION_MAX_GROUPS_PER_CYCLE".into(), "42".into());
-        vars.insert("DETECTION_SECURITY_FINDINGS_ENABLED".into(), "false".into());
-        vars.insert("DETECTION_AGENT_HEALTH_ENABLED".into(), "0".into());
-        vars.insert("DETECTION_LOG_PATTERN_ENABLED".into(), "no".into());
-        vars.insert("DETECTION_SAFE_MODE".into(), "1".into());
-
-        let detection = DetectionConfig::from_vars(&vars).unwrap();
-        assert_eq!(detection.mode, DetectionMode::Heavy);
-        assert_eq!(detection.light_window_min, 10);
-        assert_eq!(detection.medium_window_min, 20);
-        assert_eq!(detection.heavy_window_min, 120);
-        assert_eq!(detection.min_samples, 50);
-        assert_eq!(detection.cooldown_sec, 60);
-        assert_eq!(detection.auto_resolve_sec, 600);
-        assert_eq!(detection.max_groups_per_cycle, 42);
-        assert!(!detection.security_findings_enabled);
-        assert!(!detection.agent_health_enabled);
-        assert!(!detection.log_pattern_enabled);
-        assert!(detection.safe_mode);
-    }
-
-    fn minimal_vars() -> std::collections::HashMap<String, String> {
-        super::collect_vars([
-            ("POSTGRES_DSN", "postgres://localhost/test"),
-            ("NATS_URL", "nats://localhost:4222"),
-            ("QUERY_ALERT_HTTP_ADDR", "0.0.0.0:9095"),
-            ("OPENSEARCH_URL", "http://localhost:9200"),
-            ("OPENSEARCH_INDEX_PREFIX", "doro"),
-            ("CLICKHOUSE_DSN", "http://localhost:8123"),
-            ("CLICKHOUSE_DATABASE", "doro"),
-            ("CLICKHOUSE_TABLE", "logs"),
-        ])
+        assert!(config.rare_fingerprint.enabled);
+        assert_eq!(config.rare_fingerprint.window_minutes, 30);
+        assert_eq!(config.rare_fingerprint.max_count, 2);
+        assert_eq!(config.rare_fingerprint.severity, "low");
+        assert_eq!(config.anomaly.evaluation_interval_secs, 45);
+        assert_eq!(config.anomaly.rule_cache_ttl_secs, 20);
     }
 }

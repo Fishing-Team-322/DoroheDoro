@@ -6,7 +6,10 @@ use serde_json::{json, Value};
 
 use common::proto::query;
 
-use crate::config::{ClickHouseConfig, OpenSearchConfig};
+use crate::{
+    anomaly::ResolvedLogFilter,
+    config::{ClickHouseConfig, OpenSearchConfig},
+};
 
 #[derive(Clone)]
 pub struct OpenSearchClient {
@@ -352,6 +355,28 @@ impl ClickHouseClient {
             .unwrap_or_default())
     }
 
+    pub async fn count_events(
+        &self,
+        filter: &ResolvedLogFilter,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> anyhow::Result<u64> {
+        let where_sql = build_anomaly_where(filter, from, to);
+        let sql = format!(
+            "SELECT count() AS count
+             FROM {}.{}
+             WHERE {}",
+            quote_identifier(&self.config.database),
+            quote_identifier(&self.config.table),
+            where_sql
+        );
+        let rows = self.query_json(&sql).await?;
+        Ok(rows
+            .first()
+            .map(|row| as_u64(&row["count"]))
+            .unwrap_or_default())
+    }
+
     pub async fn matching_count(
         &self,
         host: &str,
@@ -495,6 +520,44 @@ fn build_clickhouse_where(filter: &query::LogQueryFilter) -> String {
     } else {
         format!("WHERE {}", clauses.join(" AND "))
     }
+}
+
+fn build_anomaly_where(
+    filter: &ResolvedLogFilter,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> String {
+    let mut clauses = vec![
+        format!(
+            "timestamp >= {}",
+            clickhouse_timestamp_expr(&from.to_rfc3339_opts(SecondsFormat::Millis, true))
+        ),
+        format!(
+            "timestamp <= {}",
+            clickhouse_timestamp_expr(&to.to_rfc3339_opts(SecondsFormat::Millis, true))
+        ),
+    ];
+
+    if let Some(host) = filter.host.as_deref() {
+        clauses.push(format!("host = {}", sql_string(host)));
+    }
+    if let Some(service) = filter.service.as_deref() {
+        clauses.push(format!("service = {}", sql_string(service)));
+    }
+    if let Some(severity) = filter.severity.as_deref() {
+        clauses.push(format!("severity = {}", sql_string(severity)));
+    }
+    if let Some(fingerprint) = filter.fingerprint.as_deref() {
+        clauses.push(format!("fingerprint = {}", sql_string(fingerprint)));
+    }
+    if let Some(query) = filter.query.as_deref() {
+        clauses.push(format!(
+            "positionCaseInsensitive(message, {}) > 0",
+            sql_string(query)
+        ));
+    }
+
+    clauses.join(" AND ")
 }
 
 fn quote_identifier(value: &str) -> String {
