@@ -1,125 +1,158 @@
 # Agent Distribution and Packaging
 
-This repository now defines a delivery contract for `AGENT` artifacts without changing `agent-rs` runtime code.
+`AGENT` is now delivered as a Docker image first. The repository keeps a compatibility manifest so the current `WEB -> deployment-plane -> Ansible` flow can continue to work without `server-rs` changes.
 
-## Release matrix
+## Delivery model
 
-Current supported release targets:
+- published artifact: multi-arch Docker image for `linux/amd64` and `linux/arm64`
+- default image contract: `docker.io/<org>/doro-agent`
+- tags:
+  - floating: `main`
+  - immutable rollout tag: `main-<shortsha>`
+- rollback pin: digest, not tag
+- compatibility bridge: `agent-release-manifest.json` with `package_type=container` and `install_mode=docker_image`
 
-- `linux-amd64`
-- `linux-arm64`
-- Debian/Ubuntu compatible `.deb`
-- Astra Linux compatible `.deb`
-- generic `tar.gz` fallback for glibc-based Linux hosts
+Example contracts:
 
-This phase does not promise every Unix variant. The supported baseline is Linux + systemd.
+- [`../deployments/examples/agent-image-compat-manifest.example.json`](../deployments/examples/agent-image-compat-manifest.example.json)
+- [`../deployments/examples/agent-image-metadata.example.json`](../deployments/examples/agent-image-metadata.example.json)
 
-## Artifact formats
+## Container runtime contract
 
-Each release can publish:
+Canonical in-container paths:
 
-- `doro-agent_<version>_linux_<arch>.tar.gz`
-- `doro-agent_<version>_linux_<arch>.deb`
-- `*.sha256`
-- `*.artifact.json`
-- `agent-release-manifest.json`
+- binary: `/usr/bin/doro-agent`
+- config: `/etc/doro-agent/config.yaml`
+- PKI: `/etc/doro-agent/pki`
+- state: `/var/lib/doro-agent`
 
-The formal manifest schema lives in:
+Container commands:
 
-- [`deployments/artifacts/manifest.schema.json`](../deployments/artifacts/manifest.schema.json)
+- runtime: `doro-agent run --config /etc/doro-agent/config.yaml`
+- preflight/health: `doro-agent doctor --config /etc/doro-agent/config.yaml`
 
-An example manifest lives in:
+Host mount contract:
 
-- [`deployments/artifacts/example.manifest.json`](../deployments/artifacts/example.manifest.json)
+- `/etc/doro-agent` -> `/etc/doro-agent` read-only
+- `/var/lib/doro-agent` -> `/var/lib/doro-agent` read-write
+- `/var/log` -> `/var/log` read-only
 
-## Release bundle contents
+Current v1 limitation:
 
-Both package modes are aligned to the same install contract:
+- host log sources outside `/var/log` are not auto-mounted; use `/var/log/...` sources or extend the role intentionally
 
-- `doro-agent` binary
-- `doro-agent.service`
-- example config
-- example env file
-- install notes
-- build metadata with version, arch and build time
+## Local build and manifest generation
 
-The canonical install contract is documented in:
-
-- [`deployments/packaging/INSTALL.md`](../deployments/packaging/INSTALL.md)
-
-## Build artifacts locally
-
-Generic build:
+Build the container image locally:
 
 ```bash
-bash scripts/release/build-agent-artifacts.sh --version 0.2.0
+docker build \
+  -f agent-rs/packaging/container/Dockerfile \
+  -t docker.io/example/doro-agent:main-local \
+  .
 ```
 
-Per target:
+Generate the compatibility manifest and metadata:
 
 ```bash
-bash scripts/release/build-agent-artifacts.sh \
-  --target x86_64-unknown-linux-gnu \
-  --arch amd64 \
-  --version 0.2.0
-
-bash scripts/release/build-agent-artifacts.sh \
-  --target aarch64-unknown-linux-gnu \
-  --arch arm64 \
-  --version 0.2.0
+bash scripts/release/generate-agent-image-manifest.sh \
+  --image-repository docker.io/example/doro-agent \
+  --image-tag main-local \
+  --image-digest sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+  --version main-local
 ```
 
-Generate the combined manifest:
+Output directory:
 
-```bash
-bash scripts/release/generate-manifest.sh --version 0.2.0
-```
+- `dist/agent-image/<version>/`
 
-Artifacts are written into:
+## CI publish flow
 
-- `dist/agent/<version>/`
-
-## CI workflow
-
-The release workflow lives in:
+Workflow:
 
 - [`.github/workflows/agent-release.yml`](../.github/workflows/agent-release.yml)
 
-It is designed to:
+Trigger:
 
-- build `amd64` and `arm64` artifacts
-- emit `tar.gz` and `.deb`
-- attach checksums
-- generate a release manifest
+- push to `main`
+- manual `workflow_dispatch`
 
-## Astra Linux note
+Required GitHub configuration:
 
-Astra Linux is handled as a Debian-family packaging target.
+- repository variable: `AGENT_IMAGE_REPOSITORY`
+- repository secret: `DOCKERHUB_USERNAME`
+- repository secret: `DOCKERHUB_TOKEN`
 
-Practical rule for this phase:
+Workflow result:
 
-- prefer `.deb` on Astra
-- fall back to `tar.gz` when package installation is constrained
+- pushes `linux/amd64,linux/arm64` image with `buildx`
+- tags `main` and `main-<shortsha>`
+- captures the manifest-list digest
+- emits `agent-image-metadata.json`
+- emits compatibility `agent-release-manifest.json`
 
-The manifest includes `distro_family` so Ansible or future deployment runtime can prefer the correct artifact without hardcoded guesswork.
+## Ansible install contract
 
-## Ansible consumption
+Role:
 
-The Ansible install layer now lives in:
+- [`../deployments/ansible/roles/doro-agent`](../deployments/ansible/roles/doro-agent)
 
-- [`deployments/ansible/playbooks/install-agent.yml`](../deployments/ansible/playbooks/install-agent.yml)
-- [`deployments/ansible/roles/doro-agent`](../deployments/ansible/roles/doro-agent)
+Default mode:
 
-It consumes:
+- `doro_agent_install_mode: docker_image`
 
-- a local manifest path, or
-- a manifest URL plus optional release base URL
+New operator-facing variables:
 
-Artifact selection is based on:
+- `doro_agent_image_repository`
+- `doro_agent_image_tag`
+- `doro_agent_image_digest`
+- `doro_agent_pull_policy`
+- `doro_agent_container_name`
+- `doro_agent_restart_policy`
+- `doro_agent_container_engine`
 
-- platform
-- arch
-- distro family
-- package type preference
+Container engine selection order:
 
-That same manifest contract is intended to be reused later by `deployment-plane`.
+1. explicit `doro_agent_container_engine`
+2. `docker`
+3. `podman`
+
+Compatibility behavior:
+
+- direct image vars can be used for manual runs
+- `deployment-plane` can still pass `doro_agent_selected_artifact`
+- the role translates `package_type=container` / `install_mode=docker_image` into container deployment
+- legacy binary install tasks remain available as `legacy_binary`
+
+Direct image input is considered explicit only when you provide a real repository, tag override, or digest. The default placeholder does not bypass the manifest bridge by itself.
+
+## Rollout and rollback
+
+Host-side persisted state:
+
+- running state: `/var/lib/doro-agent`
+- last known good image: `/var/lib/doro-agent/last-known-good-image.json`
+
+Deployment flow:
+
+1. pull candidate image
+2. run `doctor` preflight in a one-shot container
+3. restart systemd unit
+4. re-run health validation
+5. persist last known good digest reference
+
+Failure behavior:
+
+- failed health does not silently succeed
+- if a last known good digest exists, the role re-renders the runner, restarts the previous image and validates rollback health
+
+## Smoke checklist
+
+- image manifest returns `package_type=container`
+- `deployment-plane` resolves `source_uri` as `docker.io/...:tag`
+- Ansible succeeds on a Docker host
+- Ansible succeeds on a Podman host
+- Ansible fails clearly on a host with neither engine
+- `/var/lib/doro-agent/state.db` and spool survive restart/recreate
+- rollback by digest restores the previous healthy image
+- `/var/log/syslog` style file sources still work through the default `/var/log` mount

@@ -1,0 +1,175 @@
+---
+- name: Gather last known good image state
+  ansible.builtin.stat:
+    path: "{{ doro_agent_last_known_good_path }}"
+  register: doro_agent_last_known_good_stat
+
+- name: Read last known good image state
+  ansible.builtin.slurp:
+    src: "{{ doro_agent_last_known_good_path }}"
+  register: doro_agent_last_known_good_raw
+  when: doro_agent_last_known_good_stat.stat.exists
+
+- name: Parse last known good image state
+  ansible.builtin.set_fact:
+    doro_agent_last_known_good_image: "{{ doro_agent_last_known_good_raw.content | b64decode | from_json }}"
+  when: doro_agent_last_known_good_stat.stat.exists
+
+- name: Resolve preferred container engine
+  ansible.builtin.shell: |
+    set -eu
+    if [ "{{ doro_agent_container_engine }}" = "docker" ] || [ "{{ doro_agent_container_engine }}" = "podman" ]; then
+      command -v "{{ doro_agent_container_engine }}" >/dev/null 2>&1 || exit 3
+      printf '%s' "{{ doro_agent_container_engine }}"
+      exit 0
+    fi
+    if command -v docker >/dev/null 2>&1; then
+      printf 'docker'
+      exit 0
+    fi
+    if command -v podman >/dev/null 2>&1; then
+      printf 'podman'
+      exit 0
+    fi
+    exit 4
+  args:
+    executable: /bin/sh
+  register: doro_agent_container_engine_detect
+  changed_when: false
+  failed_when: doro_agent_container_engine_detect.rc != 0
+
+- name: Fail when container engine is missing
+  ansible.builtin.fail:
+    msg: >-
+      No supported container engine found on the host.
+      Install Docker or Podman, or set doro_agent_container_engine explicitly.
+  when: doro_agent_container_engine_detect.stdout | trim == ''
+
+- name: Resolve systemd restart behavior for container mode
+  ansible.builtin.set_fact:
+    doro_agent_resolved_restart_behavior: >-
+      {% if doro_agent_restart_policy in ['always', 'unless-stopped'] %}always{% elif doro_agent_restart_policy == 'on-failure' %}on-failure{% else %}no{% endif %}
+
+- name: Resolve desired image references
+  ansible.builtin.set_fact:
+    doro_agent_container_engine_resolved: "{{ doro_agent_container_engine_detect.stdout | trim }}"
+    doro_agent_tagged_image_reference: "{{ doro_agent_resolved_image_repository }}:{{ doro_agent_resolved_image_tag }}"
+    doro_agent_desired_image_reference: >-
+      {% if doro_agent_resolved_image_digest | trim != '' %}{{ doro_agent_resolved_image_repository }}@{{ doro_agent_resolved_image_digest }}{% else %}{{ doro_agent_resolved_image_repository }}:{{ doro_agent_resolved_image_tag }}{% endif %}
+
+- name: Ensure container runner directory exists
+  ansible.builtin.file:
+    path: "{{ doro_agent_container_runner_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render container runner script
+  ansible.builtin.template:
+    src: doro-agent-container-runner.sh.j2
+    dest: "{{ doro_agent_container_runner_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render container systemd unit
+  ansible.builtin.template:
+    src: doro-agent-container.service.j2
+    dest: "{{ doro_agent_systemd_unit_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart doro-agent
+
+- name: Deploy containerized agent with rollback protection
+  block:
+    - name: Run container preflight
+      ansible.builtin.command:
+        argv:
+          - "{{ doro_agent_container_runner_path }}"
+          - preflight
+      changed_when: false
+
+    - name: Ensure container agent service is enabled and restarted
+      ansible.builtin.systemd_service:
+        name: "{{ doro_agent_service_name }}"
+        enabled: true
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for container health check
+      ansible.builtin.command:
+        argv:
+          - "{{ doro_agent_container_runner_path }}"
+          - health
+      register: doro_agent_container_health
+      changed_when: false
+      retries: "{{ doro_agent_container_health_retries }}"
+      delay: "{{ doro_agent_container_health_delay_sec }}"
+      until: doro_agent_container_health.rc == 0
+
+    - name: Persist last known good image state
+      ansible.builtin.copy:
+        dest: "{{ doro_agent_last_known_good_path }}"
+        owner: "{{ doro_agent_user }}"
+        group: "{{ doro_agent_group }}"
+        mode: "0640"
+        content: |
+          {
+            "image_repository": "{{ doro_agent_resolved_image_repository }}",
+            "image_tag": "{{ doro_agent_resolved_image_tag }}",
+            "image_digest": "{{ doro_agent_resolved_image_digest }}",
+            "image_reference": "{{ doro_agent_tagged_image_reference }}",
+            "image_digest_reference": "{{ doro_agent_desired_image_reference }}",
+            "container_engine": "{{ doro_agent_container_engine_resolved }}",
+            "updated_at": "{{ ansible_date_time.iso8601 }}"
+          }
+  rescue:
+    - name: Restore previous runner script when rollback image exists
+      ansible.builtin.template:
+        src: doro-agent-container-runner.sh.j2
+        dest: "{{ doro_agent_container_runner_path }}"
+        owner: root
+        group: root
+        mode: "0755"
+      vars:
+        doro_agent_resolved_image_repository: "{{ doro_agent_last_known_good_image.image_repository }}"
+        doro_agent_resolved_image_tag: "{{ doro_agent_last_known_good_image.image_tag }}"
+        doro_agent_resolved_image_digest: "{{ doro_agent_last_known_good_image.image_digest }}"
+        doro_agent_container_engine_resolved: "{{ doro_agent_last_known_good_image.container_engine | default(doro_agent_container_engine_resolved) }}"
+        doro_agent_tagged_image_reference: "{{ doro_agent_last_known_good_image.image_reference }}"
+        doro_agent_desired_image_reference: "{{ doro_agent_last_known_good_image.image_digest_reference | default(doro_agent_last_known_good_image.image_reference) }}"
+      when: doro_agent_last_known_good_stat.stat.exists
+
+    - name: Restart previous healthy image
+      ansible.builtin.systemd_service:
+        name: "{{ doro_agent_service_name }}"
+        enabled: true
+        state: restarted
+        daemon_reload: true
+      when: doro_agent_last_known_good_stat.stat.exists
+
+    - name: Verify rollback health
+      ansible.builtin.command:
+        argv:
+          - "{{ doro_agent_container_runner_path }}"
+          - health
+      register: doro_agent_rollback_health
+      changed_when: false
+      retries: "{{ doro_agent_container_health_retries }}"
+      delay: "{{ doro_agent_container_health_delay_sec }}"
+      until: doro_agent_rollback_health.rc == 0
+      when: doro_agent_last_known_good_stat.stat.exists
+
+    - name: Fail after rollback
+      ansible.builtin.fail:
+        msg: >-
+          Containerized agent deployment failed validation for image {{ doro_agent_desired_image_reference }}.
+          {% if doro_agent_last_known_good_stat.stat.exists %}
+          Rollback to {{ doro_agent_last_known_good_image.image_digest_reference | default(doro_agent_last_known_good_image.image_reference) }} succeeded.
+          {% else %}
+          No last known good image was available for rollback.
+          {% endif %}
