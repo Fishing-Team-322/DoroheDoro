@@ -29,6 +29,35 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null;
 };
 
+const resolveFetch = (fetcher?: typeof fetch): typeof fetch => {
+  if (fetcher) {
+    if (typeof window !== "undefined" && fetcher === window.fetch) {
+      return window.fetch.bind(window);
+    }
+
+    if (typeof globalThis.fetch === "function" && fetcher === globalThis.fetch) {
+      return globalThis.fetch.bind(globalThis);
+    }
+
+    return ((input: RequestInfo | URL, init?: RequestInit) =>
+      fetcher(input, init)) as typeof fetch;
+  }
+
+  if (typeof window !== "undefined" && typeof window.fetch === "function") {
+    return window.fetch.bind(window);
+  }
+
+  if (typeof globalThis.fetch === "function") {
+    return globalThis.fetch.bind(globalThis);
+  }
+
+  throw new Error("Fetch API is unavailable in this runtime");
+};
+
+export const isApiError = (error: unknown): error is ApiError => {
+  return error instanceof Error && (error as ApiError).name === "ApiError";
+};
+
 const buildUrl = (baseUrl: string | undefined, path: string): string => {
   if (/^https?:\/\//i.test(path)) {
     return path;
@@ -68,6 +97,7 @@ const normalizeError = async (
   if (response) {
     let details: unknown;
     let message = `Request failed with status ${response.status}`;
+    let code = "API_RESPONSE_ERROR";
 
     try {
       const contentType = response.headers.get("content-type") ?? "";
@@ -84,17 +114,21 @@ const normalizeError = async (
       message = details.message;
     }
 
+    if (isRecord(details) && typeof details.code === "string" && details.code) {
+      code = details.code;
+    }
+
     return createApiError({
       message,
       status: response.status,
-      code: "API_RESPONSE_ERROR",
+      code,
       details,
       response,
       cause: error,
     });
   }
 
-  if (error instanceof Error && (error as ApiError).name === "ApiError") {
+  if (isApiError(error)) {
     return error as ApiError;
   }
 
@@ -127,7 +161,7 @@ export class ApiClient {
   constructor(config: ApiClientConfig = {}) {
     this.baseUrl = config.baseUrl;
     this.defaultHeaders = config.defaultHeaders;
-    this.fetcher = config.fetcher ?? fetch;
+    this.fetcher = resolveFetch(config.fetcher);
     this.credentials = config.credentials;
     this.getCsrfToken = config.getCsrfToken;
     this.csrfHeaderName = config.csrfHeaderName ?? DEFAULT_CSRF_HEADER_NAME;

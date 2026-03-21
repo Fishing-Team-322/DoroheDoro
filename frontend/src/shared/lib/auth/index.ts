@@ -6,6 +6,7 @@ export {
 export { clearCsrfToken, getCsrfToken, setCsrfToken, CSRF_COOKIE_NAME } from "./csrf";
 export { emitUnauthorized, subscribeToUnauthorized } from "./events";
 export {
+  getLoginErrorMessage,
   getCurrentUser,
   isUnauthorizedError,
   login,

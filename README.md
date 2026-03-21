@@ -14,6 +14,8 @@ The root `docker-compose.yml` starts exactly these three services together so th
 docker compose up --build
 ```
 
+This is the recommended local DEV workflow now: both WEB and SERVER run inside Docker, while the browser only talks to `http://localhost:3000`.
+
 ## URLs
 
 - Frontend: `http://localhost:3000`
@@ -31,6 +33,10 @@ The local compose file enables a frontend-compatible dev auth stub in `edge-api`
 Frontend proxy env:
 - `NEXT_PUBLIC_API_BASE_URL=/api/edge`
 - `EDGE_API_INTERNAL_URL=http://edge-api:8080`
+
+Frontend local dev env:
+- `NEXT_PUBLIC_API_BASE_URL=/api/edge`
+- `EDGE_API_INTERNAL_URL=http://localhost:8080`
 
 Edge API auth env:
 - `HTTP_AUTH_STUB_ENABLED=true`
@@ -93,6 +99,15 @@ If `HTTP_AUTH_STUB_ENABLED=false`, these DEV auth handlers stay mounted but retu
 
 The WEB container proxies every request from `/api/edge/*` to `EDGE_API_INTERNAL_URL`. This keeps browser calls same-origin with the WEB host while still routing traffic to the Go Edge API inside compose. Because auth cookies are now issued through the WEB origin, the dev login flow works without a separate browser-visible `http://localhost:8080` dependency.
 
+For local `next dev` on the host, set `frontend/.env.local` from `frontend/.env.example` so the proxy targets `http://localhost:8080`. If `EDGE_API_INTERNAL_URL` is not set, the Next.js proxy now uses a dev-friendly default order:
+
+- `http://localhost:8080` during `next dev`
+- `http://edge-api:8080` as the compose/container default
+
+When a dev proxy attempt cannot reach the configured upstream, the proxy logs the failure and returns a structured `502` response instead of silently collapsing into a generic login error.
+
+`docker-compose.yml` now also includes healthchecks so the frontend waits for the Edge API readiness endpoint before it is started.
+
 ## Cookie and CSRF behavior
 
 - Session cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`
@@ -139,6 +154,8 @@ Use either of these identifiers with the default password:
 7. Confirm health endpoints still respond:
    - `GET http://localhost:8080/healthz`
    - `GET http://localhost:8080/readyz`
+8. If you need to inspect the auth path, watch logs with:
+   - `docker compose logs -f frontend edge-api`
 
 ## Manual API check
 

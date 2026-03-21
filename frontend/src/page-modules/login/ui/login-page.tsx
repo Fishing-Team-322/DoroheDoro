@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { FormEvent } from "react";
 import type { Locale } from "@/src/shared/config";
 import {
+  getLoginErrorMessage,
   getDefaultAuthenticatedPath,
   normalizeRedirectPath,
 } from "@/src/shared/lib/auth";
@@ -87,8 +88,9 @@ export function LoginPage({ locale }: LoginPageProps) {
       });
 
       router.replace(redirectTo);
-    } catch {
-      setLocalError("Не удалось войти. Проверьте логин и пароль.");
+    } catch (error) {
+      console.error("Login failed", error);
+      setLocalError(getLoginErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
