@@ -38,6 +38,7 @@ DEV auth for the current WEB flow:
 
 - `127.0.0.1:13000 -> frontend:3000`
 - `127.0.0.1:18080 -> edge-api:8080`
+- `127.0.0.1:19090 -> edge-api:9090`
 
 Run:
 
@@ -46,6 +47,20 @@ docker compose -f docker-compose.server.yml up -d --build
 ```
 
 The server env lives in [`edge_api/.env.server`](./edge_api/.env.server). Replace the demo auth password there before exposing the stack publicly.
+
+This server stack is the single-host pre-production model:
+
+- one host
+- one public domain
+- WEB and SERVER on the same machine
+- HTTP/SSE proxied to `frontend` and `edge-api`
+- agent gRPC+mTLS proxied to `edge-api:9090`
+
+For the first practical rollout to three Linux hosts, use the inventory and group-vars examples under [`deployments/ansible/`](./deployments/ansible/). The current honest state is:
+
+- real remote agents can already target the public domain over TLS
+- transport-level mTLS is validated at the boundary with `fake-agent`
+- real agent client-cert rollout still depends on follow-up `agent-rs` support and is not being faked in Go
 
 For the Nginx/domain layout on `fishingteam.su`, see [`docs/server-deploy.md`](./docs/server-deploy.md).
 
@@ -90,6 +105,8 @@ The current integrated slice is no longer just enrollment. The local stack now h
   - `SendHeartbeat`
   - `SendDiagnostics`
   - `IngestLogs`
+
+Boundary-side mTLS is live and verified with the built-in `fake-agent` smoke. The current `agent-rs` runtime still uses the public TLS path and does not yet expose client-certificate configuration, so that part remains an explicit follow-up outside Go boundary ownership.
 
 Query, dashboards, alerts and audit still return controlled `501 not_implemented` from `edge-api` until the corresponding Rust runtime exists.
 

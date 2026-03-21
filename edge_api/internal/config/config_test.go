@@ -20,6 +20,31 @@ func TestLoadSupportsNewAgentGRPCEnvNames(t *testing.T) {
 	}
 }
 
+func TestLoadPublicSingleHostContract(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("HTTP_LISTEN_ADDR", ":8080")
+	t.Setenv("AGENT_GRPC_LISTEN_ADDR", ":9090")
+	t.Setenv("NATS_URL", "nats://example:4222")
+	t.Setenv("AGENT_ALLOW_INSECURE_DEV_MODE", "true")
+	t.Setenv("PUBLIC_BASE_URL", "https://fishingteam.su")
+	t.Setenv("EDGE_PUBLIC_URL", "https://fishingteam.su")
+	t.Setenv("AGENT_PUBLIC_GRPC_ADDR", "fishingteam.su:443")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.Public.BaseURL != "https://fishingteam.su" {
+		t.Fatalf("unexpected public base url: %s", cfg.Public.BaseURL)
+	}
+	if cfg.Public.EdgeURL != "https://fishingteam.su" {
+		t.Fatalf("unexpected edge public url: %s", cfg.Public.EdgeURL)
+	}
+	if cfg.Public.AgentGRPCAddr != "fishingteam.su:443" {
+		t.Fatalf("unexpected public grpc addr: %s", cfg.Public.AgentGRPCAddr)
+	}
+}
+
 func TestLoadRejectsImplicitInsecureAgentGRPC(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("HTTP_LISTEN_ADDR", ":8080")
@@ -61,6 +86,9 @@ func clearConfigEnv(t *testing.T) {
 		"GRPC_TLS_CERT_FILE",
 		"GRPC_TLS_KEY_FILE",
 		"GRPC_CLIENT_CA_FILE",
+		"PUBLIC_BASE_URL",
+		"EDGE_PUBLIC_URL",
+		"AGENT_PUBLIC_GRPC_ADDR",
 	} {
 		_ = os.Unsetenv(key)
 	}

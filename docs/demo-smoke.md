@@ -155,7 +155,40 @@ After the fake agent has enrolled, these should return real PostgreSQL-backed da
 
 `edge-api -> NATS -> enrollment-plane`
 
-## 10. What is intentionally still unavailable
+## 10. Prepare a practical 3-host rollout
+
+Example inventory:
+
+- [`deployments/ansible/inventories/three-hosts.example.ini`](../deployments/ansible/inventories/three-hosts.example.ini)
+- [`deployments/ansible/group_vars/agents.example.yml`](../deployments/ansible/group_vars/agents.example.yml)
+
+Expected practical shape for the first real test:
+
+- one public boundary host: `https://fishingteam.su`
+- three remote Linux hosts in the `agents` inventory
+- artifact manifest served from the release bundle
+- per-host agent install via Ansible
+
+Run:
+
+```bash
+ansible-playbook \
+  -i deployments/ansible/inventories/three-hosts.example.ini \
+  deployments/ansible/playbooks/install-agent.yml \
+  -e @deployments/ansible/group_vars/agents.example.yml
+```
+
+For the current repo state, this rollout is honest in two parts:
+
+- real `agent-rs` hosts can already be pointed at `https://fishingteam.su` and `fishingteam.su:443`
+- transport-level client-certificate mTLS is already validated at the boundary with `fake-agent`
+
+The remaining gap is in `agent-rs` client-cert configuration, not in `edge_api`. Until that lands, treat the real 3-host rollout as:
+
+- real domain/TLS/boundary path for deployed agents
+- separate boundary mTLS validation with `fake-agent`
+
+## 11. What is intentionally still unavailable
 
 The current repo still does not contain live Rust runtime crates for:
 

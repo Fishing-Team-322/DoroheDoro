@@ -259,19 +259,19 @@ func agentPolicyHandler(deps RouterDeps) http.HandlerFunc {
 			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "agent id is required")
 			return
 		}
-		replyMsg, err := deps.Bridge.Request(r.Context(), deps.Config.NATS.Subjects.AgentsPolicyFetch, envelope.EncodeFetchPolicyRequest(envelope.FetchPolicyRequest{
+		replyMsg, err := deps.Bridge.Request(r.Context(), deps.Config.NATS.Subjects.AgentsPolicyGet, envelope.EncodeGetAgentPolicyRequest(envelope.GetAgentPolicyRequest{
 			CorrelationID: middleware.GetRequestID(r.Context()),
 			AgentID:       agentID,
 		}))
 		if err != nil {
-			deps.Logger.Error("nats request failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyFetch), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
+			deps.Logger.Error("nats request failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyGet), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
 			middleware.WriteTransportError(w, r, err)
 			return
 		}
 
 		reply, err := envelope.DecodeAgentReplyEnvelope(replyMsg.Data)
 		if err != nil {
-			deps.Logger.Error("decode upstream agent reply failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyFetch), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
+			deps.Logger.Error("decode upstream agent reply failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyGet), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
 			middleware.WriteError(w, r, http.StatusBadGateway, "internal", "invalid upstream response")
 			return
 		}
@@ -280,22 +280,26 @@ func agentPolicyHandler(deps RouterDeps) http.HandlerFunc {
 			return
 		}
 
-		payload, err := envelope.DecodeFetchPolicyResponse(reply.Payload)
+		payload, err := envelope.DecodeGetAgentPolicyResponse(reply.Payload)
 		if err != nil {
-			deps.Logger.Error("decode upstream policy payload failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyFetch), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
+			deps.Logger.Error("decode upstream policy payload failed", zap.String("subject", deps.Config.NATS.Subjects.AgentsPolicyGet), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
 			middleware.WriteError(w, r, http.StatusBadGateway, "internal", "invalid upstream response")
 			return
 		}
 
-		w.Header().Set("X-NATS-Subject", deps.Config.NATS.Subjects.AgentsPolicyFetch)
+		w.Header().Set("X-NATS-Subject", deps.Config.NATS.Subjects.AgentsPolicyGet)
+		policy := map[string]any{}
+		if payload.Policy != nil {
+			policy["id"] = payload.Policy.PolicyID
+			policy["revision_id"] = payload.Policy.PolicyRevisionID
+			policy["revision"] = payload.Policy.PolicyRevision
+			policy["assigned_at"] = payload.Policy.AssignedAt
+			policy["name"] = payload.Policy.PolicyName
+			policy["description"] = payload.Policy.PolicyDescription
+		}
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
-			"agent_id": payload.AgentID,
-			"policy": map[string]any{
-				"id":        payload.PolicyID,
-				"revision":  payload.PolicyRevision,
-				"body_json": payload.PolicyBodyJSON,
-				"status":    payload.Status,
-			},
+			"agent_id":   agentID,
+			"policy":     policy,
 			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
 		})
 	}
@@ -303,13 +307,16 @@ func agentPolicyHandler(deps RouterDeps) http.HandlerFunc {
 
 func agentsListHandler(deps RouterDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		subject := deps.Config.NATS.Subjects.AgentsRegistryList
-		items, reply, err := requestJSONEnvelope[[]agentRegistryItem](
+		subject := deps.Config.NATS.Subjects.AgentsList
+		payload, reply, err := requestAgentEnvelope(
 			r.Context(),
 			deps.Bridge,
 			deps.Logger,
 			subject,
-			map[string]string{"correlation_id": middleware.GetRequestID(r.Context())},
+			envelope.EncodeListAgentsRequest(envelope.ListAgentsRequest{
+				CorrelationID: middleware.GetRequestID(r.Context()),
+			}),
+			envelope.DecodeListAgentsResponse,
 		)
 		if err != nil {
 			deps.Logger.Error("nats request failed", zap.String("subject", subject), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
@@ -321,6 +328,17 @@ func agentsListHandler(deps RouterDeps) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("X-NATS-Subject", subject)
+		items := make([]agentRegistryItem, 0, len(payload.Agents))
+		for _, agent := range payload.Agents {
+			items = append(items, agentRegistryItem{
+				AgentID:      agent.AgentID,
+				Hostname:     agent.Hostname,
+				Status:       agent.Status,
+				Version:      agent.Version,
+				LastSeenAt:   agent.LastSeenAt,
+				MetadataJSON: map[string]any{},
+			})
+		}
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
 			"items":      items,
 			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
@@ -335,13 +353,17 @@ func agentDetailHandler(deps RouterDeps) http.HandlerFunc {
 			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "agent id is required")
 			return
 		}
-		subject := deps.Config.NATS.Subjects.AgentsRegistryGet
-		item, reply, err := requestJSONEnvelope[agentRegistryItem](
+		subject := deps.Config.NATS.Subjects.AgentsGet
+		item, reply, err := requestAgentEnvelope(
 			r.Context(),
 			deps.Bridge,
 			deps.Logger,
 			subject,
-			map[string]string{"correlation_id": middleware.GetRequestID(r.Context()), "agent_id": agentID},
+			envelope.EncodeGetAgentRequest(envelope.GetAgentRequest{
+				CorrelationID: middleware.GetRequestID(r.Context()),
+				AgentID:       agentID,
+			}),
+			envelope.DecodeAgentDetail,
 		)
 		if err != nil {
 			deps.Logger.Error("nats request failed", zap.String("subject", subject), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
@@ -354,7 +376,16 @@ func agentDetailHandler(deps RouterDeps) http.HandlerFunc {
 		}
 		w.Header().Set("X-NATS-Subject", subject)
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
-			"item":       item,
+			"item": map[string]any{
+				"agent_id":         item.AgentID,
+				"hostname":         item.Hostname,
+				"status":           item.Status,
+				"version":          item.Version,
+				"metadata_json":    item.Metadata,
+				"first_seen_at":    item.FirstSeenAt,
+				"last_seen_at":     item.LastSeenAt,
+				"effective_policy": mapPolicyBinding(item.EffectivePolicy),
+			},
 			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
 		})
 	}
@@ -368,12 +399,16 @@ func agentDiagnosticsHandler(deps RouterDeps) http.HandlerFunc {
 			return
 		}
 		subject := deps.Config.NATS.Subjects.AgentsDiagnosticsGet
-		item, reply, err := requestJSONEnvelope[agentDiagnosticsItem](
+		item, reply, err := requestAgentEnvelope(
 			r.Context(),
 			deps.Bridge,
 			deps.Logger,
 			subject,
-			map[string]string{"correlation_id": middleware.GetRequestID(r.Context()), "agent_id": agentID},
+			envelope.EncodeGetAgentDiagnosticsRequest(envelope.GetAgentDiagnosticsRequest{
+				CorrelationID: middleware.GetRequestID(r.Context()),
+				AgentID:       agentID,
+			}),
+			envelope.DecodeDiagnosticsSnapshot,
 		)
 		if err != nil {
 			deps.Logger.Error("nats request failed", zap.String("subject", subject), zap.String("request_id", middleware.GetRequestID(r.Context())), zap.Error(err))
@@ -386,9 +421,27 @@ func agentDiagnosticsHandler(deps RouterDeps) http.HandlerFunc {
 		}
 		w.Header().Set("X-NATS-Subject", subject)
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
-			"item":       item,
+			"item": map[string]any{
+				"agent_id":     item.AgentID,
+				"payload_json": item.PayloadJSON,
+				"created_at":   item.CreatedAt,
+			},
 			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
 		})
+	}
+}
+
+func mapPolicyBinding(binding *envelope.AgentPolicyBinding) map[string]any {
+	if binding == nil {
+		return nil
+	}
+	return map[string]any{
+		"policy_id":          binding.PolicyID,
+		"policy_revision_id": binding.PolicyRevisionID,
+		"policy_revision":    binding.PolicyRevision,
+		"assigned_at":        binding.AssignedAt,
+		"policy_name":        binding.PolicyName,
+		"policy_description": binding.PolicyDescription,
 	}
 }
 

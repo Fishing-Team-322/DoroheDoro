@@ -47,6 +47,68 @@ type FetchPolicyResponse struct {
 	RespondedAtUnixMs int64
 }
 
+type ListAgentsRequest struct {
+	CorrelationID string
+}
+
+type AgentPolicyBinding struct {
+	PolicyID          string
+	PolicyRevisionID  string
+	PolicyRevision    string
+	AssignedAt        string
+	PolicyName        string
+	PolicyDescription string
+}
+
+type AgentSummary struct {
+	AgentID         string
+	Hostname        string
+	Version         string
+	Status          string
+	LastSeenAt      string
+	EffectivePolicy *AgentPolicyBinding
+}
+
+type ListAgentsResponse struct {
+	Agents []AgentSummary
+}
+
+type AgentDetail struct {
+	AgentID         string
+	Hostname        string
+	Version         string
+	Status          string
+	Metadata        map[string]string
+	FirstSeenAt     string
+	LastSeenAt      string
+	EffectivePolicy *AgentPolicyBinding
+}
+
+type GetAgentRequest struct {
+	CorrelationID string
+	AgentID       string
+}
+
+type GetAgentDiagnosticsRequest struct {
+	CorrelationID string
+	AgentID       string
+}
+
+type DiagnosticsSnapshot struct {
+	AgentID     string
+	PayloadJSON string
+	CreatedAt   string
+}
+
+type GetAgentPolicyRequest struct {
+	CorrelationID string
+	AgentID       string
+}
+
+type GetAgentPolicyResponse struct {
+	Policy *AgentPolicyBinding
+}
+
 type HeartbeatPayload struct {
 	AgentID      string
 	Hostname     string
@@ -176,6 +238,33 @@ func EncodeFetchPolicyRequest(request FetchPolicyRequest) []byte {
 	return out
 }
 
+func EncodeListAgentsRequest(request ListAgentsRequest) []byte {
+	var out []byte
+	out = appendStringField(out, 1, request.CorrelationID)
+	return out
+}
+
+func EncodeGetAgentRequest(request GetAgentRequest) []byte {
+	var out []byte
+	out = appendStringField(out, 1, request.CorrelationID)
+	out = appendStringField(out, 2, request.AgentID)
+	return out
+}
+
+func EncodeGetAgentDiagnosticsRequest(request GetAgentDiagnosticsRequest) []byte {
+	var out []byte
+	out = appendStringField(out, 1, request.CorrelationID)
+	out = appendStringField(out, 2, request.AgentID)
+	return out
+}
+
+func EncodeGetAgentPolicyRequest(request GetAgentPolicyRequest) []byte {
+	var out []byte
+	out = appendStringField(out, 1, request.CorrelationID)
+	out = appendStringField(out, 2, request.AgentID)
+	return out
+}
+
 func DecodeFetchPolicyResponse(data []byte) (FetchPolicyResponse, error) {
 	var out FetchPolicyResponse
 	err := walkFields(data, func(num protowire.Number, kind protowire.Type, value []byte) error {
@@ -217,6 +306,237 @@ func DecodeFetchPolicyResponse(data []byte) (FetchPolicyResponse, error) {
 			}
 			out.RespondedAtUnixMs = decoded
 		}
+		return nil
+	})
+	return out, err
+}
+
+func DecodeAgentPolicyBinding(data []byte) (AgentPolicyBinding, error) {
+	var out AgentPolicyBinding
+	err := walkFields(data, func(num protowire.Number, kind protowire.Type, value []byte) error {
+		switch num {
+		case 1:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.PolicyID = decoded
+		case 2:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.PolicyRevisionID = decoded
+		case 3:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.PolicyRevision = decoded
+		case 4:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.AssignedAt = decoded
+		case 5:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.PolicyName = decoded
+		case 6:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.PolicyDescription = decoded
+		}
+		return nil
+	})
+	return out, err
+}
+
+func DecodeAgentSummary(data []byte) (AgentSummary, error) {
+	var out AgentSummary
+	err := walkFields(data, func(num protowire.Number, kind protowire.Type, value []byte) error {
+		switch num {
+		case 1:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.AgentID = decoded
+		case 2:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.Hostname = decoded
+		case 3:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.Version = decoded
+		case 4:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.Status = decoded
+		case 5:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.LastSeenAt = decoded
+		case 6:
+			decoded, err := consumeBytes(kind, value)
+			if err != nil {
+				return err
+			}
+			binding, err := DecodeAgentPolicyBinding(decoded)
+			if err != nil {
+				return err
+			}
+			out.EffectivePolicy = &binding
+		}
+		return nil
+	})
+	return out, err
+}
+
+func DecodeListAgentsResponse(data []byte) (ListAgentsResponse, error) {
+	var out ListAgentsResponse
+	err := walkFields(data, func(num protowire.Number, kind protowire.Type, value []byte) error {
+		if num != 1 {
+			return nil
+		}
+		decoded, err := consumeBytes(kind, value)
+		if err != nil {
+			return err
+		}
+		agent, err := DecodeAgentSummary(decoded)
+		if err != nil {
+			return err
+		}
+		out.Agents = append(out.Agents, agent)
+		return nil
+	})
+	return out, err
+}
+
+func DecodeAgentDetail(data []byte) (AgentDetail, error) {
+	var out AgentDetail
+	out.Metadata = map[string]string{}
+	err := walkFields(data, func(num protowire.Number, kind protowire.Type, value []byte) error {
+		switch num {
+		case 1:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.AgentID = decoded
+		case 2:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.Hostname = decoded
+		case 3:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.Version = decoded
+		case 4:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.Status = decoded
+		case 5:
+			decoded, err := consumeBytes(kind, value)
+			if err != nil {
+				return err
+			}
+			key, mapValue, err := decodeStringMapEntry(decoded)
+			if err != nil {
+				return err
+			}
+			out.Metadata[key] = mapValue
+		case 6:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.FirstSeenAt = decoded
+		case 7:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.LastSeenAt = decoded
+		case 8:
+			decoded, err := consumeBytes(kind, value)
+			if err != nil {
+				return err
+			}
+			binding, err := DecodeAgentPolicyBinding(decoded)
+			if err != nil {
+				return err
+			}
+			out.EffectivePolicy = &binding
+		}
+		return nil
+	})
+	return out, err
+}
+
+func DecodeDiagnosticsSnapshot(data []byte) (DiagnosticsSnapshot, error) {
+	var out DiagnosticsSnapshot
+	err := walkFields(data, func(num protowire.Number, kind protowire.Type, value []byte) error {
+		switch num {
+		case 1:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.AgentID = decoded
+		case 2:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.PayloadJSON = decoded
+		case 3:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.CreatedAt = decoded
+		}
+		return nil
+	})
+	return out, err
+}
+
+func DecodeGetAgentPolicyResponse(data []byte) (GetAgentPolicyResponse, error) {
+	var out GetAgentPolicyResponse
+	err := walkFields(data, func(num protowire.Number, kind protowire.Type, value []byte) error {
+		if num != 1 {
+			return nil
+		}
+		decoded, err := consumeBytes(kind, value)
+		if err != nil {
+			return err
+		}
+		binding, err := DecodeAgentPolicyBinding(decoded)
+		if err != nil {
+			return err
+		}
+		out.Policy = &binding
 		return nil
 	})
 	return out, err
