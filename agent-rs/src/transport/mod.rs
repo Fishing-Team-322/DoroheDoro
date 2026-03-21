@@ -36,7 +36,6 @@ pub struct FetchPolicyRequest {
 
 #[derive(Debug, Clone)]
 pub struct PolicySnapshot {
-    pub agent_id: String,
     pub policy_id: String,
     pub policy_revision: String,
     pub policy_body_json: String,

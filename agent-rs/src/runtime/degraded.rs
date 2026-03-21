@@ -9,8 +9,9 @@ use crate::{
     error::AppResult,
     runtime::{
         state_writer::{RuntimeFlagsUpdate, StateWriterHandle},
-        RuntimeStatusHandle,
+        RuntimePhase, RuntimeStatusHandle,
     },
+    state::RuntimeStatePatch,
 };
 
 pub fn spawn_degraded_controller(
@@ -59,6 +60,24 @@ pub fn spawn_degraded_controller(
                     let target_reason = if target_mode { reason } else { None };
 
                     if status.set_degraded_mode(target_mode, target_reason.clone()) {
+                        let current_phase = status.current_runtime_phase();
+                        let next_phase = if target_mode {
+                            match current_phase {
+                                RuntimePhase::Starting
+                                | RuntimePhase::Enrolling
+                                | RuntimePhase::PolicySyncing
+                                | RuntimePhase::Stopping => current_phase,
+                                _ => RuntimePhase::Degraded,
+                            }
+                        } else if current_phase == RuntimePhase::Degraded {
+                            RuntimePhase::Online
+                        } else {
+                            current_phase
+                        };
+
+                        if next_phase != current_phase {
+                            status.set_runtime_phase(next_phase, target_reason.clone());
+                        }
                         state_writer
                             .update_runtime_flags(RuntimeFlagsUpdate {
                                 degraded_mode: target_mode,
@@ -67,6 +86,17 @@ pub fn spawn_degraded_controller(
                                 spool_enabled,
                                 consecutive_send_failures: status.current_consecutive_failures(),
                                 last_successful_send_at_unix_ms: None,
+                            })
+                            .await?;
+                        state_writer
+                            .update_runtime_state(RuntimeStatePatch {
+                                runtime_status: Some(Some(next_phase.as_str().to_string())),
+                                runtime_status_reason: Some(if next_phase == RuntimePhase::Degraded {
+                                    target_reason.clone()
+                                } else {
+                                    None
+                                }),
+                                ..RuntimeStatePatch::default()
                             })
                             .await?;
                         if target_mode {

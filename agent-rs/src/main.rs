@@ -6,6 +6,7 @@ mod doctor;
 mod error;
 mod logging;
 mod metadata;
+mod policy;
 mod proto;
 mod runtime;
 mod sources;

@@ -19,13 +19,52 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::SourceConfig,
-    error::TransportErrorKind,
+    error::{AppError, TransportErrorKind},
     metadata::{
         BuildMetadata, ClusterMetadata, CompatibilitySnapshot, IdentityStatusSnapshot,
         InstallMetadata, PathMetadata, PlatformMetadata, RuntimeMetadataContext,
     },
-    state::{FileOffsetRecord, SpoolStats},
+    state::{FileOffsetRecord, RuntimeStateRecord, SpoolStats},
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimePhase {
+    Starting,
+    Enrolling,
+    PolicySyncing,
+    Online,
+    Degraded,
+    Stopping,
+    Error,
+}
+
+impl RuntimePhase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Starting => "starting",
+            Self::Enrolling => "enrolling",
+            Self::PolicySyncing => "policy_syncing",
+            Self::Online => "online",
+            Self::Degraded => "degraded",
+            Self::Stopping => "stopping",
+            Self::Error => "error",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "starting" => Some(Self::Starting),
+            "enrolling" => Some(Self::Enrolling),
+            "policy_syncing" => Some(Self::PolicySyncing),
+            "online" => Some(Self::Online),
+            "degraded" => Some(Self::Degraded),
+            "stopping" => Some(Self::Stopping),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticsSnapshot {
@@ -34,6 +73,8 @@ pub struct DiagnosticsSnapshot {
     pub version: String,
     pub uptime_sec: u64,
     pub current_policy_revision: Option<String>,
+    pub runtime_status: String,
+    pub runtime_status_reason: Option<String>,
     pub degraded_mode: bool,
     pub degraded_reason: Option<String>,
     pub blocked_delivery: bool,
@@ -52,6 +93,8 @@ pub struct DiagnosticsSnapshot {
     pub last_successful_send_at: Option<i64>,
     pub consecutive_send_failures: u32,
     pub transport_state: TransportStateSnapshot,
+    pub policy_state: PolicyStateSnapshot,
+    pub connectivity_state: ConnectivityStateSnapshot,
     pub source_statuses: Vec<SourceStatusSnapshot>,
     pub platform: PlatformMetadata,
     pub build: BuildMetadata,
@@ -70,6 +113,32 @@ pub struct TransportStateSnapshot {
     pub last_error_kind: Option<String>,
     pub blocked_delivery: bool,
     pub blocked_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyStateSnapshot {
+    pub current_policy_revision: Option<String>,
+    pub last_policy_fetch_at: Option<i64>,
+    pub last_policy_apply_at: Option<i64>,
+    pub last_policy_error: Option<String>,
+    pub active_source_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectivityStateSnapshot {
+    pub endpoint: String,
+    pub tls_enabled: bool,
+    pub mtls_enabled: bool,
+    pub server_name: Option<String>,
+    pub ca_path: Option<String>,
+    pub cert_path: Option<String>,
+    pub key_path: Option<String>,
+    pub ca_path_present: bool,
+    pub cert_path_present: bool,
+    pub key_path_present: bool,
+    pub last_connect_error: Option<String>,
+    pub last_tls_error: Option<String>,
+    pub last_handshake_success_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +180,18 @@ pub struct RuntimeStaticContext {
     pub persisted_identity_present: bool,
     pub last_known_edge_url: Option<String>,
     pub identity_status: IdentityStatusSnapshot,
+    pub connectivity: ConnectivityStaticContext,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectivityStaticContext {
+    pub endpoint: String,
+    pub tls_enabled: bool,
+    pub mtls_enabled: bool,
+    pub server_name: Option<String>,
+    pub ca_path: Option<String>,
+    pub cert_path: Option<String>,
+    pub key_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +232,15 @@ struct RuntimeStatus {
     state_db_accessible: bool,
     persisted_identity_present: bool,
     last_known_edge_url: Option<String>,
+    runtime_phase: RuntimePhase,
+    runtime_phase_reason: Option<String>,
+    last_policy_fetch_at: Option<i64>,
+    last_policy_apply_at: Option<i64>,
+    last_policy_error: Option<String>,
+    connectivity: ConnectivityStaticContext,
+    last_connect_error: Option<String>,
+    last_tls_error: Option<String>,
+    last_handshake_success_at: Option<i64>,
     degraded_mode: bool,
     degraded_reason: Option<String>,
     blocked_delivery: bool,
@@ -198,34 +288,7 @@ impl RuntimeStatusHandle {
         persisted_offsets: &[FileOffsetRecord],
         last_successful_send_at: Option<i64>,
     ) -> Self {
-        let mut source_statuses = BTreeMap::new();
-        for source in sources {
-            source_statuses.insert(
-                source.path.to_string_lossy().into_owned(),
-                SourceRuntimeState {
-                    source_id: source.source_id().to_string(),
-                    path: source.path.to_string_lossy().into_owned(),
-                    source: source.source.clone(),
-                    service: source.service.clone(),
-                    status: "idle".to_string(),
-                    file_key: None,
-                    live_read_offset: 0,
-                    durable_read_offset: 0,
-                    acked_offset: 0,
-                    last_read_at: None,
-                    last_error: None,
-                },
-            );
-        }
-
-        for offset in persisted_offsets {
-            if let Some(source) = source_statuses.get_mut(&offset.path) {
-                source.file_key = offset.file_key.clone();
-                source.durable_read_offset = offset.durable_read_offset;
-                source.acked_offset = offset.acked_offset;
-                source.live_read_offset = offset.durable_read_offset.max(offset.acked_offset);
-            }
-        }
+        let source_statuses = build_source_states(sources, persisted_offsets);
 
         Self {
             inner: Arc::new(Mutex::new(RuntimeStatus {
@@ -245,6 +308,15 @@ impl RuntimeStatusHandle {
                 state_db_accessible: static_context.state_db_accessible,
                 persisted_identity_present: static_context.persisted_identity_present,
                 last_known_edge_url: static_context.last_known_edge_url,
+                runtime_phase: RuntimePhase::Starting,
+                runtime_phase_reason: None,
+                last_policy_fetch_at: None,
+                last_policy_apply_at: None,
+                last_policy_error: None,
+                connectivity: static_context.connectivity,
+                last_connect_error: None,
+                last_tls_error: None,
+                last_handshake_success_at: None,
                 degraded_mode: false,
                 degraded_reason: None,
                 blocked_delivery: false,
@@ -273,6 +345,13 @@ impl RuntimeStatusHandle {
         }
     }
 
+    pub fn current_agent_id(&self) -> String {
+        self.inner
+            .lock()
+            .map(|inner| inner.agent_id.clone())
+            .unwrap_or_default()
+    }
+
     pub fn set_policy_revision(&self, revision: Option<String>) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.current_policy_revision = revision;
@@ -291,6 +370,101 @@ impl RuntimeStatusHandle {
         }
     }
 
+    pub fn set_runtime_phase(&self, phase: RuntimePhase, reason: Option<String>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.runtime_phase = phase;
+            inner.runtime_phase_reason = reason;
+        }
+    }
+
+    pub fn restore_runtime_state(&self, runtime_state: &RuntimeStateRecord) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.current_policy_revision = runtime_state.applied_policy_revision.clone();
+            inner.last_known_edge_url = runtime_state.last_known_edge_url.clone();
+            inner.last_successful_send_at = runtime_state.last_successful_send_at_unix_ms;
+            inner.last_policy_fetch_at = runtime_state.last_policy_fetch_at_unix_ms;
+            inner.last_policy_apply_at = runtime_state.last_policy_apply_at_unix_ms;
+            inner.last_policy_error = runtime_state.last_policy_error.clone();
+            inner.last_connect_error = runtime_state.last_connect_error.clone();
+            inner.last_tls_error = runtime_state.last_tls_error.clone();
+            inner.last_handshake_success_at = runtime_state.last_handshake_success_at_unix_ms;
+            if let Some(phase) = runtime_state
+                .runtime_status
+                .as_deref()
+                .and_then(RuntimePhase::parse)
+            {
+                inner.runtime_phase = phase;
+            }
+            inner.runtime_phase_reason = runtime_state.runtime_status_reason.clone();
+            if let Some(status) = runtime_state.identity_status.clone() {
+                inner.identity_status.status = status;
+            }
+            inner.identity_status.reason = runtime_state.identity_status_reason.clone();
+        }
+    }
+
+    pub fn current_runtime_phase(&self) -> RuntimePhase {
+        self.inner
+            .lock()
+            .map(|inner| inner.runtime_phase)
+            .unwrap_or(RuntimePhase::Error)
+    }
+
+    pub fn set_policy_fetch_result(&self, timestamp_unix_ms: i64, error: Option<String>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_policy_fetch_at = Some(timestamp_unix_ms);
+            if error.is_some() {
+                inner.last_policy_error = error;
+            }
+        }
+    }
+
+    pub fn set_policy_apply_success(
+        &self,
+        revision: Option<String>,
+        timestamp_unix_ms: i64,
+        _source_count: usize,
+    ) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.current_policy_revision = revision;
+            inner.last_policy_apply_at = Some(timestamp_unix_ms);
+            inner.last_policy_error = None;
+        }
+    }
+
+    pub fn set_policy_error(&self, error: impl Into<String>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_policy_error = Some(error.into());
+        }
+    }
+
+    pub fn record_connectivity_success(&self, timestamp_unix_ms: i64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_handshake_success_at = Some(timestamp_unix_ms);
+        }
+    }
+
+    pub fn record_connectivity_error(&self, error: &AppError) {
+        let message = error.to_string();
+        if let Ok(mut inner) = self.inner.lock() {
+            if is_tls_error(error) {
+                inner.last_tls_error = Some(message);
+            } else if is_connect_error(error) {
+                inner.last_connect_error = Some(message);
+            }
+        }
+    }
+
+    pub fn set_configured_sources(
+        &self,
+        sources: &[SourceConfig],
+        persisted_offsets: &[FileOffsetRecord],
+    ) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.sources = merge_source_states(&inner.sources, sources, persisted_offsets);
+        }
+    }
+
     pub fn update_spool_stats(&self, stats: SpoolStats) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.spool_stats = stats;
@@ -306,6 +480,7 @@ impl RuntimeStatusHandle {
     pub fn record_send_success(&self, timestamp_unix_ms: i64) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.last_successful_send_at = Some(timestamp_unix_ms);
+            inner.last_handshake_success_at = Some(timestamp_unix_ms);
             inner.consecutive_send_failures = 0;
             inner.server_unavailable_since = None;
             inner.blocked_delivery = false;
@@ -622,6 +797,8 @@ impl RuntimeStatusHandle {
             version: inner.version.clone(),
             uptime_sec: inner.started_at.elapsed().as_secs(),
             current_policy_revision: inner.current_policy_revision.clone(),
+            runtime_status: inner.runtime_phase.as_str().to_string(),
+            runtime_status_reason: inner.runtime_phase_reason.clone(),
             degraded_mode: inner.degraded_mode,
             degraded_reason: inner.degraded_reason.clone(),
             blocked_delivery: inner.blocked_delivery,
@@ -657,6 +834,28 @@ impl RuntimeStatusHandle {
                 blocked_delivery: inner.blocked_delivery,
                 blocked_reason: inner.blocked_reason.clone(),
             },
+            policy_state: PolicyStateSnapshot {
+                current_policy_revision: inner.current_policy_revision.clone(),
+                last_policy_fetch_at: inner.last_policy_fetch_at,
+                last_policy_apply_at: inner.last_policy_apply_at,
+                last_policy_error: inner.last_policy_error.clone(),
+                active_source_count: inner.sources.len(),
+            },
+            connectivity_state: ConnectivityStateSnapshot {
+                endpoint: inner.connectivity.endpoint.clone(),
+                tls_enabled: inner.connectivity.tls_enabled,
+                mtls_enabled: inner.connectivity.mtls_enabled,
+                server_name: inner.connectivity.server_name.clone(),
+                ca_path: inner.connectivity.ca_path.clone(),
+                cert_path: inner.connectivity.cert_path.clone(),
+                key_path: inner.connectivity.key_path.clone(),
+                ca_path_present: path_present(inner.connectivity.ca_path.as_deref()),
+                cert_path_present: path_present(inner.connectivity.cert_path.as_deref()),
+                key_path_present: path_present(inner.connectivity.key_path.as_deref()),
+                last_connect_error: inner.last_connect_error.clone(),
+                last_tls_error: inner.last_tls_error.clone(),
+                last_handshake_success_at: inner.last_handshake_success_at,
+            },
             source_statuses,
             platform: inner.platform.clone(),
             build: inner.build.clone(),
@@ -690,6 +889,100 @@ impl RuntimeStatusHandle {
             }
         }
     }
+}
+
+fn build_source_states(
+    sources: &[SourceConfig],
+    persisted_offsets: &[FileOffsetRecord],
+) -> BTreeMap<String, SourceRuntimeState> {
+    let mut source_statuses = BTreeMap::new();
+    for source in sources {
+        source_statuses.insert(
+            source.path.to_string_lossy().into_owned(),
+            SourceRuntimeState {
+                source_id: source.source_id().to_string(),
+                path: source.path.to_string_lossy().into_owned(),
+                source: source.source.clone(),
+                service: source.service.clone(),
+                status: "idle".to_string(),
+                file_key: None,
+                live_read_offset: 0,
+                durable_read_offset: 0,
+                acked_offset: 0,
+                last_read_at: None,
+                last_error: None,
+            },
+        );
+    }
+
+    for offset in persisted_offsets {
+        if let Some(source) = source_statuses.get_mut(&offset.path) {
+            source.file_key = offset.file_key.clone();
+            source.durable_read_offset = offset.durable_read_offset;
+            source.acked_offset = offset.acked_offset;
+            source.live_read_offset = offset.durable_read_offset.max(offset.acked_offset);
+        }
+    }
+
+    source_statuses
+}
+
+fn merge_source_states(
+    current: &BTreeMap<String, SourceRuntimeState>,
+    sources: &[SourceConfig],
+    persisted_offsets: &[FileOffsetRecord],
+) -> BTreeMap<String, SourceRuntimeState> {
+    let fresh = build_source_states(sources, persisted_offsets);
+    let mut merged = BTreeMap::new();
+    for (path, new_state) in fresh {
+        if let Some(existing) = current.get(&path) {
+            let mut state = existing.clone();
+            state.source_id = new_state.source_id;
+            state.source = new_state.source;
+            state.service = new_state.service;
+            state.path = new_state.path;
+            if state.file_key.is_none() {
+                state.file_key = new_state.file_key;
+            }
+            if state.durable_read_offset == 0 {
+                state.durable_read_offset = new_state.durable_read_offset;
+            }
+            if state.acked_offset == 0 {
+                state.acked_offset = new_state.acked_offset;
+            }
+            if state.live_read_offset == 0 {
+                state.live_read_offset = new_state.live_read_offset;
+            }
+            merged.insert(path, state);
+        } else {
+            merged.insert(path, new_state);
+        }
+    }
+    merged
+}
+
+fn is_tls_error(error: &AppError) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    matches!(error, AppError::Http(_))
+        && (message.contains("tls")
+            || message.contains("certificate")
+            || message.contains("rustls")
+            || message.contains("ssl"))
+}
+
+fn is_connect_error(error: &AppError) -> bool {
+    match error {
+        AppError::Http(error) => error.is_connect() || error.is_timeout() || error.is_request(),
+        AppError::HttpStatus { status, .. } => status.is_server_error(),
+        AppError::GrpcStatus { code, .. } => matches!(code, 4 | 8 | 13 | 14),
+        _ => false,
+    }
+}
+
+fn path_present(path: Option<&str>) -> bool {
+    path.map(std::path::Path::new)
+        .map(std::path::Path::exists)
+        .unwrap_or(false)
 }
 
 fn parse_inode(file_key: Option<&str>) -> Option<u64> {
@@ -772,6 +1065,15 @@ pub fn test_static_context() -> RuntimeStaticContext {
         identity_status: IdentityStatusSnapshot {
             status: "reused".to_string(),
             reason: Some("persisted identity accepted".to_string()),
+        },
+        connectivity: ConnectivityStaticContext {
+            endpoint: "https://edge.example.local:7443".to_string(),
+            tls_enabled: true,
+            mtls_enabled: true,
+            server_name: Some("edge.example.local".to_string()),
+            ca_path: Some("/etc/doro-agent/ca.pem".to_string()),
+            cert_path: Some("/etc/doro-agent/agent.pem".to_string()),
+            key_path: Some("/etc/doro-agent/agent.key".to_string()),
         },
     }
 }

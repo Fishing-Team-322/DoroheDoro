@@ -21,6 +21,8 @@ pub struct AgentConfig {
     #[serde(default)]
     pub diagnostics: DiagnosticsConfig,
     #[serde(default)]
+    pub policy: PolicyConfig,
+    #[serde(default)]
     pub batch: BatchConfig,
     #[serde(default)]
     pub queues: QueueConfig,
@@ -34,6 +36,8 @@ pub struct AgentConfig {
     pub install: InstallConfig,
     #[serde(default)]
     pub platform: PlatformConfig,
+    #[serde(default)]
+    pub tls: TlsConfig,
     #[serde(default)]
     pub scope: ScopeConfig,
     #[serde(default)]
@@ -63,6 +67,20 @@ pub struct DiagnosticsConfig {
 impl Default for DiagnosticsConfig {
     fn default() -> Self {
         Self { interval_sec: 0 }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PolicyConfig {
+    #[serde(default = "default_policy_refresh_interval")]
+    pub refresh_interval_sec: u64,
+}
+
+impl Default for PolicyConfig {
+    fn default() -> Self {
+        Self {
+            refresh_interval_sec: default_policy_refresh_interval(),
+        }
     }
 }
 
@@ -188,6 +206,18 @@ pub struct PlatformConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
+pub struct TlsConfig {
+    #[serde(default)]
+    pub ca_path: Option<PathBuf>,
+    #[serde(default)]
+    pub cert_path: Option<PathBuf>,
+    #[serde(default)]
+    pub key_path: Option<PathBuf>,
+    #[serde(default)]
+    pub server_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Default)]
 pub struct ScopeConfig {
     #[serde(default)]
     pub configured_cluster_id: Option<String>,
@@ -255,7 +285,7 @@ pub enum StartAt {
     End,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct SourceConfig {
     #[serde(rename = "type")]
     pub kind: String,
@@ -312,6 +342,10 @@ impl AgentConfig {
         }
         if let Some(value) = env::var_os("DIAGNOSTICS_INTERVAL_SEC") {
             self.diagnostics.interval_sec = parse_u64(&value, self.diagnostics.interval_sec);
+        }
+        if let Some(value) = env::var_os("POLICY_REFRESH_INTERVAL_SEC") {
+            self.policy.refresh_interval_sec =
+                parse_u64(&value, self.policy.refresh_interval_sec);
         }
         if let Some(value) = env::var_os("BATCH_MAX_EVENTS") {
             self.batch.max_events = parse_usize(&value, self.batch.max_events);
@@ -393,6 +427,18 @@ impl AgentConfig {
         if let Some(value) = env::var_os("ALLOW_MACHINE_ID") {
             self.platform.allow_machine_id = parse_bool(&value, self.platform.allow_machine_id);
         }
+        if let Some(value) = env::var_os("TLS_CA_PATH") {
+            self.tls.ca_path = Some(PathBuf::from(value));
+        }
+        if let Some(value) = env::var_os("TLS_CERT_PATH") {
+            self.tls.cert_path = Some(PathBuf::from(value));
+        }
+        if let Some(value) = env::var_os("TLS_KEY_PATH") {
+            self.tls.key_path = Some(PathBuf::from(value));
+        }
+        if let Some(value) = env::var_os("TLS_SERVER_NAME") {
+            self.tls.server_name = Some(value.to_string_lossy().into_owned());
+        }
         if let Some(value) = env::var_os("CLUSTER_ID") {
             self.scope.configured_cluster_id = Some(value.to_string_lossy().into_owned());
         }
@@ -418,6 +464,7 @@ impl AgentConfig {
         normalize_optional_string(&mut self.scope.cluster_name);
         normalize_optional_string(&mut self.scope.service_name);
         normalize_optional_string(&mut self.scope.environment);
+        normalize_optional_string(&mut self.tls.server_name);
         for source in &mut self.sources {
             if source.source_id.is_none() {
                 source.source_id = Some(format!("file:{}", source.path.to_string_lossy()));
@@ -446,6 +493,11 @@ impl AgentConfig {
         if self.diagnostics.interval_sec == 0 {
             return Err(AppError::invalid_config(
                 "diagnostics.interval_sec must be greater than zero",
+            ));
+        }
+        if self.policy.refresh_interval_sec == 0 {
+            return Err(AppError::invalid_config(
+                "policy.refresh_interval_sec must be greater than zero",
             ));
         }
         if self.batch.max_events == 0 {
@@ -486,6 +538,11 @@ impl AgentConfig {
         if self.spool.enabled && self.spool.max_disk_bytes == 0 {
             return Err(AppError::invalid_config(
                 "spool.max_disk_bytes must be greater than zero when spool is enabled",
+            ));
+        }
+        if self.tls.cert_path.is_some() ^ self.tls.key_path.is_some() {
+            return Err(AppError::invalid_config(
+                "tls.cert_path and tls.key_path must be configured together",
             ));
         }
         for source in &self.sources {
@@ -550,6 +607,10 @@ fn default_log_level() -> String {
 }
 
 fn default_heartbeat_interval() -> u64 {
+    30
+}
+
+fn default_policy_refresh_interval() -> u64 {
     30
 }
 
@@ -645,7 +706,7 @@ fn parse_usize(value: &std::ffi::OsStr, fallback: usize) -> usize {
 mod tests {
     use std::{
         env, fs,
-        path::PathBuf,
+        path::{Path, PathBuf},
         sync::{LazyLock, Mutex},
     };
 
@@ -672,6 +733,8 @@ heartbeat:
   interval_sec: 15
 diagnostics:
   interval_sec: 10
+policy:
+  refresh_interval_sec: 20
 batch:
   max_events: 42
   max_bytes: 10000
@@ -698,6 +761,7 @@ sources:
 
         let config = AgentConfig::load(&config_path).unwrap();
         assert_eq!(config.edge_grpc_addr, "localhost:9090");
+        assert_eq!(config.policy.refresh_interval_sec, 20);
         assert_eq!(config.batch.max_events, 42);
         assert_eq!(config.transport.mode, TransportMode::Mock);
         assert_eq!(config.sources[0].start_at, StartAt::Beginning);
@@ -732,6 +796,7 @@ sources:
             config.diagnostics.interval_sec,
             config.heartbeat.interval_sec
         );
+        assert_eq!(config.policy.refresh_interval_sec, 30);
         assert_eq!(
             config.spool.dir,
             PathBuf::from("/tmp/doro-agent").join("spool")
@@ -765,6 +830,7 @@ sources:
 
         env::set_var("EDGE_URL", "https://edge.example.local");
         env::set_var("EDGE_GRPC_ADDR", "edge.example.local:7443");
+        env::set_var("POLICY_REFRESH_INTERVAL_SEC", "60");
         env::set_var("BATCH_MAX_EVENTS", "100");
         env::set_var("BATCH_FLUSH_INTERVAL_MS", "750");
         env::set_var("QUEUE_SEND_CAPACITY", "16");
@@ -772,6 +838,10 @@ sources:
         env::set_var("TRANSPORT_MODE", "mock");
         env::set_var("INSTALL_MODE", "ansible");
         env::set_var("ALLOW_MACHINE_ID", "true");
+        env::set_var("TLS_CA_PATH", "/etc/doro-agent/ca.pem");
+        env::set_var("TLS_CERT_PATH", "/etc/doro-agent/agent.pem");
+        env::set_var("TLS_KEY_PATH", "/etc/doro-agent/agent.key");
+        env::set_var("TLS_SERVER_NAME", "edge.example.local");
         env::set_var("CLUSTER_ID", "cluster-a");
         env::set_var("CLUSTER_NAME", "prod");
         env::set_var("SERVICE_NAME", "api");
@@ -781,6 +851,7 @@ sources:
 
         env::remove_var("EDGE_URL");
         env::remove_var("EDGE_GRPC_ADDR");
+        env::remove_var("POLICY_REFRESH_INTERVAL_SEC");
         env::remove_var("BATCH_MAX_EVENTS");
         env::remove_var("BATCH_FLUSH_INTERVAL_MS");
         env::remove_var("QUEUE_SEND_CAPACITY");
@@ -788,6 +859,10 @@ sources:
         env::remove_var("TRANSPORT_MODE");
         env::remove_var("INSTALL_MODE");
         env::remove_var("ALLOW_MACHINE_ID");
+        env::remove_var("TLS_CA_PATH");
+        env::remove_var("TLS_CERT_PATH");
+        env::remove_var("TLS_KEY_PATH");
+        env::remove_var("TLS_SERVER_NAME");
         env::remove_var("CLUSTER_ID");
         env::remove_var("CLUSTER_NAME");
         env::remove_var("SERVICE_NAME");
@@ -795,6 +870,7 @@ sources:
 
         assert_eq!(config.edge_url, "https://edge.example.local");
         assert_eq!(config.edge_grpc_addr, "edge.example.local:7443");
+        assert_eq!(config.policy.refresh_interval_sec, 60);
         assert_eq!(config.batch.max_events, 100);
         assert_eq!(config.batch.flush_interval_ms, 750);
         assert_eq!(config.queues.send_capacity, 16);
@@ -803,12 +879,56 @@ sources:
         assert_eq!(config.install.mode, InstallMode::Ansible);
         assert!(config.platform.allow_machine_id);
         assert_eq!(
+            config.tls.ca_path.as_deref(),
+            Some(Path::new("/etc/doro-agent/ca.pem"))
+        );
+        assert_eq!(
+            config.tls.cert_path.as_deref(),
+            Some(Path::new("/etc/doro-agent/agent.pem"))
+        );
+        assert_eq!(
+            config.tls.key_path.as_deref(),
+            Some(Path::new("/etc/doro-agent/agent.key"))
+        );
+        assert_eq!(config.tls.server_name.as_deref(), Some("edge.example.local"));
+        assert_eq!(
             config.scope.configured_cluster_id.as_deref(),
             Some("cluster-a")
         );
         assert_eq!(config.scope.cluster_name.as_deref(), Some("prod"));
         assert_eq!(config.scope.service_name.as_deref(), Some("api"));
         assert_eq!(config.scope.environment.as_deref(), Some("production"));
+    }
+
+    #[test]
+    fn rejects_partial_tls_keypair() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        clear_test_env();
+        let dir = TempDir::new().unwrap();
+        let config_path = dir.path().join("agent.yaml");
+        fs::write(
+            &config_path,
+            r#"
+edge_url: "https://edge.example.local"
+edge_grpc_addr: "edge.example.local:7443"
+bootstrap_token: "token"
+state_dir: "/tmp/doro-agent"
+tls:
+  cert_path: "/etc/doro-agent/agent.pem"
+sources:
+  - type: "file"
+    path: "/tmp/test.log"
+    source: "syslog"
+    service: "demo"
+    severity_hint: "info"
+"#,
+        )
+        .unwrap();
+
+        let error = AgentConfig::load(&config_path).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("tls.cert_path and tls.key_path must be configured together"));
     }
 
     fn clear_test_env() {
@@ -820,6 +940,7 @@ sources:
             "LOG_LEVEL",
             "HEARTBEAT_INTERVAL_SEC",
             "DIAGNOSTICS_INTERVAL_SEC",
+            "POLICY_REFRESH_INTERVAL_SEC",
             "BATCH_MAX_EVENTS",
             "BATCH_MAX_BYTES",
             "BATCH_FLUSH_INTERVAL_MS",
@@ -841,6 +962,10 @@ sources:
             "TRANSPORT_MODE",
             "INSTALL_MODE",
             "ALLOW_MACHINE_ID",
+            "TLS_CA_PATH",
+            "TLS_CERT_PATH",
+            "TLS_KEY_PATH",
+            "TLS_SERVER_NAME",
             "CLUSTER_ID",
             "CLUSTER_NAME",
             "SERVICE_NAME",

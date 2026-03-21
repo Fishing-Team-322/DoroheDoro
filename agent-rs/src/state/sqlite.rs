@@ -9,8 +9,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::error::{AppError, AppResult};
 
 use super::{
-    AgentIdentity, FileOffsetRecord, FileOffsetUpdate, RuntimeStateRecord, SpoolBatchRecord,
-    SpoolStats,
+    AgentIdentity, FileOffsetRecord, FileOffsetUpdate, RuntimeStatePatch, RuntimeStateRecord,
+    SpoolBatchRecord, SpoolStats,
 };
 
 #[derive(Debug, Clone)]
@@ -77,7 +77,11 @@ impl SqliteStateStore {
             .query_row(
                 "SELECT applied_policy_revision, policy_body_json,
                         last_successful_send_at_unix_ms, last_known_edge_url,
+                        runtime_status, runtime_status_reason,
                         identity_status, identity_status_reason,
+                        last_policy_fetch_at_unix_ms, last_policy_apply_at_unix_ms,
+                        last_policy_error, last_connect_error, last_tls_error,
+                        last_handshake_success_at_unix_ms,
                         degraded_mode, blocked_delivery, blocked_reason,
                         spool_enabled, consecutive_send_failures, updated_at_unix_ms
                  FROM agent_runtime_state WHERE singleton_id = 1",
@@ -88,14 +92,22 @@ impl SqliteStateStore {
                         policy_body_json: row.get(1)?,
                         last_successful_send_at_unix_ms: row.get(2)?,
                         last_known_edge_url: row.get(3)?,
-                        identity_status: row.get(4)?,
-                        identity_status_reason: row.get(5)?,
-                        degraded_mode: row.get::<_, i64>(6)? != 0,
-                        blocked_delivery: row.get::<_, i64>(7)? != 0,
-                        blocked_reason: row.get(8)?,
-                        spool_enabled: row.get::<_, i64>(9)? != 0,
-                        consecutive_send_failures: row.get::<_, u32>(10)?,
-                        updated_at_unix_ms: row.get(11)?,
+                        runtime_status: row.get(4)?,
+                        runtime_status_reason: row.get(5)?,
+                        identity_status: row.get(6)?,
+                        identity_status_reason: row.get(7)?,
+                        last_policy_fetch_at_unix_ms: row.get(8)?,
+                        last_policy_apply_at_unix_ms: row.get(9)?,
+                        last_policy_error: row.get(10)?,
+                        last_connect_error: row.get(11)?,
+                        last_tls_error: row.get(12)?,
+                        last_handshake_success_at_unix_ms: row.get(13)?,
+                        degraded_mode: row.get::<_, i64>(14)? != 0,
+                        blocked_delivery: row.get::<_, i64>(15)? != 0,
+                        blocked_reason: row.get(16)?,
+                        spool_enabled: row.get::<_, i64>(17)? != 0,
+                        consecutive_send_failures: row.get::<_, u32>(18)?,
+                        updated_at_unix_ms: row.get(19)?,
                     })
                 },
             )
@@ -115,17 +127,31 @@ impl SqliteStateStore {
             "INSERT INTO agent_runtime_state (
                 singleton_id, applied_policy_revision, policy_body_json,
                 last_successful_send_at_unix_ms, last_known_edge_url,
+                runtime_status, runtime_status_reason,
                 identity_status, identity_status_reason,
+                last_policy_fetch_at_unix_ms, last_policy_apply_at_unix_ms,
+                last_policy_error, last_connect_error, last_tls_error,
+                last_handshake_success_at_unix_ms,
                 degraded_mode, blocked_delivery, blocked_reason,
                 spool_enabled, consecutive_send_failures, updated_at_unix_ms
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ) VALUES (
+                1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20
+             )
              ON CONFLICT(singleton_id) DO UPDATE SET
                 applied_policy_revision = excluded.applied_policy_revision,
                 policy_body_json = excluded.policy_body_json,
                 last_successful_send_at_unix_ms = excluded.last_successful_send_at_unix_ms,
                 last_known_edge_url = excluded.last_known_edge_url,
+                runtime_status = excluded.runtime_status,
+                runtime_status_reason = excluded.runtime_status_reason,
                 identity_status = excluded.identity_status,
                 identity_status_reason = excluded.identity_status_reason,
+                last_policy_fetch_at_unix_ms = excluded.last_policy_fetch_at_unix_ms,
+                last_policy_apply_at_unix_ms = excluded.last_policy_apply_at_unix_ms,
+                last_policy_error = excluded.last_policy_error,
+                last_connect_error = excluded.last_connect_error,
+                last_tls_error = excluded.last_tls_error,
+                last_handshake_success_at_unix_ms = excluded.last_handshake_success_at_unix_ms,
                 degraded_mode = excluded.degraded_mode,
                 blocked_delivery = excluded.blocked_delivery,
                 blocked_reason = excluded.blocked_reason,
@@ -137,17 +163,32 @@ impl SqliteStateStore {
                 state.policy_body_json,
                 state.last_successful_send_at_unix_ms,
                 state.last_known_edge_url,
+                state.runtime_status,
+                state.runtime_status_reason,
                 state.identity_status,
                 state.identity_status_reason,
+                state.last_policy_fetch_at_unix_ms,
+                state.last_policy_apply_at_unix_ms,
+                state.last_policy_error,
+                state.last_connect_error,
+                state.last_tls_error,
+                state.last_handshake_success_at_unix_ms,
                 if state.degraded_mode { 1_i64 } else { 0_i64 },
                 if state.blocked_delivery { 1_i64 } else { 0_i64 },
                 state.blocked_reason,
                 if state.spool_enabled { 1_i64 } else { 0_i64 },
                 state.consecutive_send_failures,
-                updated_at_unix_ms
+                updated_at_unix_ms,
             ],
         )?;
         Ok(())
+    }
+
+    pub fn apply_runtime_state_patch(&self, patch: RuntimeStatePatch) -> AppResult<RuntimeStateRecord> {
+        let mut state = self.load_runtime_state()?;
+        state.apply_patch(patch);
+        self.save_runtime_state(&state)?;
+        Ok(state)
     }
 
     pub fn load_file_offset(&self, path: &Path) -> AppResult<Option<FileOffsetRecord>> {
@@ -377,8 +418,16 @@ impl SqliteStateStore {
                 policy_body_json TEXT NULL,
                 last_successful_send_at_unix_ms INTEGER NULL,
                 last_known_edge_url TEXT NULL,
+                runtime_status TEXT NULL,
+                runtime_status_reason TEXT NULL,
                 identity_status TEXT NULL,
                 identity_status_reason TEXT NULL,
+                last_policy_fetch_at_unix_ms INTEGER NULL,
+                last_policy_apply_at_unix_ms INTEGER NULL,
+                last_policy_error TEXT NULL,
+                last_connect_error TEXT NULL,
+                last_tls_error TEXT NULL,
+                last_handshake_success_at_unix_ms INTEGER NULL,
                 degraded_mode INTEGER NOT NULL DEFAULT 0,
                 blocked_delivery INTEGER NOT NULL DEFAULT 0,
                 blocked_reason TEXT NULL,
@@ -411,8 +460,16 @@ impl SqliteStateStore {
 
     fn migrate_runtime_state(&self, conn: &Connection) -> AppResult<()> {
         for (column, definition) in [
+            ("runtime_status", "TEXT NULL"),
+            ("runtime_status_reason", "TEXT NULL"),
             ("identity_status", "TEXT NULL"),
             ("identity_status_reason", "TEXT NULL"),
+            ("last_policy_fetch_at_unix_ms", "INTEGER NULL"),
+            ("last_policy_apply_at_unix_ms", "INTEGER NULL"),
+            ("last_policy_error", "TEXT NULL"),
+            ("last_connect_error", "TEXT NULL"),
+            ("last_tls_error", "TEXT NULL"),
+            ("last_handshake_success_at_unix_ms", "INTEGER NULL"),
             ("degraded_mode", "INTEGER NOT NULL DEFAULT 0"),
             ("blocked_delivery", "INTEGER NOT NULL DEFAULT 0"),
             ("blocked_reason", "TEXT NULL"),
@@ -526,7 +583,7 @@ mod tests {
     use rusqlite::Connection;
     use tempfile::TempDir;
 
-    use super::{RuntimeStateRecord, SqliteStateStore};
+    use super::{RuntimeStatePatch, RuntimeStateRecord, SqliteStateStore};
     use crate::state::{FileOffsetUpdate, SourceOffsetMarker, SpoolBatchRecord};
 
     #[test]
@@ -578,8 +635,16 @@ mod tests {
                 policy_body_json: Some("{\"sources\":[]}".to_string()),
                 last_successful_send_at_unix_ms: Some(42),
                 last_known_edge_url: Some("https://edge.local".to_string()),
+                runtime_status: Some("online".to_string()),
+                runtime_status_reason: None,
                 identity_status: Some("reused".to_string()),
                 identity_status_reason: Some("persisted identity accepted".to_string()),
+                last_policy_fetch_at_unix_ms: Some(40),
+                last_policy_apply_at_unix_ms: Some(41),
+                last_policy_error: None,
+                last_connect_error: Some("connection refused".to_string()),
+                last_tls_error: Some("certificate verify failed".to_string()),
+                last_handshake_success_at_unix_ms: Some(39),
                 degraded_mode: true,
                 blocked_delivery: true,
                 blocked_reason: Some("permanent transport failure".to_string()),
@@ -602,16 +667,48 @@ mod tests {
         assert_eq!(offset.acked_offset, 64);
         assert!(runtime.degraded_mode);
         assert!(runtime.blocked_delivery);
+        assert_eq!(runtime.runtime_status.as_deref(), Some("online"));
         assert_eq!(runtime.identity_status.as_deref(), Some("reused"));
         assert_eq!(
             runtime.identity_status_reason.as_deref(),
             Some("persisted identity accepted")
+        );
+        assert_eq!(runtime.last_policy_fetch_at_unix_ms, Some(40));
+        assert_eq!(runtime.last_policy_apply_at_unix_ms, Some(41));
+        assert_eq!(runtime.last_connect_error.as_deref(), Some("connection refused"));
+        assert_eq!(
+            runtime.last_tls_error.as_deref(),
+            Some("certificate verify failed")
         );
         assert_eq!(
             runtime.blocked_reason.as_deref(),
             Some("permanent transport failure")
         );
         assert_eq!(runtime.consecutive_send_failures, 3);
+    }
+
+    #[test]
+    fn applies_runtime_state_patch() {
+        let dir = TempDir::new().unwrap();
+        let store = SqliteStateStore::new(dir.path()).unwrap();
+
+        let state = store
+            .apply_runtime_state_patch(RuntimeStatePatch {
+                runtime_status: Some(Some("degraded".to_string())),
+                runtime_status_reason: Some(Some("policy sync failed".to_string())),
+                last_policy_error: Some(Some("invalid policy".to_string())),
+                last_policy_fetch_at_unix_ms: Some(Some(10)),
+                ..RuntimeStatePatch::default()
+            })
+            .unwrap();
+
+        assert_eq!(state.runtime_status.as_deref(), Some("degraded"));
+        assert_eq!(
+            state.runtime_status_reason.as_deref(),
+            Some("policy sync failed")
+        );
+        assert_eq!(state.last_policy_error.as_deref(), Some("invalid policy"));
+        assert_eq!(state.last_policy_fetch_at_unix_ms, Some(10));
     }
 
     #[test]
