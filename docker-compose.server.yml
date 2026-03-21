@@ -51,6 +51,7 @@ services:
         condition: service_completed_successfully
     ports:
       - "127.0.0.1:18080:8080"
+      - "127.0.0.1:19090:9090"
     restart: unless-stopped
     volumes:
       - edge-api-certs:/certs:ro

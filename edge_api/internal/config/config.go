@@ -14,6 +14,7 @@ type Config struct {
 	ServiceName string
 	Version     string
 	LogLevel    string
+	Public      PublicConfig
 	HTTP        HTTPConfig
 	GRPC        GRPCConfig
 	NATS        NATSConfig
@@ -21,6 +22,12 @@ type Config struct {
 	Limits      LimitsConfig
 	Auth        AuthConfig
 	Stream      StreamConfig
+}
+
+type PublicConfig struct {
+	BaseURL       string
+	EdgeURL       string
+	AgentGRPCAddr string
 }
 
 type HTTPConfig struct {
@@ -92,6 +99,11 @@ func Load() (Config, error) {
 		ServiceName: env("SERVICE_NAME", "edge-api"),
 		Version:     env("SERVICE_VERSION", "dev"),
 		LogLevel:    env("LOG_LEVEL", "info"),
+		Public: PublicConfig{
+			BaseURL:       env("PUBLIC_BASE_URL", "http://localhost:3000"),
+			EdgeURL:       env("EDGE_PUBLIC_URL", "http://localhost:8080"),
+			AgentGRPCAddr: env("AGENT_PUBLIC_GRPC_ADDR", "localhost:9090"),
+		},
 		HTTP: HTTPConfig{
 			ListenAddr:         env("HTTP_LISTEN_ADDR", ":8080"),
 			TLSCert:            os.Getenv("HTTP_TLS_CERT_FILE"),
@@ -117,9 +129,10 @@ func Load() (Config, error) {
 				AgentsPolicyFetch:             env("SUBJECT_AGENTS_POLICY_FETCH", defaultSubjects.AgentsPolicyFetch),
 				AgentsHeartbeat:               env("SUBJECT_AGENTS_HEARTBEAT", defaultSubjects.AgentsHeartbeat),
 				AgentsDiagnostics:             env("SUBJECT_AGENTS_DIAGNOSTICS", defaultSubjects.AgentsDiagnostics),
-				AgentsRegistryList:            env("SUBJECT_AGENTS_REGISTRY_LIST", defaultSubjects.AgentsRegistryList),
-				AgentsRegistryGet:             env("SUBJECT_AGENTS_REGISTRY_GET", defaultSubjects.AgentsRegistryGet),
+				AgentsList:                    envAny([]string{"SUBJECT_AGENTS_LIST", "SUBJECT_AGENTS_REGISTRY_LIST"}, defaultSubjects.AgentsList),
+				AgentsGet:                     envAny([]string{"SUBJECT_AGENTS_GET", "SUBJECT_AGENTS_REGISTRY_GET"}, defaultSubjects.AgentsGet),
 				AgentsDiagnosticsGet:          env("SUBJECT_AGENTS_DIAGNOSTICS_GET", defaultSubjects.AgentsDiagnosticsGet),
+				AgentsPolicyGet:               env("SUBJECT_AGENTS_POLICY_GET", defaultSubjects.AgentsPolicyGet),
 				ControlPoliciesList:           env("SUBJECT_CONTROL_POLICIES_LIST", defaultSubjects.ControlPoliciesList),
 				ControlPoliciesGet:            env("SUBJECT_CONTROL_POLICIES_GET", defaultSubjects.ControlPoliciesGet),
 				ControlPoliciesCreate:         env("SUBJECT_CONTROL_POLICIES_CREATE", defaultSubjects.ControlPoliciesCreate),

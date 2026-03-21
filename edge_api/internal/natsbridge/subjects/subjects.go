@@ -5,9 +5,10 @@ type Registry struct {
 	AgentsPolicyFetch    string
 	AgentsHeartbeat      string
 	AgentsDiagnostics    string
-	AgentsRegistryList   string
-	AgentsRegistryGet    string
+	AgentsList           string
+	AgentsGet            string
 	AgentsDiagnosticsGet string
+	AgentsPolicyGet      string
 
 	ControlPoliciesList      string
 	ControlPoliciesGet       string
@@ -106,9 +107,10 @@ func Defaults() Registry {
 		AgentsPolicyFetch:    "agents.policy.fetch",
 		AgentsHeartbeat:      "agents.heartbeat",
 		AgentsDiagnostics:    "agents.diagnostics",
-		AgentsRegistryList:   "agents.registry.list",
-		AgentsRegistryGet:    "agents.registry.get",
+		AgentsList:           "agents.list",
+		AgentsGet:            "agents.get",
 		AgentsDiagnosticsGet: "agents.diagnostics.get",
+		AgentsPolicyGet:      "agents.policy.get",
 
 		ControlPoliciesList:      "control.policies.list",
 		ControlPoliciesGet:       "control.policies.get",

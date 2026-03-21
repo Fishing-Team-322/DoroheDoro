@@ -17,14 +17,17 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	if registry.AgentsDiagnostics != "agents.diagnostics" {
 		t.Fatalf("unexpected diagnostics subject: %s", registry.AgentsDiagnostics)
 	}
-	if registry.AgentsRegistryList != "agents.registry.list" {
-		t.Fatalf("unexpected agents list subject: %s", registry.AgentsRegistryList)
+	if registry.AgentsList != "agents.list" {
+		t.Fatalf("unexpected agents list subject: %s", registry.AgentsList)
 	}
-	if registry.AgentsRegistryGet != "agents.registry.get" {
-		t.Fatalf("unexpected agents get subject: %s", registry.AgentsRegistryGet)
+	if registry.AgentsGet != "agents.get" {
+		t.Fatalf("unexpected agents get subject: %s", registry.AgentsGet)
 	}
 	if registry.AgentsDiagnosticsGet != "agents.diagnostics.get" {
 		t.Fatalf("unexpected diagnostics get subject: %s", registry.AgentsDiagnosticsGet)
+	}
+	if registry.AgentsPolicyGet != "agents.policy.get" {
+		t.Fatalf("unexpected policy get subject: %s", registry.AgentsPolicyGet)
 	}
 	if registry.ControlPoliciesList != "control.policies.list" {
 		t.Fatalf("unexpected policies list subject: %s", registry.ControlPoliciesList)

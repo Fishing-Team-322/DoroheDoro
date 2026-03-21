@@ -10,10 +10,10 @@ Current boundary snapshot for the integrated stack in this repository.
 | `GET /readyz` | NATS readiness | live | returns `503` when bridge is not ready |
 | `GET /version` | local | live | build/version surface |
 | `GET /api/v1/me` | local stub | live | current WEB auth placeholder |
-| `GET /api/v1/agents` | request/reply -> `agents.registry.list` | live | real data from `enrollment-plane` |
-| `GET /api/v1/agents/{id}` | request/reply -> `agents.registry.get` | live | real data from `enrollment-plane` |
+| `GET /api/v1/agents` | request/reply -> `agents.list` | live | real data from `enrollment-plane` |
+| `GET /api/v1/agents/{id}` | request/reply -> `agents.get` | live | real data from `enrollment-plane` |
 | `GET /api/v1/agents/{id}/diagnostics` | request/reply -> `agents.diagnostics.get` | live | latest persisted diagnostics snapshot |
-| `GET /api/v1/agents/{id}/policy` | request/reply -> `agents.policy.fetch` | live | current bound policy for the agent |
+| `GET /api/v1/agents/{id}/policy` | request/reply -> `agents.policy.get` | live | current bound policy binding for the agent |
 | `GET /api/v1/policies` | request/reply -> `control.policies.list` | live | policy list from `control-plane` |
 | `GET /api/v1/policies/{id}` | request/reply -> `control.policies.get` | live | policy detail from `control-plane` |
 | `POST /api/v1/policies` | request/reply -> `control.policies.create` | live | policy create |
