@@ -1,8 +1,9 @@
 export default function Loading() {
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-lg border border-black/10 bg-white p-8 text-center shadow-sm dark:border-white/15 dark:bg-neutral-950">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">Загрузка…</p>
+    <main className="flex min-h-screen items-center justify-center bg-white p-6 dark:bg-black">
+      <div className="flex flex-col items-center gap-4">
+        <div className="loader" />
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">Загрузка...</p>
       </div>
     </main>
   );
