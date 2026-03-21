@@ -1,0 +1,19 @@
+services:
+  agent-artifacts:
+    image: dorohedoro-agent-artifacts-server
+    build:
+      context: .
+      dockerfile: ./agent-rs/packaging/compat-manifest/Dockerfile
+      args:
+        AGENT_IMAGE_REPOSITORY: ${AGENT_IMAGE_REPOSITORY:-docker.io/<org>/doro-agent}
+        AGENT_IMAGE_TAG: ${AGENT_IMAGE_TAG:-main}
+        AGENT_IMAGE_DIGEST: ${AGENT_IMAGE_DIGEST:-sha256:0000000000000000000000000000000000000000000000000000000000000000}
+        AGENT_IMAGE_VERSION: ${AGENT_IMAGE_VERSION:-main}
+        AGENT_RELEASE_CHANNEL: ${AGENT_RELEASE_CHANNEL:-main}
+
+  deployment-plane:
+    environment:
+      AGENT_ARTIFACT_MANIFEST_URL: http://agent-artifacts:8080/manifest.json
+      AGENT_RELEASE_BASE_URL: ""
+      AGENT_ARTIFACT_VERSION: ${AGENT_IMAGE_VERSION:-main}
+      AGENT_PREFERRED_PACKAGE_TYPE: container

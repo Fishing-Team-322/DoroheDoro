@@ -1,12 +1,19 @@
 ---
 doro_agent_state: present
 doro_agent_version: ""
-doro_agent_install_mode: auto
+doro_agent_install_mode: docker_image
 
 doro_agent_artifact_manifest_path: ""
 doro_agent_artifact_manifest_url: ""
 doro_agent_release_base_url: ""
 doro_agent_selected_artifact: ""
+doro_agent_image_repository: "docker.io/<org>/doro-agent"
+doro_agent_image_tag: "main"
+doro_agent_image_digest: ""
+doro_agent_pull_policy: always
+doro_agent_container_name: doro-agent
+doro_agent_container_engine: auto
+doro_agent_restart_policy: unless-stopped
 
 doro_agent_user: doro-agent
 doro_agent_group: doro-agent
@@ -21,6 +28,14 @@ doro_agent_package_binary_path: /usr/bin/doro-agent
 doro_agent_tarball_binary_path: /usr/local/bin/doro-agent
 doro_agent_systemd_unit_path: /etc/systemd/system/doro-agent.service
 doro_agent_docs_dir: /usr/share/doc/doro-agent
+doro_agent_container_runner_dir: /usr/local/lib/doro-agent
+doro_agent_container_runner_path: /usr/local/lib/doro-agent/container-runner.sh
+doro_agent_last_known_good_path: /var/lib/doro-agent/last-known-good-image.json
+doro_agent_host_log_mount: /var/log
+doro_agent_container_log_mount: /var/log
+doro_agent_container_tmpfs_size: 64m
+doro_agent_container_health_retries: 12
+doro_agent_container_health_delay_sec: 5
 
 doro_agent_edge_url: http://localhost:8080
 doro_agent_edge_grpc_addr: localhost:9090

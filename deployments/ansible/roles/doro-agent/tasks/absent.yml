@@ -1,0 +1,54 @@
+---
+- name: Stop agent service
+  ansible.builtin.systemd_service:
+    name: "{{ doro_agent_service_name }}"
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Detect container engines for cleanup
+  ansible.builtin.shell: |
+    set -eu
+    if command -v docker >/dev/null 2>&1; then
+      printf 'docker'
+      exit 0
+    fi
+    if command -v podman >/dev/null 2>&1; then
+      printf 'podman'
+      exit 0
+    fi
+    exit 0
+  args:
+    executable: /bin/sh
+  register: doro_agent_cleanup_engine
+  changed_when: false
+  failed_when: false
+
+- name: Remove containerized agent instance
+  ansible.builtin.command:
+    argv:
+      - "{{ doro_agent_cleanup_engine.stdout | trim }}"
+      - rm
+      - -f
+      - "{{ doro_agent_container_name }}"
+  changed_when: false
+  failed_when: false
+  when: doro_agent_cleanup_engine.stdout | trim != ''
+
+- name: Remove packaged agent
+  ansible.builtin.apt:
+    name: doro-agent
+    state: absent
+    purge: false
+  failed_when: false
+  when: ansible_os_family == 'Debian'
+
+- name: Remove agent service support files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ doro_agent_systemd_unit_path }}"
+    - "{{ doro_agent_container_runner_path }}"
+    - "{{ doro_agent_tarball_binary_path }}"
+    - "{{ doro_agent_package_binary_path }}"

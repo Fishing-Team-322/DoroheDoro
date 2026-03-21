@@ -1,0 +1,22 @@
+[Unit]
+Description=DoroheDoro Rust Agent (Container)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStartPre={{ doro_agent_container_runner_path }} preflight
+ExecStart={{ doro_agent_container_runner_path }} start
+ExecStop={{ doro_agent_container_runner_path }} stop
+ExecStopPost={{ doro_agent_container_runner_path }} cleanup
+Restart={{ doro_agent_resolved_restart_behavior }}
+RestartSec=5
+TimeoutStartSec=0
+TimeoutStopSec=30
+NoNewPrivileges=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
