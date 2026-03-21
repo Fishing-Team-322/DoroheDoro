@@ -1,6 +1,7 @@
 import { createApiClient } from "@/src/shared/lib/api";
 import { ApiError } from "@/src/shared/lib/api/client";
 import { clearCsrfToken, fetchCsrfToken, getCsrfToken, setCsrfToken } from "./csrf";
+import { getLoginErrorMessage, normalizeLoginError } from "./errors";
 import { emitUnauthorized } from "./events";
 import type {
   LoginInput,
@@ -25,7 +26,12 @@ async function ensureCsrfToken(): Promise<string> {
     return existingToken;
   }
 
-  return fetchCsrfToken(process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/edge");
+  try {
+    return await fetchCsrfToken(process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/edge");
+  } catch (error) {
+    clearCsrfToken();
+    throw normalizeLoginError(error, "csrf_init");
+  }
 }
 
 export function isUnauthorizedError(error: unknown): boolean {
@@ -38,14 +44,23 @@ export function isUnauthorizedError(error: unknown): boolean {
 
 export async function login(input: LoginInput): Promise<SessionPayload> {
   await ensureCsrfToken();
-  const response = await authApiClient.post<SessionPayload>("/auth/login", {
-    identifier: input.identifier,
-    email: input.identifier,
-    login: input.identifier,
-    password: input.password,
-  });
-  setCsrfToken(response.csrfToken);
-  return response;
+
+  try {
+    const response = await authApiClient.post<SessionPayload>("/auth/login", {
+      identifier: input.identifier,
+      email: input.identifier,
+      login: input.identifier,
+      password: input.password,
+    });
+    setCsrfToken(response.csrfToken);
+    return response;
+  } catch (error) {
+    const normalizedError = normalizeLoginError(error, "login");
+    if (normalizedError.kind === "csrf") {
+      clearCsrfToken();
+    }
+    throw normalizedError;
+  }
 }
 
 export async function logout(): Promise<void> {
@@ -71,3 +86,5 @@ export async function updateProfile(
   }
   return response;
 }
+
+export { getLoginErrorMessage };

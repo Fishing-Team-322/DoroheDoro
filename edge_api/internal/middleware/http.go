@@ -134,6 +134,9 @@ func AccessLog(logger *zap.Logger) func(http.Handler) http.Handler {
 			started := time.Now()
 			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(sw, r)
+			if r.URL.Path == "/readyz" || r.URL.Path == "/healthz" {
+				return
+			}
 			logger.Info("http access",
 				zap.String("request_id", GetRequestID(r.Context())),
 				zap.String("method", r.Method),

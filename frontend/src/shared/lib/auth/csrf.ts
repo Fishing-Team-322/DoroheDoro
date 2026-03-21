@@ -1,3 +1,5 @@
+import { createApiClient } from "@/src/shared/lib/api";
+
 const CSRF_COOKIE_NAME = "csrf_token";
 
 let csrfTokenCache: string | null = null;
@@ -42,16 +44,10 @@ export function clearCsrfToken(): void {
 export { CSRF_COOKIE_NAME };
 
 export async function fetchCsrfToken(baseUrl?: string): Promise<string> {
-  const response = await fetch(`${baseUrl ?? ""}/auth/csrf`, {
+  const payload = await createApiClient({
+    baseUrl,
     credentials: "include",
-    method: "GET",
-  });
-
-  if (!response.ok) {
-    throw new Error(`Unable to initialize CSRF token (${response.status})`);
-  }
-
-  const payload = (await response.json()) as { csrfToken?: string };
+  }).get<{ csrfToken?: string }>("/auth/csrf");
   const token = payload.csrfToken?.trim();
 
   if (!token) {
