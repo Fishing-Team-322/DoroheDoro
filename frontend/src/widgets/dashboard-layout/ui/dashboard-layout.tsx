@@ -4,9 +4,13 @@ import type { ComponentType, ReactNode } from "react";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { dashboardNavigation, type DashboardNavItem } from "@/src/features/dashboard-navigation";
+import { motion } from "motion/react";
+import * as Tooltip from "@radix-ui/react-tooltip";
+import {
+  dashboardNavigation,
+  type DashboardNavItem,
+} from "@/src/features/dashboard-navigation";
 import { useAuth } from "@/src/features/auth/model/use-auth";
-import { LogoutButton } from "@/src/features/auth/ui/logout-button";
 import type { Locale } from "@/src/shared/config";
 import { cn } from "@/src/shared/lib/cn";
 import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
@@ -15,7 +19,6 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   HomeIcon,
-  LogoGlyph,
   MenuIcon,
   ServerIcon,
   SettingsIcon,
@@ -31,6 +34,22 @@ type NavItem = DashboardNavItem & {
   icon?: ComponentType<{ className?: string }>;
 };
 
+type DashboardSidebarProps = {
+  locale: Locale;
+  collapsed: boolean;
+  mobileOpen: boolean;
+  onToggle: () => void;
+  onCloseMobile: () => void;
+};
+
+const SIDEBAR_EXPANDED_WIDTH = 288;
+const SIDEBAR_COLLAPSED_WIDTH = 88;
+
+const SIDEBAR_TRANSITION = {
+  duration: 0.28,
+  ease: [0.22, 1, 0.36, 1] as const,
+};
+
 export function DashboardLayout({ locale, children }: DashboardLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -39,11 +58,21 @@ export function DashboardLayout({ locale, children }: DashboardLayoutProps) {
   return (
     <div className="min-h-screen bg-[color:var(--background)] text-[color:var(--foreground)]">
       <div className="flex min-h-screen">
+        <motion.div
+          initial={false}
+          animate={{
+            width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH,
+          }}
+          transition={SIDEBAR_TRANSITION}
+          className="hidden shrink-0 lg:block"
+          aria-hidden="true"
+        />
+
         <DashboardSidebar
           locale={locale}
           collapsed={collapsed}
           mobileOpen={mobileOpen}
-          onToggle={() => setCollapsed((current) => !current)}
+          onToggle={() => setCollapsed((prev) => !prev)}
           onCloseMobile={() => setMobileOpen(false)}
         />
 
@@ -52,7 +81,7 @@ export function DashboardLayout({ locale, children }: DashboardLayoutProps) {
             type="button"
             onClick={() => setMobileOpen(true)}
             aria-label={dictionary.navigation.expandSidebar}
-            className="fixed left-4 top-4 z-20 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-elevated)] text-[color:var(--foreground)] shadow-[0_10px_30px_rgba(0,0,0,0.25)] lg:hidden"
+            className="fixed left-4 top-4 z-30 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-elevated)] text-[color:var(--foreground)] shadow-[0_10px_30px_rgba(0,0,0,0.25)] lg:hidden"
           >
             <MenuIcon className="h-5 w-5" />
           </button>
@@ -63,14 +92,6 @@ export function DashboardLayout({ locale, children }: DashboardLayoutProps) {
     </div>
   );
 }
-
-type DashboardSidebarProps = {
-  locale: Locale;
-  collapsed: boolean;
-  mobileOpen: boolean;
-  onToggle: () => void;
-  onCloseMobile: () => void;
-};
 
 export function DashboardSidebar({
   locale,
@@ -92,155 +113,192 @@ export function DashboardSidebar({
     []
   );
 
+  const username = getSidebarUsername(user);
+  const usernameBase = `@${username.slice(0, 2)}`;
+  const usernameTail = username.slice(2);
+
   return (
     <>
-      <div
-        className={cn(
-          "fixed inset-0 z-30 bg-black/50 backdrop-blur-[2px] transition-opacity duration-300 lg:hidden",
-          mobileOpen
-            ? "pointer-events-auto opacity-100"
-            : "pointer-events-none opacity-0"
-        )}
+      <motion.div
+        initial={false}
+        animate={{ opacity: mobileOpen ? 1 : 0 }}
+        transition={{ duration: 0.18 }}
         onClick={onCloseMobile}
+        className={cn(
+          "fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] lg:hidden",
+          mobileOpen ? "pointer-events-auto" : "pointer-events-none"
+        )}
       />
 
-      <aside
+      <motion.aside
+        initial={false}
+        animate={{
+          width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH,
+        }}
+        transition={SIDEBAR_TRANSITION}
         className={cn(
-          "group/sidebar relative fixed inset-y-0 left-0 z-40 flex h-screen shrink-0 flex-col border-r border-[color:var(--border)] bg-[color:var(--background)] transition-all duration-300 ease-out lg:sticky lg:translate-x-0",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
-          collapsed ? "w-[92px]" : "w-[296px]"
+          "fixed inset-y-0 left-0 z-50 h-screen border-r border-[color:var(--border)] bg-[color:var(--background)] lg:z-40",
+          mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
-        <button
-          type="button"
-          aria-label={
-            collapsed
-              ? dictionary.navigation.expandSidebar
-              : dictionary.navigation.collapseSidebar
-          }
-          onClick={onToggle}
-          className={cn(
-            "absolute right-2 top-5 z-20 hidden items-center justify-center rounded-xl bg-[color:var(--surface-elevated)] text-[color:var(--muted-foreground)] opacity-0 shadow-sm pointer-events-none transition-all duration-200 hover:bg-[color:var(--surface-elevated)] hover:text-[color:var(--foreground)] group-hover/sidebar:pointer-events-auto group-hover/sidebar:opacity-100 lg:inline-flex",
-            collapsed ? "h-10 w-10" : "h-12 w-9"
-          )}
-        >
-          {collapsed ? (
-            <ChevronRightIcon className="h-6 w-6 stroke-[2.6]" />
-          ) : (
-            <ChevronLeftIcon className="h-6 w-6 stroke-[2.6]" />
-          )}
-        </button>
+        <div className="relative flex h-full min-h-0 flex-col px-4 py-5">
+          <div className="mb-8 shrink-0 overflow-hidden">
+            <div
+              className="flex h-12 items-center pl-[6px]"
+              title={`@${username}`}
+            >
+              <div className="min-w-0 overflow-hidden">
+                <div className="inline-flex h-[24px] items-center whitespace-nowrap text-[20px] font-medium italic leading-[1] tracking-[-0.01em] text-[color:var(--foreground)]">
+                  <span className="shrink-0">{usernameBase}</span>
 
-        <div className="flex h-full min-h-0 flex-col px-4 pb-4 pt-5">
-          <div
-            className={cn(
-              "mb-6 flex items-start gap-3",
-              collapsed ? "justify-center pr-0" : "pr-10"
-            )}
-          >
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[color:var(--surface-elevated)]">
-              <LogoGlyph />
-            </div>
-
-            <div className={cn("min-w-0", collapsed && "hidden")}>
-              <p className="truncate text-[11px] uppercase tracking-[0.22em] text-[color:var(--muted-foreground)]">
-                {dictionary.navigation.eyebrow}
-              </p>
-              <p className="truncate text-[15px] font-semibold leading-none text-[color:var(--foreground)]">
-                {dictionary.navigation.title}
-              </p>
+                  <span
+                    className={cn(
+                      "inline-block -ml-[0.02em] overflow-hidden transition-[max-width,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                      collapsed
+                        ? "max-w-0 opacity-0"
+                        : "max-w-[160px] opacity-100"
+                    )}
+                  >
+                    {usernameTail}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <nav className="space-y-1">
+          <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <nav className="space-y-2">
               {items.map((item) => {
                 const href = withLocalePath(locale, item.href);
-                const isActive = pathname === href || pathname.startsWith(`${href}/`);
+                const isActive =
+                  pathname === href || pathname.startsWith(`${href}/`);
                 const Icon = item.icon;
                 const navItem = dictionary.navigation[item.key];
 
                 return (
-                  <Link
+                  <SidebarNavItem
                     key={item.href}
                     href={href}
+                    label={navItem.label}
+                    Icon={Icon}
+                    isActive={isActive}
+                    collapsed={collapsed}
                     onClick={onCloseMobile}
-                    title={collapsed ? navItem.label : undefined}
-                    className={cn(
-                      "group/item flex h-11 items-center gap-3 rounded-xl px-3 py-2 text-sm transition-colors duration-150",
-                      collapsed && "justify-center px-0",
-                      isActive
-                        ? "bg-[color:var(--surface-elevated)] text-[color:var(--foreground)]"
-                        : "text-[color:var(--muted-foreground)] hover:bg-[color:var(--button-ghost-bg-hover)] hover:text-[color:var(--foreground)]"
-                    )}
-                  >
-                    {Icon ? (
-                      <Icon
-                        className={cn(
-                          "h-5 w-5 shrink-0 transition-colors",
-                          isActive
-                            ? "text-[color:var(--foreground)]"
-                            : "text-[color:var(--muted-foreground)] group-hover/item:text-[color:var(--foreground)]"
-                        )}
-                      />
-                    ) : null}
-
-                    <span className={cn("min-w-0 flex-1", collapsed && "hidden")}>
-                      <span className="block truncate text-[15px] font-medium leading-5">
-                        {navItem.label}
-                      </span>
-                    </span>
-                  </Link>
+                  />
                 );
               })}
             </nav>
           </div>
 
-          <div
-            className={cn(
-              "mt-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-elevated)] p-3",
-              collapsed && "px-2 py-2"
-            )}
+          <button
+            type="button"
+            aria-label={
+              collapsed
+                ? dictionary.navigation.expandSidebar
+                : dictionary.navigation.collapseSidebar
+            }
+            onClick={onToggle}
+            className="mt-4 hidden h-10 w-10 shrink-0 self-center items-center justify-center rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface-elevated)] text-[color:var(--muted-foreground)] shadow-[0_8px_24px_rgba(0,0,0,0.18)] transition-colors hover:text-[color:var(--foreground)] lg:inline-flex"
           >
-            <div className={cn("space-y-1", collapsed && "hidden")}>
-              <p className="truncate text-sm font-medium text-[color:var(--foreground)]">
-                {user?.displayName ?? dictionary.common.signedIn}
-              </p>
-              <p className="truncate text-xs text-[color:var(--muted-foreground)]">
-                {user?.email ?? dictionary.common.sessionActive}
-              </p>
-            </div>
-
-            <LogoutButton
-              locale={locale}
-              variant={collapsed ? "ghost" : "secondary"}
-              size="sm"
-              className={cn("mt-3 w-full", collapsed && "mt-0 px-0")}
-            >
-              {collapsed
-                ? dictionary.auth.logout.compact
-                : dictionary.auth.logout.full}
-            </LogoutButton>
-          </div>
+            {collapsed ? (
+              <ChevronRightIcon className="h-5 w-5 stroke-[2.4]" />
+            ) : (
+              <ChevronLeftIcon className="h-5 w-5 stroke-[2.4]" />
+            )}
+          </button>
 
           <button
             type="button"
             onClick={onCloseMobile}
-            className="mt-4 inline-flex h-10 w-full items-center justify-center rounded-2xl border border-[color:var(--button-secondary-border)] bg-[color:var(--button-secondary-bg)] px-4 text-sm font-medium text-[color:var(--button-secondary-fg)] transition-colors hover:bg-[color:var(--button-secondary-bg-hover)] lg:hidden"
+            className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-2xl border border-[color:var(--button-secondary-border)] bg-[color:var(--button-secondary-bg)] px-4 text-sm font-medium text-[color:var(--button-secondary-fg)] transition-colors hover:bg-[color:var(--button-secondary-bg-hover)] lg:hidden"
           >
             {dictionary.common.close}
           </button>
         </div>
-      </aside>
+      </motion.aside>
     </>
   );
 }
 
-export function DashboardPageContainer({
-  children,
+function SidebarNavItem({
+  href,
+  label,
+  Icon,
+  isActive,
+  collapsed,
+  onClick,
 }: {
-  children: ReactNode;
+  href: string;
+  label: string;
+  Icon?: ComponentType<{ className?: string }>;
+  isActive: boolean;
+  collapsed: boolean;
+  onClick?: () => void;
 }) {
+  const content = (
+    <Link
+      href={href}
+      onClick={onClick}
+      aria-label={collapsed ? label : undefined}
+      className={cn(
+        "block rounded-lg text-white transition-colors duration-200",
+        isActive
+          ? "bg-[color:var(--surface-elevated)]"
+          : "hover:bg-[color:var(--button-ghost-bg-hover)]"
+      )}
+    >
+      <div className="grid h-10 grid-cols-[44px_minmax(0,1fr)] items-center pl-[6px]">
+        <div className="flex h-10 w-11 items-center justify-center">
+          {Icon ? (
+            <Icon className="h-5 w-5 shrink-0 text-[color:var(--foreground)] transition-colors duration-200" />
+          ) : null}
+        </div>
+
+        <div className="min-w-0 overflow-hidden">
+          <div
+            className={cn(
+              "overflow-hidden whitespace-nowrap transition-[max-width,opacity,margin-left] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              collapsed
+                ? "ml-0 max-w-0 opacity-0"
+                : "ml-3 max-w-[180px] opacity-100"
+            )}
+          >
+            <span className="block truncate text-[15px] font-medium leading-5 text-white">
+              {label}
+            </span>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+
+  if (!collapsed) {
+    return content;
+  }
+
+  return (
+    <Tooltip.Provider delayDuration={100}>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>{content}</Tooltip.Trigger>
+
+        <Tooltip.Portal>
+          <Tooltip.Content
+            side="right"
+            align="center"
+            sideOffset={12}
+            collisionPadding={8}
+            className="z-[9999] whitespace-nowrap rounded-md bg-[color:var(--surface-elevated)] px-3 py-2 text-sm font-medium leading-none text-white shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
+          >
+            {label}
+            <Tooltip.Arrow className="fill-[color:var(--surface-elevated)]" />
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
+}
+
+export function DashboardPageContainer({ children }: { children: ReactNode }) {
   return <ConsolePage>{children}</ConsolePage>;
 }
 
@@ -261,7 +319,10 @@ export function PageHeader({
         <nav aria-label="Breadcrumb">
           <ol className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted-foreground)]">
             {breadcrumbs.map((item, index) => (
-              <li key={`${item.label}-${index}`} className="flex items-center gap-2">
+              <li
+                key={`${item.label}-${index}`}
+                className="flex items-center gap-2"
+              >
                 {item.href ? (
                   <Link
                     href={item.href}
@@ -270,7 +331,9 @@ export function PageHeader({
                     {item.label}
                   </Link>
                 ) : (
-                  <span className="text-[color:var(--foreground)]">{item.label}</span>
+                  <span className="text-[color:var(--foreground)]">
+                    {item.label}
+                  </span>
                 )}
 
                 {index < breadcrumbs.length - 1 ? (
@@ -314,7 +377,10 @@ export function Section({
 }) {
   return (
     <section
-      className={cn("min-w-0 border-t border-[color:var(--border)] py-5", className)}
+      className={cn(
+        "min-w-0 border-t border-[color:var(--border)] py-5",
+        className
+      )}
     >
       {children}
     </section>
@@ -331,5 +397,28 @@ function getSidebarIcon(item: Pick<NavItem, "key">) {
       return ShieldIcon;
     case "profile":
       return SettingsIcon;
+    default:
+      return undefined;
   }
+}
+
+function getSidebarUsername(
+  user:
+    | {
+        username?: string | null;
+        login?: string | null;
+        displayName?: string | null;
+        email?: string | null;
+      }
+    | null
+    | undefined
+) {
+  const rawValue =
+    user?.username ??
+    user?.login ??
+    user?.displayName ??
+    user?.email?.split("@")[0] ??
+    "admin";
+
+  return rawValue.trim().replace(/^@+/, "").replace(/\s+/g, "").toLowerCase();
 }
