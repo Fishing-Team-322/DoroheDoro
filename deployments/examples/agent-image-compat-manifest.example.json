@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0",
+  "version": "main-a1b2c3d4",
+  "generated_at": "2026-03-22T00:00:00Z",
+  "release_channel": "main",
+  "image": {
+    "repository": "docker.io/example/doro-agent",
+    "tag": "main-a1b2c3d4",
+    "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "reference": "docker.io/example/doro-agent:main-a1b2c3d4",
+    "digest_reference": "docker.io/example/doro-agent@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "artifacts": [
+    {
+      "artifact_name": "doro-agent-linux-amd64",
+      "artifact_path": "docker.io/example/doro-agent:main-a1b2c3d4",
+      "arch": "amd64",
+      "checksum_file": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "distro_family": "generic-glibc",
+      "image_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "image_digest_reference": "docker.io/example/doro-agent@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "image_reference": "docker.io/example/doro-agent:main-a1b2c3d4",
+      "image_repository": "docker.io/example/doro-agent",
+      "image_tag": "main-a1b2c3d4",
+      "install_mode": "docker_image",
+      "package_type": "container",
+      "packaging_preference": 100,
+      "platform": "linux",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "source_uri": "docker.io/example/doro-agent:main-a1b2c3d4"
+    },
+    {
+      "artifact_name": "doro-agent-linux-arm64",
+      "artifact_path": "docker.io/example/doro-agent:main-a1b2c3d4",
+      "arch": "arm64",
+      "checksum_file": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "distro_family": "generic-glibc",
+      "image_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "image_digest_reference": "docker.io/example/doro-agent@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "image_reference": "docker.io/example/doro-agent:main-a1b2c3d4",
+      "image_repository": "docker.io/example/doro-agent",
+      "image_tag": "main-a1b2c3d4",
+      "install_mode": "docker_image",
+      "package_type": "container",
+      "packaging_preference": 100,
+      "platform": "linux",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "source_uri": "docker.io/example/doro-agent:main-a1b2c3d4"
+    }
+  ]
+}
