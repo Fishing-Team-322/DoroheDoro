@@ -7,6 +7,22 @@ log_level: "info"
 transport:
   mode: "edge"
 
+install:
+  mode: "auto"
+
+platform:
+  allow_machine_id: false
+
+scope:
+  configured_cluster_id: "cluster-a"
+  cluster_name: "production"
+  service_name: "system-logs"
+  environment: "prod"
+  configured_cluster_tags:
+    tenant: "team-a"
+  host_labels:
+    role: "edge"
+
 heartbeat:
   interval_sec: 30
 

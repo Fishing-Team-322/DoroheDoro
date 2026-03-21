@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     fs::{self, File},
     io::{BufRead, BufReader, Seek, SeekFrom},
     path::Path,
@@ -14,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     batching::approximate_event_size,
     config::{QueueConfig, SourceConfig, StartAt},
+    metadata::EventEnrichmentContext,
     proto::ingest,
     runtime::RuntimeStatusHandle,
     sources::{decode_line, SourceCheckpoint, SourceEvent},
@@ -25,19 +25,29 @@ const FILE_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub fn spawn_file_source(
     config: SourceConfig,
     queue_config: QueueConfig,
+    enrichment: EventEnrichmentContext,
     store: SqliteStateStore,
     status: RuntimeStatusHandle,
     tx: mpsc::Sender<SourceEvent>,
     shutdown: CancellationToken,
 ) -> JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
-        run_file_source(config, queue_config, store, status, tx, shutdown);
+        run_file_source(
+            config,
+            queue_config,
+            enrichment,
+            store,
+            status,
+            tx,
+            shutdown,
+        );
     })
 }
 
 fn run_file_source(
     config: SourceConfig,
     queue_config: QueueConfig,
+    enrichment: EventEnrichmentContext,
     store: SqliteStateStore,
     status: RuntimeStatusHandle,
     tx: mpsc::Sender<SourceEvent>,
@@ -150,10 +160,8 @@ fn run_file_source(
                 Ok(_) => {
                     let offset = reader.stream_position().unwrap_or_default();
                     if let Some(message) = decode_line(&line) {
-                        let mut labels = BTreeMap::new();
-                        labels.insert("path".to_string(), source_path.clone());
-                        labels.insert("source".to_string(), config.source.clone());
-                        labels.insert("source_id".to_string(), source_id.clone());
+                        let labels =
+                            enrichment.labels_for_source(&source_path, &config.source, &source_id);
 
                         let event = ingest::LogEvent {
                             timestamp_unix_ms: Utc::now().timestamp_millis(),

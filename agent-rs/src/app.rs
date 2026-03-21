@@ -1,22 +1,23 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
+use rusqlite::OpenFlags;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::{
     batching::spawn_batcher,
-    cli::Cli,
     config::{AgentConfig, TransportMode},
     error::AppResult,
     logging,
+    metadata::{IdentityStatusSnapshot, RuntimeMetadataContext},
     runtime::{
         degraded::spawn_degraded_controller, diagnostics::spawn_diagnostics_worker,
         heartbeat::spawn_heartbeat_worker, sender::spawn_sender, state_writer::spawn_state_writer,
-        RuntimeStatusHandle,
+        RuntimeStaticContext, RuntimeStatusHandle,
     },
     sources::spawn_file_source,
-    state::{RuntimeStateRecord, SqliteStateStore},
+    state::SqliteStateStore,
     transport::{
         AgentTransport, DynTransport, EdgeGrpcTransport, EnrollRequest, FetchPolicyRequest,
         MockTransport,
@@ -30,26 +31,52 @@ pub struct App {
     store: SqliteStateStore,
     transport: DynTransport,
     status: RuntimeStatusHandle,
+    metadata: RuntimeMetadataContext,
     hostname: String,
     version: String,
     agent_id: String,
 }
 
 impl App {
-    pub async fn load(cli: Cli) -> AppResult<Self> {
-        let config = AgentConfig::load(&cli.config)?;
+    pub async fn load(config_path: PathBuf) -> AppResult<Self> {
+        let config = AgentConfig::load(&config_path)?;
         logging::init(&config.log_level)?;
+
+        let hostname = resolve_hostname();
+        let metadata = RuntimeMetadataContext::detect(&config, &config_path, &hostname)?;
+        log_metadata_warnings(&metadata);
 
         let store = SqliteStateStore::new(&config.state_dir)?;
         let runtime_state = store.load_runtime_state()?;
         let persisted_offsets = store.list_file_offsets()?;
-        let hostname = resolve_hostname();
-        let version = env!("CARGO_PKG_VERSION").to_string();
+        let persisted_identity = store.load_identity()?;
+        let version = metadata.build.agent_version.clone();
+        let last_known_edge_url = runtime_state
+            .last_known_edge_url
+            .clone()
+            .or_else(|| Some(config.edge_url.clone()));
+        let identity_status = runtime_state
+            .identity_status
+            .clone()
+            .map(|status| IdentityStatusSnapshot {
+                status,
+                reason: runtime_state.identity_status_reason.clone(),
+            })
+            .unwrap_or_default();
+
         let status = RuntimeStatusHandle::new(
             String::new(),
             hostname.clone(),
             version.clone(),
-            transport_mode_label(&config.transport.mode),
+            config.transport.mode.as_str().to_string(),
+            RuntimeStaticContext {
+                metadata: metadata.clone(),
+                state_db_exists: store.db_path().exists(),
+                state_db_accessible: sqlite_accessible(store.db_path()),
+                persisted_identity_present: persisted_identity.is_some(),
+                last_known_edge_url,
+                identity_status,
+            },
             config.spool.enabled,
             &config.sources,
             &persisted_offsets,
@@ -69,6 +96,7 @@ impl App {
         if let Some(revision) = runtime_state.applied_policy_revision.clone() {
             status.set_policy_revision(Some(revision));
         }
+        status.set_last_known_edge_url(Some(config.edge_url.clone()));
         status.update_spool_stats(store.spool_stats()?);
 
         let transport = build_transport(&config)?;
@@ -77,6 +105,7 @@ impl App {
             store,
             transport,
             status,
+            metadata,
             hostname,
             version,
             agent_id: String::new(),
@@ -91,7 +120,9 @@ impl App {
             agent_id = self.agent_id,
             state_db = %self.store.db_path().display(),
             spool_dir = %self.config.spool.dir.display(),
-            transport_mode = ?self.config.transport.mode,
+            transport_mode = self.config.transport.mode.as_str(),
+            install_mode = self.metadata.install.resolved_mode,
+            target = self.metadata.build.target_triple,
             "starting doro-agent"
         );
 
@@ -168,6 +199,7 @@ impl App {
             source_handles.push(spawn_file_source(
                 source,
                 self.config.queues.clone(),
+                self.metadata.event_enrichment.clone(),
                 self.store.clone(),
                 self.status.clone(),
                 event_tx.clone(),
@@ -197,10 +229,24 @@ impl App {
     }
 
     async fn ensure_identity_and_policy(&mut self) -> AppResult<String> {
-        let runtime_state = self.store.load_runtime_state()?;
-        let mut agent_id = match self.store.load_identity()? {
-            Some(identity) => identity.agent_id,
-            None => self.enroll(None).await?,
+        let mut runtime_state = self.store.load_runtime_state()?;
+        let persisted_identity = self.store.load_identity()?;
+        let (mut agent_id, mut identity_status) = if let Some(identity) = persisted_identity {
+            (
+                identity.agent_id,
+                IdentityStatusSnapshot {
+                    status: "reused".to_string(),
+                    reason: Some("persisted identity accepted".to_string()),
+                },
+            )
+        } else {
+            (
+                self.enroll(None).await?,
+                IdentityStatusSnapshot {
+                    status: "newly_enrolled".to_string(),
+                    reason: Some("no persisted identity was found".to_string()),
+                },
+            )
         };
 
         let policy = match self
@@ -214,7 +260,11 @@ impl App {
             Ok(policy) => policy,
             Err(error) if error.is_identity_error() => {
                 warn!(error = %error, "stored agent identity was rejected, re-enrolling");
-                agent_id = self.enroll(None).await?;
+                identity_status = IdentityStatusSnapshot {
+                    status: "re_enrolled".to_string(),
+                    reason: Some("stored identity was rejected by the server".to_string()),
+                };
+                agent_id = self.enroll(Some(agent_id.clone())).await?;
                 self.transport
                     .fetch_policy(FetchPolicyRequest {
                         agent_id: agent_id.clone(),
@@ -225,28 +275,34 @@ impl App {
             Err(error) => return Err(error),
         };
 
-        self.store.save_runtime_state(&RuntimeStateRecord {
-            applied_policy_revision: Some(policy.policy_revision.clone()),
-            policy_body_json: Some(policy.policy_body_json),
-            last_successful_send_at_unix_ms: runtime_state.last_successful_send_at_unix_ms,
-            last_known_edge_url: Some(self.config.edge_url.clone()),
-            degraded_mode: runtime_state.degraded_mode,
-            blocked_delivery: runtime_state.blocked_delivery,
-            blocked_reason: runtime_state.blocked_reason,
-            spool_enabled: self.config.spool.enabled,
-            consecutive_send_failures: runtime_state.consecutive_send_failures,
-            updated_at_unix_ms: chrono::Utc::now().timestamp_millis(),
-        })?;
+        runtime_state.applied_policy_revision = Some(policy.policy_revision.clone());
+        // TODO: keep policy_body_json persisted for future cluster-aware server-issued metadata,
+        // but do not parse it on the agent until the shared contract is explicitly fixed.
+        runtime_state.policy_body_json = Some(policy.policy_body_json.clone());
+        runtime_state.last_known_edge_url = Some(self.config.edge_url.clone());
+        runtime_state.identity_status = Some(identity_status.status.clone());
+        runtime_state.identity_status_reason = identity_status.reason.clone();
+        runtime_state.degraded_mode = runtime_state.degraded_mode;
+        runtime_state.blocked_delivery = runtime_state.blocked_delivery;
+        runtime_state.blocked_reason = runtime_state.blocked_reason;
+        runtime_state.spool_enabled = self.config.spool.enabled;
+        runtime_state.updated_at_unix_ms = chrono::Utc::now().timestamp_millis();
+        self.store.save_runtime_state(&runtime_state)?;
+
         info!(
             agent_id = agent_id,
             policy_agent_id = policy.agent_id,
             policy_id = policy.policy_id,
             policy_revision = policy.policy_revision,
             policy_status = policy.status,
+            identity_status = identity_status.status,
             "agent policy synchronized"
         );
         self.status
             .set_policy_revision(Some(policy.policy_revision.clone()));
+        self.status.set_identity_status(identity_status);
+        self.status
+            .set_last_known_edge_url(Some(self.config.edge_url.clone()));
 
         Ok(agent_id)
     }
@@ -258,7 +314,7 @@ impl App {
                 bootstrap_token: self.config.bootstrap_token.clone(),
                 hostname: self.hostname.clone(),
                 version: self.version.clone(),
-                metadata: enrollment_metadata(&self.config.transport.mode, &self.config.edge_url),
+                metadata: enrollment_metadata(&self.metadata, &self.config),
                 existing_agent_id,
             })
             .await?;
@@ -284,25 +340,73 @@ fn build_transport(config: &AgentConfig) -> AppResult<Arc<dyn AgentTransport>> {
     }
 }
 
-fn resolve_hostname() -> String {
+pub fn resolve_hostname() -> String {
     hostname::get()
         .ok()
         .and_then(|value| value.into_string().ok())
         .unwrap_or_else(|| "unknown-host".to_string())
 }
 
-fn transport_mode_label(mode: &TransportMode) -> String {
-    match mode {
-        TransportMode::Edge => "edge".to_string(),
-        TransportMode::Mock => "mock".to_string(),
+fn enrollment_metadata(
+    metadata: &RuntimeMetadataContext,
+    config: &AgentConfig,
+) -> BTreeMap<String, String> {
+    let mut values = BTreeMap::new();
+    values.insert("os_family".to_string(), metadata.platform.os_family.clone());
+    values.insert("arch".to_string(), metadata.platform.architecture.clone());
+    values.insert("edge_url".to_string(), config.edge_url.clone());
+    values.insert(
+        "transport_mode".to_string(),
+        config.transport.mode.as_str().to_string(),
+    );
+    values.insert(
+        "resolved_install_mode".to_string(),
+        metadata.install.resolved_mode.clone(),
+    );
+    values.insert("build_id".to_string(), metadata.build.build_id.clone());
+    values.insert(
+        "systemd_detected".to_string(),
+        metadata.platform.systemd_detected.to_string(),
+    );
+    if let Some(value) = metadata.platform.distro_name.clone() {
+        values.insert("distro_name".to_string(), value);
     }
+    if let Some(value) = metadata.platform.distro_version.clone() {
+        values.insert("distro_version".to_string(), value);
+    }
+    if let Some(value) = metadata.platform.kernel_version.clone() {
+        values.insert("kernel_version".to_string(), value);
+    }
+    if let Some(value) = metadata.platform.machine_id_hash.clone() {
+        values.insert("machine_id_hash".to_string(), value);
+    }
+    if let Some(value) = metadata.cluster.configured_cluster_id.clone() {
+        values.insert("cluster_id".to_string(), value);
+    }
+    if let Some(value) = metadata.cluster.cluster_name.clone() {
+        values.insert("cluster_name".to_string(), value);
+    }
+    if let Some(value) = metadata.cluster.service_name.clone() {
+        values.insert("service_name".to_string(), value);
+    }
+    if let Some(value) = metadata.cluster.environment.clone() {
+        values.insert("environment".to_string(), value);
+    }
+    values
 }
 
-fn enrollment_metadata(mode: &TransportMode, edge_url: &str) -> BTreeMap<String, String> {
-    let mut metadata = BTreeMap::new();
-    metadata.insert("os".to_string(), std::env::consts::OS.to_string());
-    metadata.insert("arch".to_string(), std::env::consts::ARCH.to_string());
-    metadata.insert("edge_url".to_string(), edge_url.to_string());
-    metadata.insert("transport_mode".to_string(), transport_mode_label(mode));
-    metadata
+fn sqlite_accessible(path: &std::path::Path) -> bool {
+    rusqlite::Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE).is_ok()
+}
+
+fn log_metadata_warnings(metadata: &RuntimeMetadataContext) {
+    for warning in &metadata.install.warnings {
+        warn!(warning = %warning, "install layout warning");
+    }
+    for warning in &metadata.compatibility.warnings {
+        warn!(warning = %warning, "compatibility warning");
+    }
+    for issue in &metadata.compatibility.source_path_issues {
+        warn!(issue = %issue, "source path note");
+    }
 }

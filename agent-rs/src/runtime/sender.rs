@@ -510,7 +510,7 @@ mod tests {
         config::{SourceConfig, StartAt},
         error::{AppError, AppResult},
         proto::{agent, ingest},
-        runtime::{state_writer::spawn_state_writer, RuntimeStatusHandle},
+        runtime::{state_writer::spawn_state_writer, test_static_context, RuntimeStatusHandle},
         state::{
             encode_spool_payload, write_spool_payload, SourceOffsetMarker, SpoolBatchRecord,
             SqliteStateStore,
@@ -612,6 +612,7 @@ mod tests {
             "demo-host".to_string(),
             "0.1.0".to_string(),
             "mock".to_string(),
+            test_static_context(),
             true,
             &[SourceConfig {
                 kind: "file".to_string(),

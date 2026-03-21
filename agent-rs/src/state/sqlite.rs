@@ -77,6 +77,7 @@ impl SqliteStateStore {
             .query_row(
                 "SELECT applied_policy_revision, policy_body_json,
                         last_successful_send_at_unix_ms, last_known_edge_url,
+                        identity_status, identity_status_reason,
                         degraded_mode, blocked_delivery, blocked_reason,
                         spool_enabled, consecutive_send_failures, updated_at_unix_ms
                  FROM agent_runtime_state WHERE singleton_id = 1",
@@ -87,12 +88,14 @@ impl SqliteStateStore {
                         policy_body_json: row.get(1)?,
                         last_successful_send_at_unix_ms: row.get(2)?,
                         last_known_edge_url: row.get(3)?,
-                        degraded_mode: row.get::<_, i64>(4)? != 0,
-                        blocked_delivery: row.get::<_, i64>(5)? != 0,
-                        blocked_reason: row.get(6)?,
-                        spool_enabled: row.get::<_, i64>(7)? != 0,
-                        consecutive_send_failures: row.get::<_, u32>(8)?,
-                        updated_at_unix_ms: row.get(9)?,
+                        identity_status: row.get(4)?,
+                        identity_status_reason: row.get(5)?,
+                        degraded_mode: row.get::<_, i64>(6)? != 0,
+                        blocked_delivery: row.get::<_, i64>(7)? != 0,
+                        blocked_reason: row.get(8)?,
+                        spool_enabled: row.get::<_, i64>(9)? != 0,
+                        consecutive_send_failures: row.get::<_, u32>(10)?,
+                        updated_at_unix_ms: row.get(11)?,
                     })
                 },
             )
@@ -112,14 +115,17 @@ impl SqliteStateStore {
             "INSERT INTO agent_runtime_state (
                 singleton_id, applied_policy_revision, policy_body_json,
                 last_successful_send_at_unix_ms, last_known_edge_url,
+                identity_status, identity_status_reason,
                 degraded_mode, blocked_delivery, blocked_reason,
                 spool_enabled, consecutive_send_failures, updated_at_unix_ms
-             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(singleton_id) DO UPDATE SET
                 applied_policy_revision = excluded.applied_policy_revision,
                 policy_body_json = excluded.policy_body_json,
                 last_successful_send_at_unix_ms = excluded.last_successful_send_at_unix_ms,
                 last_known_edge_url = excluded.last_known_edge_url,
+                identity_status = excluded.identity_status,
+                identity_status_reason = excluded.identity_status_reason,
                 degraded_mode = excluded.degraded_mode,
                 blocked_delivery = excluded.blocked_delivery,
                 blocked_reason = excluded.blocked_reason,
@@ -131,6 +137,8 @@ impl SqliteStateStore {
                 state.policy_body_json,
                 state.last_successful_send_at_unix_ms,
                 state.last_known_edge_url,
+                state.identity_status,
+                state.identity_status_reason,
                 if state.degraded_mode { 1_i64 } else { 0_i64 },
                 if state.blocked_delivery { 1_i64 } else { 0_i64 },
                 state.blocked_reason,
@@ -369,6 +377,8 @@ impl SqliteStateStore {
                 policy_body_json TEXT NULL,
                 last_successful_send_at_unix_ms INTEGER NULL,
                 last_known_edge_url TEXT NULL,
+                identity_status TEXT NULL,
+                identity_status_reason TEXT NULL,
                 degraded_mode INTEGER NOT NULL DEFAULT 0,
                 blocked_delivery INTEGER NOT NULL DEFAULT 0,
                 blocked_reason TEXT NULL,
@@ -401,6 +411,8 @@ impl SqliteStateStore {
 
     fn migrate_runtime_state(&self, conn: &Connection) -> AppResult<()> {
         for (column, definition) in [
+            ("identity_status", "TEXT NULL"),
+            ("identity_status_reason", "TEXT NULL"),
             ("degraded_mode", "INTEGER NOT NULL DEFAULT 0"),
             ("blocked_delivery", "INTEGER NOT NULL DEFAULT 0"),
             ("blocked_reason", "TEXT NULL"),
@@ -566,6 +578,8 @@ mod tests {
                 policy_body_json: Some("{\"sources\":[]}".to_string()),
                 last_successful_send_at_unix_ms: Some(42),
                 last_known_edge_url: Some("https://edge.local".to_string()),
+                identity_status: Some("reused".to_string()),
+                identity_status_reason: Some("persisted identity accepted".to_string()),
                 degraded_mode: true,
                 blocked_delivery: true,
                 blocked_reason: Some("permanent transport failure".to_string()),
@@ -588,6 +602,11 @@ mod tests {
         assert_eq!(offset.acked_offset, 64);
         assert!(runtime.degraded_mode);
         assert!(runtime.blocked_delivery);
+        assert_eq!(runtime.identity_status.as_deref(), Some("reused"));
+        assert_eq!(
+            runtime.identity_status_reason.as_deref(),
+            Some("persisted identity accepted")
+        );
         assert_eq!(
             runtime.blocked_reason.as_deref(),
             Some("permanent transport failure")

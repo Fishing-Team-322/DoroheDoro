@@ -7,6 +7,22 @@ log_level: "info"
 transport:
   mode: "mock"
 
+install:
+  mode: "dev"
+
+platform:
+  allow_machine_id: false
+
+scope:
+  configured_cluster_id: "local-dev"
+  cluster_name: "dev-cluster"
+  service_name: "agent-smoke"
+  environment: "development"
+  configured_cluster_tags:
+    owner: "local"
+  host_labels:
+    role: "workstation"
+
 heartbeat:
   interval_sec: 30
 
