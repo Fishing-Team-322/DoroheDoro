@@ -5,4 +5,5 @@ export {
   TableHead,
   TableHeader,
   TableRow,
+  TableSortButton,
 } from "./ui/table";

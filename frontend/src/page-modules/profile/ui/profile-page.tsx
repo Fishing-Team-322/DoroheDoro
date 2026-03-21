@@ -120,7 +120,7 @@ export function ProfilePage() {
                       {copy.editTitle}
                     </h2>
                     <p className="text-base leading-6 text-[color:var(--muted-foreground)]">
-                      Ну типа сохраняет новое имя
+                      {copy.editDescription}
                     </p>
                   </div>
 

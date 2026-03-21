@@ -19,10 +19,17 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   HomeIcon,
+  LogsIcon,
   MenuIcon,
+  PulseIcon,
+  RocketIcon,
   ServerIcon,
-  SettingsIcon,
   ShieldIcon,
+  SettingsIcon,
+  ActivityIcon,
+  GridIcon,
+  ChartIcon,
+  BellIcon,
 } from "../icons";
 
 type DashboardLayoutProps = {
@@ -137,7 +144,7 @@ export function DashboardSidebar({
         }}
         transition={SIDEBAR_TRANSITION}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 h-screen border-r border-[color:var(--border)] bg-[color:var(--background)] lg:z-40",
+          "fixed inset-y-0 left-0 z-50 h-screen  bg-[color:var(--background)] lg:z-40",
           mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         )}
       >
@@ -173,13 +180,11 @@ export function DashboardSidebar({
                 const isActive =
                   pathname === href || pathname.startsWith(`${href}/`);
                 const Icon = item.icon;
-                const navItem = dictionary.navigation[item.key];
-
                 return (
                   <SidebarNavItem
                     key={item.href}
                     href={href}
-                    label={navItem.label}
+                    label={item.label}
                     Icon={Icon}
                     isActive={isActive}
                     collapsed={collapsed}
@@ -388,18 +393,51 @@ export function Section({
 }
 
 function getSidebarIcon(item: Pick<NavItem, "key">) {
-  switch (item.key) {
-    case "overview":
-      return HomeIcon;
-    case "inventory":
-      return ServerIcon;
-    case "policies":
-      return ShieldIcon;
-    case "profile":
-      return SettingsIcon;
-    default:
-      return undefined;
+  if (item.key === "overview") {
+    return HomeIcon;
   }
+
+  if (item.key === "system") {
+    return ServerIcon;
+  }
+
+  if (item.key === "policies") {
+    return ShieldIcon;
+  }
+
+  if (item.key === "deployments") {
+    return RocketIcon;
+  }
+
+  if (item.key === "agents") {
+    return ActivityIcon;
+  }
+
+  if (item.key === "logs") {
+    return LogsIcon;
+  }
+
+  if (item.key === "live-logs") {
+    return PulseIcon;
+  }
+
+  if (item.key === "hosts") {
+    return GridIcon;
+  }
+
+  if (item.key === "host-groups") {
+    return ChartIcon;
+  }
+
+  if (item.key === "credentials") {
+    return BellIcon;
+  }
+
+  if (item.key === "profile") {
+    return SettingsIcon;
+  }
+
+  return undefined;
 }
 
 function getSidebarUsername(

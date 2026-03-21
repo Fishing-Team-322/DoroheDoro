@@ -25,6 +25,7 @@ export interface SelectProps {
   options: ReadonlyArray<SelectOption>;
   placeholder?: string;
   className?: string;
+  triggerClassName?: string;
   disabled?: boolean;
   selectSize?: "sm" | "md" | "lg";
 
@@ -73,6 +74,7 @@ export function Select({
   options,
   placeholder,
   className,
+  triggerClassName,
   disabled = false,
   selectSize = "md",
   searchable = false,
@@ -530,7 +532,8 @@ export function Select({
           "focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-50",
           triggerSizeClasses[selectSize],
-          open && "bg-[rgba(255,255,255,0.06)]"
+          open && "bg-[rgba(255,255,255,0.06)]",
+          triggerClassName
         )}
       >
         <span

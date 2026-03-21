@@ -13,4 +13,4 @@ export * from "./select";
 export * from "./spinner";
 export * from "./switch";
 export * from "./table";
-export * from "./dashboard";
+export * from "./toast";

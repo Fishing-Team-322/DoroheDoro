@@ -1,5 +1,5 @@
-import { OverviewPage as OverviewPageView } from "@/src/page-modules/overview";
+import { OverviewPage } from "@/src/features/operations";
 
-export default function OverviewPage() {
-  return <OverviewPageView />;
+export default function DashboardOverviewRoute() {
+  return <OverviewPage />;
 }

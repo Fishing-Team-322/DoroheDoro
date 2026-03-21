@@ -1,5 +1,5 @@
-import { DashboardPlaceholderPage } from "@/src/page-modules/dashboard-placeholder";
+import { PoliciesPage } from "@/src/features/operations";
 
-export default function PoliciesPage() {
-  return <DashboardPlaceholderPage />;
+export default function DashboardPoliciesRoute() {
+  return <PoliciesPage />;
 }
