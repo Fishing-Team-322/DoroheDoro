@@ -12,8 +12,8 @@ use common::{
         CONTROL_HOST_GROUPS_ADD_MEMBER, CONTROL_HOST_GROUPS_CREATE, CONTROL_HOST_GROUPS_LIST,
         CONTROL_HOST_GROUPS_REMOVE_MEMBER, CONTROL_HOST_GROUPS_UPDATE, CONTROL_INTEGRATIONS_BIND,
         CONTROL_INTEGRATIONS_CREATE, CONTROL_POLICIES_CREATE, CONTROL_POLICIES_LIST,
-        CONTROL_POLICIES_REVISIONS, CONTROL_POLICIES_UPDATE, CONTROL_ROLE_BINDINGS_CREATE,
-        CONTROL_ROLES_CREATE, CONTROL_ROLES_PERMISSIONS_SET, TICKETS_ASSIGN, TICKETS_CLOSE,
+        CONTROL_POLICIES_REVISIONS, CONTROL_POLICIES_UPDATE, CONTROL_ROLES_CREATE,
+        CONTROL_ROLES_PERMISSIONS_SET, CONTROL_ROLE_BINDINGS_CREATE, TICKETS_ASSIGN, TICKETS_CLOSE,
         TICKETS_COMMENT_ADD, TICKETS_CREATE, TICKETS_STATUS_CHANGE,
     },
     proto::{
@@ -47,9 +47,9 @@ use control_plane::{
 };
 use prost::Message;
 use reqwest::StatusCode;
+use serde_json::json;
 use serial_test::serial;
 use sqlx::{postgres::PgPoolOptions, PgPool};
-use serde_json::json;
 use tokio::{net::TcpListener, task::JoinHandle, time::sleep};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
@@ -652,10 +652,7 @@ async fn clusters_rbac_integrations_tickets_anomalies_flow() -> anyhow::Result<(
         )
         .await?;
     assert_eq!(
-        assigned
-            .ticket
-            .as_ref()
-            .map(|t| t.assignee_user_id.clone()),
+        assigned.ticket.as_ref().map(|t| t.assignee_user_id.clone()),
         Some("ops@example.com".to_string())
     );
 
@@ -685,10 +682,7 @@ async fn clusters_rbac_integrations_tickets_anomalies_flow() -> anyhow::Result<(
         )
         .await?;
     assert_eq!(
-        in_progress
-            .ticket
-            .as_ref()
-            .map(|t| t.status.clone()),
+        in_progress.ticket.as_ref().map(|t| t.status.clone()),
         Some("in_progress".to_string())
     );
 
@@ -704,10 +698,7 @@ async fn clusters_rbac_integrations_tickets_anomalies_flow() -> anyhow::Result<(
         )
         .await?;
     assert_eq!(
-        closed
-            .ticket
-            .as_ref()
-            .map(|t| t.status.clone()),
+        closed.ticket.as_ref().map(|t| t.status.clone()),
         Some("closed".to_string())
     );
 

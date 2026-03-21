@@ -1,3 +1,4 @@
+pub mod anomaly;
 pub mod app;
 pub mod config;
 pub mod http;

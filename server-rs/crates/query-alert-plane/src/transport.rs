@@ -4,7 +4,9 @@ use async_nats::{Client, Subject, Subscriber};
 use common::{
     json::NormalizedLogEvent,
     nats_subjects::*,
-    proto::{alerts, decode_message, encode_message, ok_envelope, ok_json_envelope, query, runtime},
+    proto::{
+        alerts, decode_message, encode_message, ok_envelope, ok_json_envelope, query, runtime,
+    },
     AppError,
 };
 use futures::StreamExt;
@@ -100,7 +102,9 @@ pub async fn spawn_handlers(
         _,
         _,
     >(
-        client.subscribe(QUERY_LOGS_TOP_SERVICES.to_string()).await?,
+        client
+            .subscribe(QUERY_LOGS_TOP_SERVICES.to_string())
+            .await?,
         client.clone(),
         service.clone(),
         shutdown.clone(),
@@ -124,7 +128,9 @@ pub async fn spawn_handlers(
         _,
         _,
     >(
-        client.subscribe(QUERY_LOGS_TOP_PATTERNS.to_string()).await?,
+        client
+            .subscribe(QUERY_LOGS_TOP_PATTERNS.to_string())
+            .await?,
         client.clone(),
         service.clone(),
         shutdown.clone(),
@@ -234,7 +240,14 @@ pub async fn spawn_handlers(
         service.clone(),
         shutdown.clone(),
     )));
-    tasks.push(tokio::spawn(run_alert_resolution_loop(service, shutdown)));
+    tasks.push(tokio::spawn(run_alert_resolution_loop(
+        service.clone(),
+        shutdown.clone(),
+    )));
+    tasks.push(tokio::spawn(run_anomaly_evaluator_loop(
+        service.clone(),
+        shutdown.clone(),
+    )));
 
     Ok(tasks)
 }
@@ -332,6 +345,23 @@ async fn run_alert_resolution_loop(service: Arc<QueryAlertService>, shutdown: Ca
                     error!(error_code = error.code().as_str(), error = %error, "failed to resolve stale alerts");
                 } else {
                     info!("query-alert-plane stale alert reconciliation tick completed");
+                }
+            }
+        }
+    }
+}
+
+async fn run_anomaly_evaluator_loop(service: Arc<QueryAlertService>, shutdown: CancellationToken) {
+    let mut ticker = interval(service.anomaly_interval());
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        select! {
+            _ = shutdown.cancelled() => break,
+            _ = ticker.tick() => {
+                if let Err(error) = service.evaluate_anomaly_rules().await {
+                    error!(error_code = error.code().as_str(), error = %error, "failed to evaluate anomaly rules");
+                } else {
+                    info!("query-alert-plane anomaly evaluation tick completed");
                 }
             }
         }

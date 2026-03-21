@@ -574,9 +574,7 @@ async fn spawn_audit_handlers(
             shutdown.clone(),
         )),
         tokio::spawn(run_append_audit_event_handler(
-            append_sub,
-            service,
-            shutdown,
+            append_sub, service, shutdown,
         )),
     ])
 }
@@ -3287,7 +3285,8 @@ async fn run_list_audit_events_handler(
                             send_control_envelope(&client, &message.reply, envelope).await;
                         }
                         Err(error) => {
-                            send_control_error(&client, &message.reply, error, correlation_id).await;
+                            send_control_error(&client, &message.reply, error, correlation_id)
+                                .await;
                         }
                     }
                 } else {

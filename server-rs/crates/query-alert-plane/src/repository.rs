@@ -3,7 +3,10 @@ use serde_json::Value;
 use sqlx::{postgres::PgRow, PgPool, Row};
 use uuid::Uuid;
 
-use crate::models::{AlertInstanceRecord, AlertRuleRecord, AuditActivityRecord};
+use crate::models::{
+    AlertInstanceRecord, AlertRuleRecord, AnomalyInstanceRecord, AnomalyRuleRecord,
+    AuditActivityRecord,
+};
 
 #[derive(Clone)]
 pub struct QueryAlertRepository {
@@ -59,7 +62,10 @@ impl QueryAlertRepository {
         Ok((rows, total.max(0) as u64))
     }
 
-    pub async fn get_alert_rule(&self, alert_rule_id: Uuid) -> Result<Option<AlertRuleRecord>, sqlx::Error> {
+    pub async fn get_alert_rule(
+        &self,
+        alert_rule_id: Uuid,
+    ) -> Result<Option<AlertRuleRecord>, sqlx::Error> {
         sqlx::query_as::<_, AlertRuleRecord>(
             "SELECT id, name, description, status, severity, scope_type, scope_id,
                     condition_json, created_by, updated_by, created_at, updated_at
@@ -152,6 +158,87 @@ impl QueryAlertRepository {
              ORDER BY updated_at DESC, name ASC",
         )
         .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn list_active_anomaly_rules(&self) -> Result<Vec<AnomalyRuleRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyRuleRecord>(
+            "SELECT id, name, kind, scope_type, scope_id, config_json, is_active,
+                    created_at, updated_at, created_by, updated_by
+             FROM anomaly_rules
+             WHERE is_active = TRUE
+             ORDER BY updated_at DESC, name ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn upsert_system_rule(
+        &self,
+        name: &str,
+        description: &str,
+        severity: &str,
+        status: &str,
+        condition_json: &Value,
+    ) -> Result<AlertRuleRecord, sqlx::Error> {
+        if let Some(existing) = sqlx::query_as::<_, AlertRuleRecord>(
+            "SELECT id, name, description, status, severity, scope_type, scope_id,
+                    condition_json, created_by, updated_by, created_at, updated_at
+             FROM alert_rules
+             WHERE name = $1 AND created_by = 'system'
+             LIMIT 1",
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            if existing.severity == severity
+                && existing.status == status
+                && existing.description == description
+                && existing.condition_json == *condition_json
+            {
+                return Ok(existing);
+            }
+
+            return sqlx::query_as::<_, AlertRuleRecord>(
+                "UPDATE alert_rules
+                 SET description = $2,
+                     status = $3,
+                     severity = $4,
+                     condition_json = $5,
+                     scope_type = 'global',
+                     scope_id = NULL,
+                     updated_by = 'system',
+                     updated_at = NOW()
+                 WHERE id = $1
+                 RETURNING id, name, description, status, severity, scope_type, scope_id,
+                           condition_json, created_by, updated_by, created_at, updated_at",
+            )
+            .bind(existing.id)
+            .bind(description)
+            .bind(status)
+            .bind(severity)
+            .bind(condition_json)
+            .fetch_one(&self.pool)
+            .await;
+        }
+
+        sqlx::query_as::<_, AlertRuleRecord>(
+            "INSERT INTO alert_rules (
+                id, name, description, status, severity, scope_type, scope_id,
+                condition_json, created_by, updated_by, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, 'global', NULL, $6, 'system', 'system', NOW(), NOW())
+            RETURNING id, name, description, status, severity, scope_type, scope_id,
+                      condition_json, created_by, updated_by, created_at, updated_at",
+        )
+        .bind(Uuid::new_v4())
+        .bind(name)
+        .bind(description)
+        .bind(status)
+        .bind(severity)
+        .bind(condition_json)
+        .fetch_one(&self.pool)
         .await
     }
 
@@ -378,6 +465,109 @@ impl QueryAlertRepository {
         .await
     }
 
+    pub async fn find_open_anomaly_instance(
+        &self,
+        rule_id: Uuid,
+        dedupe_key: &str,
+    ) -> Result<Option<AnomalyInstanceRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyInstanceRecord>(
+            "SELECT id, rule_id, cluster_id, severity, status, started_at, resolved_at, payload_json
+             FROM anomaly_instances
+             WHERE rule_id = $1
+               AND status = 'open'
+               AND payload_json ->> 'dedupe_key' = $2
+             ORDER BY started_at DESC
+             LIMIT 1",
+        )
+        .bind(rule_id)
+        .bind(dedupe_key)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn create_anomaly_instance(
+        &self,
+        rule_id: Uuid,
+        cluster_id: Option<Uuid>,
+        severity: &str,
+        payload_json: &Value,
+    ) -> Result<AnomalyInstanceRecord, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyInstanceRecord>(
+            "INSERT INTO anomaly_instances (
+                id, rule_id, cluster_id, severity, status, started_at, payload_json
+            )
+            VALUES ($1, $2, $3, $4, 'open', NOW(), $5)
+            RETURNING id, rule_id, cluster_id, severity, status, started_at, resolved_at, payload_json",
+        )
+        .bind(Uuid::new_v4())
+        .bind(rule_id)
+        .bind(cluster_id)
+        .bind(severity)
+        .bind(payload_json)
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn touch_anomaly_instance(
+        &self,
+        anomaly_instance_id: Uuid,
+        payload_json: &Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE anomaly_instances
+             SET payload_json = payload_json || $2::jsonb
+             WHERE id = $1",
+        )
+        .bind(anomaly_instance_id)
+        .bind(payload_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn resolve_anomaly_instance_by_key(
+        &self,
+        rule_id: Uuid,
+        dedupe_key: &str,
+        payload_json: &Value,
+    ) -> Result<Option<AnomalyInstanceRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyInstanceRecord>(
+            "UPDATE anomaly_instances
+             SET status = 'resolved',
+                 resolved_at = NOW(),
+                 payload_json = payload_json || $3::jsonb
+             WHERE rule_id = $1
+               AND status = 'open'
+               AND payload_json ->> 'dedupe_key' = $2
+             RETURNING id, rule_id, cluster_id, severity, status, started_at, resolved_at, payload_json",
+        )
+        .bind(rule_id)
+        .bind(dedupe_key)
+        .bind(payload_json)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    pub async fn resolve_anomaly_instance(
+        &self,
+        anomaly_instance_id: Uuid,
+        payload_json: &Value,
+    ) -> Result<Option<AnomalyInstanceRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyInstanceRecord>(
+            "UPDATE anomaly_instances
+             SET status = 'resolved',
+                 resolved_at = NOW(),
+                 payload_json = payload_json || $2::jsonb
+             WHERE id = $1
+               AND status = 'open'
+             RETURNING id, rule_id, cluster_id, severity, status, started_at, resolved_at, payload_json",
+        )
+        .bind(anomaly_instance_id)
+        .bind(payload_json)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
     pub async fn count_open_alerts(&self) -> Result<u64, sqlx::Error> {
         let value = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM alert_instances WHERE status IN ('active', 'acknowledged')",
@@ -387,13 +577,15 @@ impl QueryAlertRepository {
         Ok(value.max(0) as u64)
     }
 
-    pub async fn count_active_hosts_since(&self, cutoff: DateTime<Utc>) -> Result<u64, sqlx::Error> {
-        let value = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM agents WHERE last_seen_at >= $1",
-        )
-        .bind(cutoff)
-        .fetch_one(&self.pool)
-        .await?;
+    pub async fn count_active_hosts_since(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> Result<u64, sqlx::Error> {
+        let value =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agents WHERE last_seen_at >= $1")
+                .bind(cutoff)
+                .fetch_one(&self.pool)
+                .await?;
         Ok(value.max(0) as u64)
     }
 
@@ -410,7 +602,10 @@ impl QueryAlertRepository {
         Ok(value.max(0) as u64)
     }
 
-    pub async fn recent_activity(&self, limit: u32) -> Result<Vec<AuditActivityRecord>, sqlx::Error> {
+    pub async fn recent_activity(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<AuditActivityRecord>, sqlx::Error> {
         sqlx::query_as::<_, AuditActivityRecord>(
             "SELECT event_type, entity_type, entity_id, reason, created_at
              FROM runtime_audit_events

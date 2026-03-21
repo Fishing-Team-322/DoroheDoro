@@ -121,6 +121,8 @@ pub fn optional_trimmed(vars: &HashMap<String, String>, key: &'static str) -> Op
 pub enum ConfigError {
     #[error("missing required config value: {0}")]
     Missing(&'static str),
+    #[error("invalid number for config value: {0}")]
+    InvalidNumber(String),
 }
 
 #[cfg(test)]
