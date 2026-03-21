@@ -5,8 +5,7 @@ use common::{
     nats_subjects::{
         AGENTS_BOOTSTRAP_TOKEN_ISSUE, AGENTS_DIAGNOSTICS, AGENTS_DIAGNOSTICS_GET,
         AGENTS_ENROLL_REQUEST, AGENTS_HEARTBEAT, AGENTS_POLICY_FETCH, AGENTS_REGISTRY_GET,
-        AGENTS_REGISTRY_LIST, CONTROL_POLICIES_GET, CONTROL_POLICIES_LIST,
-        CONTROL_POLICIES_REVISIONS,
+        AGENTS_REGISTRY_LIST,
     },
     proto::{
         agent::{
@@ -40,11 +39,6 @@ pub async fn spawn_handlers(
     let agents_list_sub = client.subscribe(AGENTS_REGISTRY_LIST.to_string()).await?;
     let agents_get_sub = client.subscribe(AGENTS_REGISTRY_GET.to_string()).await?;
     let diagnostics_get_sub = client.subscribe(AGENTS_DIAGNOSTICS_GET.to_string()).await?;
-    let policies_list_sub = client.subscribe(CONTROL_POLICIES_LIST.to_string()).await?;
-    let policies_get_sub = client.subscribe(CONTROL_POLICIES_GET.to_string()).await?;
-    let policies_revisions_sub = client
-        .subscribe(CONTROL_POLICIES_REVISIONS.to_string())
-        .await?;
 
     Ok(vec![
         tokio::spawn(run_enroll_handler(
@@ -93,24 +87,6 @@ pub async fn spawn_handlers(
             service.clone(),
             shutdown.clone(),
         )),
-        tokio::spawn(run_policies_list_handler(
-            policies_list_sub,
-            client.clone(),
-            service.clone(),
-            shutdown.clone(),
-        )),
-        tokio::spawn(run_policies_get_handler(
-            policies_get_sub,
-            client.clone(),
-            service.clone(),
-            shutdown.clone(),
-        )),
-        tokio::spawn(run_policy_revisions_handler(
-            policies_revisions_sub,
-            client,
-            service,
-            shutdown,
-        )),
     ])
 }
 
@@ -125,13 +101,6 @@ struct AgentLookupRequest {
     #[serde(default)]
     correlation_id: String,
     agent_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PolicyLookupRequest {
-    #[serde(default)]
-    correlation_id: String,
-    policy_id: String,
 }
 
 async fn run_issue_bootstrap_token_handler(
@@ -412,102 +381,6 @@ async fn run_diagnostics_get_handler(
         };
 
         match service.latest_diagnostics(&request.agent_id).await {
-            Ok(response) => {
-                send_json_reply(&client, &message.reply, &response, request.correlation_id).await
-            }
-            Err(error) => {
-                send_error_reply(&client, &message.reply, error, request.correlation_id).await
-            }
-        }
-    }
-}
-
-async fn run_policies_list_handler(
-    mut subscription: Subscriber,
-    client: Client,
-    service: Arc<EnrollmentService>,
-    shutdown: CancellationToken,
-) {
-    loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
-
-        let request = decode_json_or_reply::<CorrelationRequest>(&client, &message).await;
-        let Some(request) = request else {
-            continue;
-        };
-
-        match service.list_policies().await {
-            Ok(response) => {
-                send_json_reply(&client, &message.reply, &response, request.correlation_id).await
-            }
-            Err(error) => {
-                send_error_reply(&client, &message.reply, error, request.correlation_id).await
-            }
-        }
-    }
-}
-
-async fn run_policies_get_handler(
-    mut subscription: Subscriber,
-    client: Client,
-    service: Arc<EnrollmentService>,
-    shutdown: CancellationToken,
-) {
-    loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
-
-        let request = decode_json_or_reply::<PolicyLookupRequest>(&client, &message).await;
-        let Some(request) = request else {
-            continue;
-        };
-
-        match service.get_policy(&request.policy_id).await {
-            Ok(response) => {
-                send_json_reply(&client, &message.reply, &response, request.correlation_id).await
-            }
-            Err(error) => {
-                send_error_reply(&client, &message.reply, error, request.correlation_id).await
-            }
-        }
-    }
-}
-
-async fn run_policy_revisions_handler(
-    mut subscription: Subscriber,
-    client: Client,
-    service: Arc<EnrollmentService>,
-    shutdown: CancellationToken,
-) {
-    loop {
-        let message = select! {
-            _ = shutdown.cancelled() => break,
-            next_message = subscription.next() => next_message,
-        };
-
-        let Some(message) = message else {
-            break;
-        };
-
-        let request = decode_json_or_reply::<PolicyLookupRequest>(&client, &message).await;
-        let Some(request) = request else {
-            continue;
-        };
-
-        match service.list_policy_revisions(&request.policy_id).await {
             Ok(response) => {
                 send_json_reply(&client, &message.reply, &response, request.correlation_id).await
             }
