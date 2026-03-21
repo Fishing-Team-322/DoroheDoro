@@ -16,10 +16,10 @@ type DashboardSidebarLanguageSwitchProps = {
 
 const BUTTON_SIZE = 36;
 const TRACK_GAP = 2;
-const TRACK_PADDING = 2;
+const TRACK_PADDING = 4;
 const TRACK_HEIGHT = BUTTON_SIZE + TRACK_PADDING * 2;
 const TRACK_WIDTH = BUTTON_SIZE * 2 + TRACK_GAP + TRACK_PADDING * 2;
-const FLAG_SIZE = 24;
+const FLAG_SIZE = 20;
 
 export function DashboardSidebarLanguageSwitch({
   locale,
@@ -128,12 +128,14 @@ function LanguageFlagSwitch({
   disabled,
   onChange,
 }: LanguageFlagSwitchProps) {
+  const activeIndex = value === "ru" ? 0 : 1;
+
   return (
     <div
       role="tablist"
       aria-label="Language switch"
       className={cn(
-        "inline-flex items-center rounded-[14px] border border-[color:var(--border)] bg-[rgba(255,255,255,0.04)] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]",
+        "relative inline-flex items-center rounded-[16px] border border-white/8 bg-[rgba(255,255,255,0.04)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
         disabled && "pointer-events-none opacity-60"
       )}
       style={{
@@ -143,6 +145,17 @@ function LanguageFlagSwitch({
         gap: `${TRACK_GAP}px`,
       }}
     >
+      <div
+        aria-hidden="true"
+        className="absolute top-1/2 rounded-[12px] border border-white/10 bg-[rgba(255,255,255,0.14)] shadow-[0_6px_18px_rgba(0,0,0,0.24)] transition-transform duration-250 ease-[cubic-bezier(0.22,1,0.36,1)]"
+        style={{
+          width: `${BUTTON_SIZE}px`,
+          height: `${BUTTON_SIZE}px`,
+          left: `${TRACK_PADDING}px`,
+          transform: `translate(${activeIndex * (BUTTON_SIZE + TRACK_GAP)}px, -50%)`,
+        }}
+      />
+
       <FlagSegmentButton
         active={value === "ru"}
         disabled={disabled}
@@ -185,10 +198,8 @@ function FlagSegmentButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-[11px] border transition-all duration-200",
-        active
-          ? "border-white/10 bg-[rgba(255,255,255,0.18)] shadow-[0_6px_16px_rgba(0,0,0,0.22)] opacity-100"
-          : "border-transparent bg-transparent opacity-65 hover:opacity-90"
+        "relative z-[1] inline-flex shrink-0 items-center justify-center rounded-[12px] transition-all duration-200",
+        active ? "opacity-100" : "opacity-55 hover:opacity-85"
       )}
       style={{
         width: `${BUTTON_SIZE}px`,
@@ -226,7 +237,7 @@ function CompactFlagButton({
       onClick={onClick}
       aria-label={locale === "ru" ? "Переключить язык" : "Switch language"}
       className={cn(
-        "inline-flex items-center justify-center rounded-[11px] border border-white/10 bg-[rgba(255,255,255,0.18)] shadow-[0_6px_16px_rgba(0,0,0,0.22)] transition-colors",
+        "inline-flex items-center justify-center rounded-[12px] border border-white/10 bg-[rgba(255,255,255,0.14)] shadow-[0_6px_18px_rgba(0,0,0,0.24)] transition-all duration-200 hover:bg-[rgba(255,255,255,0.18)]",
         disabled && "pointer-events-none opacity-60"
       )}
       style={{
