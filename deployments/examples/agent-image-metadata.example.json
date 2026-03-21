@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "version": "main-a1b2c3d4",
+  "release_channel": "main",
+  "created_at": "2026-03-22T00:00:00Z",
+  "image_repository": "docker.io/example/doro-agent",
+  "image_tag": "main-a1b2c3d4",
+  "image_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "image_reference": "docker.io/example/doro-agent:main-a1b2c3d4",
+  "image_digest_reference": "docker.io/example/doro-agent@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "architectures": [
+    "amd64",
+    "arm64"
+  ]
+}

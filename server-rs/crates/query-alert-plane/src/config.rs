@@ -5,6 +5,8 @@ use common::{
     SharedRuntimeConfig,
 };
 
+use crate::pipeline::DetectionMode;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenSearchConfig {
     pub url: String,
@@ -18,6 +20,100 @@ pub struct ClickHouseConfig {
     pub dsn: String,
     pub database: String,
     pub table: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetectionConfig {
+    pub mode: DetectionMode,
+    pub light_window_min: u32,
+    pub medium_window_min: u32,
+    pub heavy_window_min: u32,
+    pub min_samples: u32,
+    pub cooldown_sec: u64,
+    pub auto_resolve_sec: u64,
+    pub max_groups_per_cycle: u32,
+    pub security_findings_enabled: bool,
+    pub agent_health_enabled: bool,
+    pub log_pattern_enabled: bool,
+    pub safe_mode: bool,
+}
+
+impl DetectionConfig {
+    fn from_vars(vars: &HashMap<String, String>) -> Result<Self, ConfigError> {
+        let mode = optional_trimmed(vars, "DETECTION_MODE")
+            .map(|value| parse_mode(&value))
+            .transpose()?
+            .unwrap_or(DetectionMode::Medium);
+        let light_window_min = parse_u32(vars, "DETECTION_LIGHT_WINDOW_MIN", 5)?;
+        let medium_window_min = parse_u32(vars, "DETECTION_MEDIUM_WINDOW_MIN", 15)?;
+        let heavy_window_min = parse_u32(vars, "DETECTION_HEAVY_WINDOW_MIN", 60)?;
+        let min_samples = parse_u32(vars, "DETECTION_MIN_SAMPLES", 20)?;
+        let cooldown_sec = parse_u64(vars, "DETECTION_COOLDOWN_SEC", 900)?;
+        let auto_resolve_sec = parse_u64(vars, "DETECTION_AUTO_RESOLVE_SEC", 1800)?;
+        let max_groups_per_cycle = parse_u32(vars, "DETECTION_MAX_GROUPS_PER_CYCLE", 1000)?;
+
+        Ok(Self {
+            mode,
+            light_window_min,
+            medium_window_min,
+            heavy_window_min,
+            min_samples,
+            cooldown_sec,
+            auto_resolve_sec,
+            max_groups_per_cycle,
+            security_findings_enabled: parse_bool(
+                vars,
+                "DETECTION_SECURITY_FINDINGS_ENABLED",
+                true,
+            ),
+            agent_health_enabled: parse_bool(vars, "DETECTION_AGENT_HEALTH_ENABLED", true),
+            log_pattern_enabled: parse_bool(vars, "DETECTION_LOG_PATTERN_ENABLED", true),
+            safe_mode: parse_bool(vars, "DETECTION_SAFE_MODE", false),
+        })
+    }
+}
+
+fn parse_mode(value: &str) -> Result<DetectionMode, ConfigError> {
+    DetectionMode::from_str(value).ok_or(ConfigError::InvalidEnum("DETECTION_MODE"))
+}
+
+fn parse_u32(
+    vars: &HashMap<String, String>,
+    key: &'static str,
+    default: u32,
+) -> Result<u32, ConfigError> {
+    if let Some(value) = optional_trimmed(vars, key) {
+        value
+            .parse::<u32>()
+            .map_err(|_| ConfigError::InvalidNumber(key))
+    } else {
+        Ok(default)
+    }
+}
+
+fn parse_u64(
+    vars: &HashMap<String, String>,
+    key: &'static str,
+    default: u64,
+) -> Result<u64, ConfigError> {
+    if let Some(value) = optional_trimmed(vars, key) {
+        value
+            .parse::<u64>()
+            .map_err(|_| ConfigError::InvalidNumber(key))
+    } else {
+        Ok(default)
+    }
+}
+
+fn parse_bool(vars: &HashMap<String, String>, key: &'static str, default: bool) -> bool {
+    optional_trimmed(vars, key)
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,7 +238,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::QueryAlertPlaneConfig;
+    use super::{DetectionConfig, QueryAlertPlaneConfig};
+    use crate::pipeline::DetectionMode;
 
     #[test]
     fn loads_query_alert_config() {

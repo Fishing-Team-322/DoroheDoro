@@ -2,9 +2,16 @@
 # Copy this file to a private inventory/group_vars location and replace placeholders.
 # It is intentionally example-only and must not contain real secrets in the repo.
 
-doro_agent_artifact_manifest_url: https://edge.example.com/artifacts/agent/release-manifest.json
-doro_agent_release_base_url: https://edge.example.com/artifacts/agent
-doro_agent_install_mode: auto
+doro_agent_artifact_manifest_url: https://edge.example.com/artifacts/agent/manifest.json
+doro_agent_release_base_url: ""
+doro_agent_install_mode: docker_image
+doro_agent_image_repository: docker.io/<org>/doro-agent
+doro_agent_image_tag: main
+doro_agent_image_digest: ""
+doro_agent_pull_policy: always
+doro_agent_container_name: doro-agent
+doro_agent_container_engine: auto
+doro_agent_restart_policy: unless-stopped
 
 # Single-host public boundary on the same domain as WEB.
 doro_agent_edge_url: https://edge.example.com
