@@ -60,6 +60,9 @@ export function LoginPage({ locale }: LoginPageProps) {
   const [localError, setLocalError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [identifierReadonly, setIdentifierReadonly] = useState(true);
+  const [passwordReadonly, setPasswordReadonly] = useState(true);
+
   const redirectTo = useMemo(
     () =>
       normalizeRedirectPath(searchParams.get("next"), locale) ??
@@ -76,6 +79,7 @@ export function LoginPage({ locale }: LoginPageProps) {
   const handleBackToIdentifier = () => {
     setPassword("");
     setLocalError("");
+    setPasswordReadonly(true);
     setStep("identifier");
   };
 
@@ -92,6 +96,7 @@ export function LoginPage({ locale }: LoginPageProps) {
     setIdentifier(value);
     setPassword("");
     setLocalError("");
+    setPasswordReadonly(true);
     setStep("password");
   };
 
@@ -194,14 +199,37 @@ export function LoginPage({ locale }: LoginPageProps) {
                     transition={stepTransition}
                     className="absolute inset-0"
                   >
-                    <form onSubmit={handleIdentifierSubmit} className="space-y-5">
+                    <form
+                      onSubmit={handleIdentifierSubmit}
+                      className="space-y-5"
+                      autoComplete="off"
+                    >
+                      <input
+                        type="text"
+                        name="username"
+                        autoComplete="username"
+                        tabIndex={-1}
+                        className="hidden"
+                        aria-hidden="true"
+                      />
+                      <input
+                        type="password"
+                        name="current-password"
+                        autoComplete="current-password"
+                        tabIndex={-1}
+                        className="hidden"
+                        aria-hidden="true"
+                      />
+
                       <Input
-                        id="identifier"
-                        name="identifier"
+                        id="auth_login_value"
+                        name="auth_login_value"
                         type="text"
                         inputSize="lg"
                         label={dictionary.auth.login.identifierLabel}
-                        autoComplete="off"
+                        autoComplete="new-password"
+                        readOnly={identifierReadonly}
+                        onFocus={() => setIdentifierReadonly(false)}
                         value={identifier}
                         onChange={(e) => {
                           setIdentifier(e.target.value);
@@ -231,7 +259,28 @@ export function LoginPage({ locale }: LoginPageProps) {
                     transition={stepTransition}
                     className="absolute inset-0"
                   >
-                    <form onSubmit={handlePasswordSubmit} className="space-y-5" autoComplete="off">
+                    <form
+                      onSubmit={handlePasswordSubmit}
+                      className="space-y-5"
+                      autoComplete="off"
+                    >
+                      <input
+                        type="text"
+                        name="username"
+                        autoComplete="username"
+                        tabIndex={-1}
+                        className="hidden"
+                        aria-hidden="true"
+                      />
+                      <input
+                        type="password"
+                        name="current-password"
+                        autoComplete="current-password"
+                        tabIndex={-1}
+                        className="hidden"
+                        aria-hidden="true"
+                      />
+
                       <div className="space-y-3">
                         <button
                           type="button"
@@ -267,12 +316,14 @@ export function LoginPage({ locale }: LoginPageProps) {
                       </div>
 
                       <Input
-                        id="password"
-                        name="password"
+                        id="auth_secret_value"
+                        name="auth_secret_value"
                         type="password"
                         inputSize="lg"
                         label={dictionary.auth.login.passwordLabel}
-                        autoComplete="current-password"
+                        autoComplete="new-password"
+                        readOnly={passwordReadonly}
+                        onFocus={() => setPasswordReadonly(false)}
                         value={password}
                         onChange={(e) => {
                           setPassword(e.target.value);

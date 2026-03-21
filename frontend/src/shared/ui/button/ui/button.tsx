@@ -45,7 +45,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex select-none items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)] disabled:cursor-not-allowed disabled:select-none disabled:opacity-50",
+        "inline-flex cursor-pointer select-none items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--ring)] disabled:cursor-not-allowed disabled:select-none disabled:opacity-50",
         variantClasses[variant],
         sizeClasses[size],
         className
