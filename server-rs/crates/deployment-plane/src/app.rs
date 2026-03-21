@@ -8,9 +8,7 @@ use tracing::info;
 
 use crate::{
     config::DeploymentConfig,
-    executor::{
-        AnsibleRunnerExecutor, DynDeploymentExecutor, MockExecutor, MockExecutorOptions,
-    },
+    executor::{AnsibleRunnerExecutor, DynDeploymentExecutor, MockExecutor, MockExecutorOptions},
     health::{self, HealthState},
     repository::DeploymentRepository,
     service::DeploymentService,
