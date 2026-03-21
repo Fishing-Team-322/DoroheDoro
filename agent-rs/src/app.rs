@@ -10,7 +10,11 @@ use crate::{
     config::{AgentConfig, TransportMode},
     error::AppResult,
     logging,
-    runtime::{r#loop::spawn_heartbeat_loop, RuntimeStatusHandle},
+    runtime::{
+        degraded::spawn_degraded_controller, diagnostics::spawn_diagnostics_worker,
+        heartbeat::spawn_heartbeat_worker, sender::spawn_sender, state_writer::spawn_state_writer,
+        RuntimeStatusHandle,
+    },
     sources::spawn_file_source,
     state::{RuntimeStateRecord, SqliteStateStore},
     transport::{
@@ -18,6 +22,8 @@ use crate::{
         MockTransport,
     },
 };
+
+const SOURCE_COUNT_WARN_THRESHOLD: usize = 64;
 
 pub struct App {
     config: AgentConfig,
@@ -40,18 +46,30 @@ impl App {
         let hostname = resolve_hostname();
         let version = env!("CARGO_PKG_VERSION").to_string();
         let status = RuntimeStatusHandle::new(
+            String::new(),
             hostname.clone(),
             version.clone(),
+            transport_mode_label(&config.transport.mode),
+            config.spool.enabled,
             &config.sources,
             &persisted_offsets,
+            runtime_state.last_successful_send_at_unix_ms,
         );
-
+        if runtime_state.degraded_mode {
+            status.set_degraded_mode(true, Some("persisted runtime state".to_string()));
+        }
+        if runtime_state.blocked_delivery {
+            let reason = runtime_state
+                .blocked_reason
+                .clone()
+                .or_else(|| Some("persisted blocked delivery state".to_string()));
+            status.set_blocked_delivery(true, reason.clone());
+            status.set_degraded_mode(true, reason);
+        }
         if let Some(revision) = runtime_state.applied_policy_revision.clone() {
             status.set_policy_revision(Some(revision));
         }
-        if let Some(last_send) = runtime_state.last_successful_send_at_unix_ms {
-            status.record_last_send(last_send);
-        }
+        status.update_spool_stats(store.spool_stats()?);
 
         let transport = build_transport(&config)?;
         let mut app = Self {
@@ -64,6 +82,7 @@ impl App {
             agent_id: String::new(),
         };
         app.agent_id = app.ensure_identity_and_policy().await?;
+        app.status.set_agent_id(app.agent_id.clone());
         Ok(app)
     }
 
@@ -71,60 +90,107 @@ impl App {
         info!(
             agent_id = self.agent_id,
             state_db = %self.store.db_path().display(),
+            spool_dir = %self.config.spool.dir.display(),
             transport_mode = ?self.config.transport.mode,
             "starting doro-agent"
         );
 
         let shutdown = CancellationToken::new();
-        let (tx, rx) = mpsc::channel(self.config.batch.max_events.saturating_mul(8).max(128));
+        let (event_tx, event_rx) = mpsc::channel(self.config.queues.event_capacity);
+        let (send_tx, send_rx) = mpsc::channel(self.config.queues.send_capacity);
+
+        let (state_writer, state_writer_handle) = spawn_state_writer(
+            self.store.clone(),
+            self.config.spool.dir.clone(),
+            self.config.spool.max_disk_bytes,
+        );
 
         let batcher = spawn_batcher(
-            rx,
-            self.transport.clone(),
-            self.store.clone(),
+            event_rx,
+            send_tx.clone(),
+            state_writer.clone(),
             self.status.clone(),
             shutdown.clone(),
             self.config.batch.clone(),
+            self.config.queues.clone(),
+            self.config.spool.clone(),
             self.agent_id.clone(),
             self.hostname.clone(),
         );
 
-        let heartbeat = spawn_heartbeat_loop(
+        let sender = spawn_sender(
+            send_rx,
+            self.transport.clone(),
+            state_writer.clone(),
+            self.status.clone(),
+            shutdown.clone(),
+            self.config.spool.enabled,
+            self.config.batch.compress_threshold_bytes,
+            self.config.degraded.shutdown_spool_grace_sec,
+        );
+
+        let heartbeat = spawn_heartbeat_worker(
             self.transport.clone(),
             self.status.clone(),
             shutdown.clone(),
-            self.agent_id.clone(),
-            self.hostname.clone(),
-            self.version.clone(),
             self.config.edge_url.clone(),
-            self.config.transport.mode.clone(),
             self.config.heartbeat.interval_sec,
+        );
+
+        let diagnostics = spawn_diagnostics_worker(
+            self.transport.clone(),
+            self.status.clone(),
+            shutdown.clone(),
+            self.config.diagnostics.interval_sec,
+        );
+
+        let degraded = spawn_degraded_controller(
+            self.status.clone(),
+            state_writer.clone(),
+            shutdown.clone(),
+            self.config.degraded.clone(),
+            self.config.queues.clone(),
+            self.config.spool.enabled,
+            self.config.spool.max_disk_bytes,
         );
 
         let mut source_handles = Vec::new();
         if self.config.sources.is_empty() {
             warn!("agent started without configured sources");
+        } else if self.config.sources.len() > SOURCE_COUNT_WARN_THRESHOLD {
+            warn!(
+                source_count = self.config.sources.len(),
+                threshold = SOURCE_COUNT_WARN_THRESHOLD,
+                "high source count configured; current runtime uses one reader task per source"
+            );
         }
         for source in self.config.sources.clone() {
             source_handles.push(spawn_file_source(
                 source,
+                self.config.queues.clone(),
                 self.store.clone(),
                 self.status.clone(),
-                tx.clone(),
+                event_tx.clone(),
                 shutdown.clone(),
             ));
         }
+        drop(event_tx);
 
         tokio::signal::ctrl_c().await?;
         info!("shutdown signal received");
         shutdown.cancel();
-        drop(tx);
 
         for handle in source_handles {
             let _ = handle.await;
         }
+        drop(send_tx);
+
         let _ = batcher.await;
-        let _ = heartbeat.await?;
+        let _ = sender.await??;
+        let _ = degraded.await??;
+        let _ = heartbeat.await??;
+        let _ = diagnostics.await??;
+        let _ = state_writer_handle.await??;
 
         info!("doro-agent stopped");
         Ok(())
@@ -164,6 +230,11 @@ impl App {
             policy_body_json: Some(policy.policy_body_json),
             last_successful_send_at_unix_ms: runtime_state.last_successful_send_at_unix_ms,
             last_known_edge_url: Some(self.config.edge_url.clone()),
+            degraded_mode: runtime_state.degraded_mode,
+            blocked_delivery: runtime_state.blocked_delivery,
+            blocked_reason: runtime_state.blocked_reason,
+            spool_enabled: self.config.spool.enabled,
+            consecutive_send_failures: runtime_state.consecutive_send_failures,
             updated_at_unix_ms: chrono::Utc::now().timestamp_millis(),
         })?;
         info!(
@@ -220,17 +291,18 @@ fn resolve_hostname() -> String {
         .unwrap_or_else(|| "unknown-host".to_string())
 }
 
+fn transport_mode_label(mode: &TransportMode) -> String {
+    match mode {
+        TransportMode::Edge => "edge".to_string(),
+        TransportMode::Mock => "mock".to_string(),
+    }
+}
+
 fn enrollment_metadata(mode: &TransportMode, edge_url: &str) -> BTreeMap<String, String> {
     let mut metadata = BTreeMap::new();
     metadata.insert("os".to_string(), std::env::consts::OS.to_string());
     metadata.insert("arch".to_string(), std::env::consts::ARCH.to_string());
     metadata.insert("edge_url".to_string(), edge_url.to_string());
-    metadata.insert(
-        "transport_mode".to_string(),
-        match mode {
-            TransportMode::Edge => "edge".to_string(),
-            TransportMode::Mock => "mock".to_string(),
-        },
-    );
+    metadata.insert("transport_mode".to_string(), transport_mode_label(mode));
     metadata
 }

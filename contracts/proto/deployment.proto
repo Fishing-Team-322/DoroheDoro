@@ -1,0 +1,255 @@
+syntax = "proto3";
+
+package dorohedoro.deployment.v1;
+
+option go_package = "github.com/example/dorohedoro/contracts/deploymentproto;deploymentv1";
+
+message DeploymentReplyEnvelope {
+  string status = 1;
+  string code = 2;
+  string message = 3;
+  bytes payload = 4;
+  string correlation_id = 5;
+}
+
+enum DeploymentJobType {
+  DEPLOYMENT_JOB_TYPE_UNSPECIFIED = 0;
+  DEPLOYMENT_JOB_TYPE_INSTALL = 1;
+  DEPLOYMENT_JOB_TYPE_REINSTALL = 2;
+  DEPLOYMENT_JOB_TYPE_UPGRADE = 3;
+  DEPLOYMENT_JOB_TYPE_UNINSTALL = 4;
+}
+
+enum DeploymentJobStatus {
+  DEPLOYMENT_JOB_STATUS_UNSPECIFIED = 0;
+  DEPLOYMENT_JOB_STATUS_QUEUED = 1;
+  DEPLOYMENT_JOB_STATUS_RUNNING = 2;
+  DEPLOYMENT_JOB_STATUS_PARTIAL_SUCCESS = 3;
+  DEPLOYMENT_JOB_STATUS_SUCCEEDED = 4;
+  DEPLOYMENT_JOB_STATUS_FAILED = 5;
+  DEPLOYMENT_JOB_STATUS_CANCELLED = 6;
+}
+
+enum DeploymentTargetStatus {
+  DEPLOYMENT_TARGET_STATUS_UNSPECIFIED = 0;
+  DEPLOYMENT_TARGET_STATUS_PENDING = 1;
+  DEPLOYMENT_TARGET_STATUS_RUNNING = 2;
+  DEPLOYMENT_TARGET_STATUS_SUCCEEDED = 3;
+  DEPLOYMENT_TARGET_STATUS_FAILED = 4;
+  DEPLOYMENT_TARGET_STATUS_CANCELLED = 5;
+}
+
+enum DeploymentStepStatus {
+  DEPLOYMENT_STEP_STATUS_UNSPECIFIED = 0;
+  DEPLOYMENT_STEP_STATUS_PENDING = 1;
+  DEPLOYMENT_STEP_STATUS_RUNNING = 2;
+  DEPLOYMENT_STEP_STATUS_SUCCEEDED = 3;
+  DEPLOYMENT_STEP_STATUS_FAILED = 4;
+  DEPLOYMENT_STEP_STATUS_SKIPPED = 5;
+}
+
+enum ExecutorKind {
+  EXECUTOR_KIND_UNSPECIFIED = 0;
+  EXECUTOR_KIND_MOCK = 1;
+  EXECUTOR_KIND_ANSIBLE = 2;
+}
+
+enum RetryStrategy {
+  RETRY_STRATEGY_UNSPECIFIED = 0;
+  RETRY_STRATEGY_FAILED_ONLY = 1;
+  RETRY_STRATEGY_ALL = 2;
+}
+
+message CreateDeploymentJobRequest {
+  string correlation_id = 1;
+  DeploymentJobType job_type = 2;
+  string policy_id = 3;
+  repeated string target_host_ids = 4;
+  repeated string target_host_group_ids = 5;
+  string credential_profile_id = 6;
+  string requested_by = 7;
+  bool preserve_state = 8;
+  bool force = 9;
+  bool dry_run = 10;
+}
+
+message CreateDeploymentJobResponse {
+  DeploymentJobSummary job = 1;
+}
+
+message GetDeploymentJobRequest {
+  string correlation_id = 1;
+  string job_id = 2;
+}
+
+message GetDeploymentJobResponse {
+  DeploymentJobSummary job = 1;
+  repeated DeploymentAttemptSummary attempts = 2;
+  repeated DeploymentTargetSummary targets = 3;
+  repeated DeploymentStepSummary steps = 4;
+}
+
+message ListDeploymentJobsRequest {
+  string correlation_id = 1;
+  DeploymentJobStatus status = 2;
+  DeploymentJobType job_type = 3;
+  string requested_by = 4;
+  string created_after = 5;
+  string created_before = 6;
+  uint32 limit = 7;
+  uint64 offset = 8;
+}
+
+message ListDeploymentJobsResponse {
+  repeated DeploymentJobSummary jobs = 1;
+  uint32 limit = 2;
+  uint64 offset = 3;
+  uint64 total = 4;
+}
+
+message RetryDeploymentJobRequest {
+  string correlation_id = 1;
+  string job_id = 2;
+  RetryStrategy strategy = 3;
+  string triggered_by = 4;
+  string reason = 5;
+}
+
+message RetryDeploymentJobResponse {
+  DeploymentJobSummary job = 1;
+}
+
+message CancelDeploymentJobRequest {
+  string correlation_id = 1;
+  string job_id = 2;
+  string requested_by = 3;
+  string reason = 4;
+}
+
+message CancelDeploymentJobResponse {
+  DeploymentJobSummary job = 1;
+}
+
+message CreateDeploymentPlanRequest {
+  string correlation_id = 1;
+  DeploymentJobType job_type = 2;
+  string policy_id = 3;
+  repeated string target_host_ids = 4;
+  repeated string target_host_group_ids = 5;
+  string credential_profile_id = 6;
+  string requested_by = 7;
+  bool preserve_state = 8;
+  bool force = 9;
+  bool dry_run = 10;
+}
+
+message CreateDeploymentPlanResponse {
+  DeploymentJobType job_type = 1;
+  string policy_id = 2;
+  string policy_revision_id = 3;
+  string policy_revision = 4;
+  string credential_profile_id = 5;
+  string credential_summary = 6;
+  ExecutorKind executor_kind = 7;
+  string action_summary = 8;
+  repeated DeploymentPlanTarget targets = 9;
+  repeated BootstrapPreview bootstrap_previews = 10;
+  repeated string warnings = 11;
+}
+
+message DeploymentJobSummary {
+  string job_id = 1;
+  DeploymentJobType job_type = 2;
+  DeploymentJobStatus status = 3;
+  string requested_by = 4;
+  string policy_id = 5;
+  string policy_revision_id = 6;
+  string credential_profile_id = 7;
+  ExecutorKind executor_kind = 8;
+  string current_phase = 9;
+  uint32 total_targets = 10;
+  uint32 pending_targets = 11;
+  uint32 running_targets = 12;
+  uint32 succeeded_targets = 13;
+  uint32 failed_targets = 14;
+  uint32 cancelled_targets = 15;
+  uint32 attempt_count = 16;
+  string created_at = 17;
+  string started_at = 18;
+  string finished_at = 19;
+  string updated_at = 20;
+}
+
+message DeploymentAttemptSummary {
+  string deployment_attempt_id = 1;
+  uint32 attempt_no = 2;
+  DeploymentJobStatus status = 3;
+  string triggered_by = 4;
+  string reason = 5;
+  string created_at = 6;
+  string started_at = 7;
+  string finished_at = 8;
+}
+
+message DeploymentTargetSummary {
+  string deployment_target_id = 1;
+  string deployment_attempt_id = 2;
+  string host_id = 3;
+  string hostname_snapshot = 4;
+  DeploymentTargetStatus status = 5;
+  string error_message = 6;
+  string created_at = 7;
+  string started_at = 8;
+  string finished_at = 9;
+  string updated_at = 10;
+}
+
+message DeploymentStepSummary {
+  string deployment_step_id = 1;
+  string deployment_attempt_id = 2;
+  string deployment_target_id = 3;
+  string step_name = 4;
+  DeploymentStepStatus status = 5;
+  string message = 6;
+  string payload_json = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message DeploymentPlanTarget {
+  string host_id = 1;
+  string hostname = 2;
+  string ip = 3;
+  uint32 ssh_port = 4;
+  string remote_user = 5;
+}
+
+message BootstrapPreview {
+  string host_id = 1;
+  string hostname = 2;
+  string bootstrap_yaml = 3;
+}
+
+message DeploymentStatusEvent {
+  string job_id = 1;
+  string deployment_attempt_id = 2;
+  DeploymentJobStatus status = 3;
+  string current_phase = 4;
+  uint32 pending_targets = 5;
+  uint32 running_targets = 6;
+  uint32 succeeded_targets = 7;
+  uint32 failed_targets = 8;
+  uint32 cancelled_targets = 9;
+  string updated_at = 10;
+}
+
+message DeploymentStepEvent {
+  string job_id = 1;
+  string deployment_attempt_id = 2;
+  string deployment_step_id = 3;
+  string deployment_target_id = 4;
+  string step_name = 5;
+  DeploymentStepStatus status = 6;
+  string message = 7;
+  string updated_at = 8;
+}

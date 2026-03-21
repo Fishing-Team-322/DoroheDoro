@@ -1,44 +1,41 @@
 import {
-  alertStatusMeta,
-  deploymentStatusMeta,
-  healthMeta,
-  hostStatusMeta,
-  severityMeta,
+  healthTones,
+  hostStatusTones,
 } from "@/src/shared/constants/dashboard";
 import type {
   Alert,
-  AlertStatus,
   DeploymentJob,
-  DeploymentStatus,
   HealthState,
   Host,
   HostStatus,
-  Severity,
 } from "@/src/shared/types/dashboard";
+import type { Locale } from "@/src/shared/config";
 
-export function getHostStatusMeta(status: HostStatus) {
-  return hostStatusMeta[status];
+export function getHostStatusMeta(
+  status: HostStatus,
+  labels: Record<HostStatus, string>
+) {
+  return {
+    label: labels[status],
+    tone: hostStatusTones[status],
+  };
 }
 
-export function getDeploymentStatusMeta(status: DeploymentStatus) {
-  return deploymentStatusMeta[status];
+export function getHealthMeta(
+  health: HealthState,
+  labels: Record<HealthState, string>
+) {
+  return {
+    label: labels[health],
+    tone: healthTones[health],
+  };
 }
 
-export function getAlertStatusMeta(status: AlertStatus) {
-  return alertStatusMeta[status];
-}
-
-export function getSeverityMeta(severity: Severity) {
-  return severityMeta[severity];
-}
-
-export function getHealthMeta(health: HealthState) {
-  return healthMeta[health];
-}
-
-export function formatRelativeLabel(isoDate: string) {
+export function formatRelativeLabel(isoDate: string, locale: Locale) {
   const date = new Date(isoDate);
-  return new Intl.DateTimeFormat("ru-RU", {
+  const intlLocale = locale === "en" ? "en-US" : "ru-RU";
+
+  return new Intl.DateTimeFormat(intlLocale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -48,13 +45,6 @@ export function formatRelativeLabel(isoDate: string) {
 
 export function formatPercent(value: number) {
   return `${Math.round(value)}%`;
-}
-
-export function formatCompactNumber(value: number) {
-  return new Intl.NumberFormat("ru-RU", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
 }
 
 export function countHostsByStatus(hosts: Host[]) {

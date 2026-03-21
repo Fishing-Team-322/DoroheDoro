@@ -1,6 +1,6 @@
 import type { Locale } from "@/src/shared/config";
-import en from "@/src/shared/i18n/locales/en/common";
-import ru from "@/src/shared/i18n/locales/ru/common";
+import en from "@/src/shared/i18n/locales/en/common.json";
+import ru from "@/src/shared/i18n/locales/ru/common.json";
 
 const dictionaries = {
   en,

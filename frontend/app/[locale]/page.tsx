@@ -1,4 +1,4 @@
-import { HomePage } from "@/src/page-modules/home";
+import { LocaleEntryRedirect } from "@/src/features/auth/ui/locale-entry-redirect";
 import { getLocaleFromParams } from "@/src/shared/lib/i18n";
 
 type HomePageRouteProps = {
@@ -8,5 +8,5 @@ type HomePageRouteProps = {
 export default async function LocaleHomePage({ params }: HomePageRouteProps) {
   const locale = getLocaleFromParams(await params);
 
-  return <HomePage locale={locale} />;
+  return <LocaleEntryRedirect locale={locale} />;
 }
