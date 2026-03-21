@@ -23,6 +23,8 @@ use crate::{
     },
 };
 
+const SOURCE_COUNT_WARN_THRESHOLD: usize = 64;
+
 pub struct App {
     config: AgentConfig,
     store: SqliteStateStore,
@@ -55,6 +57,14 @@ impl App {
         );
         if runtime_state.degraded_mode {
             status.set_degraded_mode(true, Some("persisted runtime state".to_string()));
+        }
+        if runtime_state.blocked_delivery {
+            let reason = runtime_state
+                .blocked_reason
+                .clone()
+                .or_else(|| Some("persisted blocked delivery state".to_string()));
+            status.set_blocked_delivery(true, reason.clone());
+            status.set_degraded_mode(true, reason);
         }
         if let Some(revision) = runtime_state.applied_policy_revision.clone() {
             status.set_policy_revision(Some(revision));
@@ -147,6 +157,12 @@ impl App {
         let mut source_handles = Vec::new();
         if self.config.sources.is_empty() {
             warn!("agent started without configured sources");
+        } else if self.config.sources.len() > SOURCE_COUNT_WARN_THRESHOLD {
+            warn!(
+                source_count = self.config.sources.len(),
+                threshold = SOURCE_COUNT_WARN_THRESHOLD,
+                "high source count configured; current runtime uses one reader task per source"
+            );
         }
         for source in self.config.sources.clone() {
             source_handles.push(spawn_file_source(
@@ -215,6 +231,8 @@ impl App {
             last_successful_send_at_unix_ms: runtime_state.last_successful_send_at_unix_ms,
             last_known_edge_url: Some(self.config.edge_url.clone()),
             degraded_mode: runtime_state.degraded_mode,
+            blocked_delivery: runtime_state.blocked_delivery,
+            blocked_reason: runtime_state.blocked_reason,
             spool_enabled: self.config.spool.enabled,
             consecutive_send_failures: runtime_state.consecutive_send_failures,
             updated_at_unix_ms: chrono::Utc::now().timestamp_millis(),

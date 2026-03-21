@@ -41,6 +41,7 @@ pub fn spawn_degraded_controller(
                     );
                     let should_enable = reason.is_some();
                     let should_disable = snapshot.degraded_mode
+                        && !snapshot.blocked_delivery
                         && snapshot.consecutive_send_failures == 0
                         && snapshot.server_unavailable_for_sec == 0
                         && queue_pressure_pct <= degraded.queue_recover_pct
@@ -61,6 +62,8 @@ pub fn spawn_degraded_controller(
                         state_writer
                             .update_runtime_flags(RuntimeFlagsUpdate {
                                 degraded_mode: target_mode,
+                                blocked_delivery: status.is_blocked_delivery(),
+                                blocked_reason: status.blocked_reason(),
                                 spool_enabled,
                                 consecutive_send_failures: status.current_consecutive_failures(),
                                 last_successful_send_at_unix_ms: None,
@@ -84,6 +87,9 @@ fn degraded_reason(
     storage_pressure: bool,
     degraded: &DegradedConfig,
 ) -> Option<String> {
+    if snapshot.blocked_delivery {
+        return Some("blocked delivery".to_string());
+    }
     if storage_pressure {
         return Some("spool storage pressure".to_string());
     }
@@ -147,6 +153,7 @@ mod tests {
         let pct = max_queue_pressure_pct(
             &ControllerSnapshot {
                 degraded_mode: false,
+                blocked_delivery: false,
                 consecutive_send_failures: 0,
                 server_unavailable_for_sec: 0,
                 event_queue_len: 80,
@@ -173,6 +180,7 @@ mod tests {
         let reason = degraded_reason(
             &ControllerSnapshot {
                 degraded_mode: false,
+                blocked_delivery: false,
                 consecutive_send_failures: 0,
                 server_unavailable_for_sec: 0,
                 event_queue_len: 0,
@@ -196,5 +204,36 @@ mod tests {
         );
 
         assert_eq!(reason.as_deref(), Some("unacked lag"));
+    }
+
+    #[test]
+    fn enters_degraded_on_blocked_delivery() {
+        let reason = degraded_reason(
+            &ControllerSnapshot {
+                degraded_mode: true,
+                blocked_delivery: true,
+                consecutive_send_failures: 1,
+                server_unavailable_for_sec: 0,
+                event_queue_len: 0,
+                event_queue_bytes: 0,
+                send_queue_len: 0,
+                send_queue_bytes: 0,
+                total_unacked_lag_bytes: 0,
+                spooled_batches: 1,
+                spooled_bytes: 256,
+            },
+            0,
+            false,
+            &DegradedConfig {
+                failure_threshold: 3,
+                server_unavailable_sec: 30,
+                queue_pressure_pct: 80,
+                queue_recover_pct: 40,
+                unacked_lag_bytes: 100,
+                shutdown_spool_grace_sec: 5,
+            },
+        );
+
+        assert_eq!(reason.as_deref(), Some("blocked delivery"));
     }
 }
