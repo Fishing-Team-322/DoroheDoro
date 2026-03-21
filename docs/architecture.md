@@ -1332,14 +1332,21 @@ Reserved future subjects are already fixed in the shared registry:
 - `query.dashboards.overview`
 - `alerts.list|get|rules.create|rules.update`
 - `audit.list`
+## Agent Security Posture Runtime
 
-### Обнаружение аномалий (2026-03)
+The Rust `AGENT` now contains a dedicated background security posture worker.
 
-- Все логи (journald, file tail и т.д.) нормализуются в `NormalizedLogEvent` внутри ingestion-plane: фиксированная схема с `timestamp`, `host`, `service`, `severity`, `message`, `fingerprint`, `labels`. Именно этот стабилизированный слой используется для любой аналитики.
-- `query-alert-plane` теперь слушает `logs.ingest.normalized` и хранит активные `anomaly_rules` / `anomaly_instances` в PostgreSQL (таблицы, добавленные миграцией `0006`). Каждое правило имеет `kind` и JSON-конфиг, который описывает фильтры (`host/service/severity/query`) и параметры окна.
-- Поддерживаются 3 алгоритма:
-  1. **`rare_fingerprint`** — по каждому событию проверяет частоту fingerprint (sha256 по сообщению без числовых/hex переменных) в текущем окне. Можно делать как host-scoped, так и глобальные детекты, что отлично подходит для journald noise, где новая форма сообщения почти всегда интересна.
-  2. **`threshold`** — периодически (по `ANOMALY_EVALUATION_INTERVAL_SECS`) считает количество событий в ClickHouse за окно `window_minutes` и сравнивает с явным `threshold`. Используется для всплесков ошибок/диагностик.
-  3. **`baseline`** — сравнивает текущее окно с историческим `baseline_minutes`: если `current_count >= baseline_avg * multiplier` и выполнены минимальные пороги, фиксируем отклонение. Весь baseline считается в ClickHouse (scroll-free) поверх той же нормализованной схемы.
-- Все детекты создают/обновляют строки в `anomaly_instances`, пишут `runtime_audit_events` и могут приводить к автоматическому тикету дальше по процессу.
-- Кэш правил управляется через `ANOMALY_RULE_CACHE_TTL_SECS`, чтобы query-alert-plane не перегружал Postgres при большом потоке journald событий.
+This worker remains inside the `AGENT` service boundary and:
+
+- schedules periodic local scans on Linux hosts
+- checks listening ports, watched package versions, and coarse hardening signals
+- emits normalized `security.posture.*.v1` payloads through the existing diagnostics transport
+- persists the latest posture state in the agent SQLite database and optionally mirrors the last report JSON to local disk
+
+This preserves the current external architecture:
+
+- `WEB`
+- `SERVER`
+- `AGENT`
+
+No new public product service or extra internet-facing runtime is introduced by this slice.

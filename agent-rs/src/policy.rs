@@ -99,17 +99,16 @@ fn parse_object_source(value: &Value) -> AppResult<SourceConfig> {
         .unwrap_or_else(|| "host".to_string());
     let severity_hint = optional_non_empty(object.get("severity_hint").and_then(Value::as_str))
         .unwrap_or_else(|| "info".to_string());
-    let start_at = match optional_non_empty(object.get("start_at").and_then(Value::as_str))
-        .as_deref()
-    {
-        Some("beginning") => StartAt::Beginning,
-        Some("end") | None => StartAt::End,
-        Some(other) => {
-            return Err(AppError::protocol(format!(
-                "unsupported start_at `{other}` for policy file source"
-            )))
-        }
-    };
+    let start_at =
+        match optional_non_empty(object.get("start_at").and_then(Value::as_str)).as_deref() {
+            Some("beginning") => StartAt::Beginning,
+            Some("end") | None => StartAt::End,
+            Some(other) => {
+                return Err(AppError::protocol(format!(
+                    "unsupported start_at `{other}` for policy file source"
+                )))
+            }
+        };
 
     Ok(SourceConfig {
         kind: "file".to_string(),
@@ -206,9 +205,8 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_source_types() {
-        let error =
-            parse_file_sources(r#"{"sources":[{"type":"journald","path":"journald"}]}"#)
-                .unwrap_err();
+        let error = parse_file_sources(r#"{"sources":[{"type":"journald","path":"journald"}]}"#)
+            .unwrap_err();
         assert!(error.to_string().contains("unsupported policy source type"));
     }
 }

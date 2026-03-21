@@ -686,7 +686,8 @@ mod tests {
     };
     use crate::config::{
         AgentConfig, InstallConfig, InstallMode, PlatformConfig, PolicyConfig, ScopeConfig,
-        SourceConfig, SpoolConfig, StartAt, TlsConfig, TransportConfig, TransportMode,
+        SecurityScanConfig, SourceConfig, SpoolConfig, StartAt, TlsConfig, TransportConfig,
+        TransportMode,
     };
 
     fn test_config() -> AgentConfig {
@@ -698,6 +699,7 @@ mod tests {
             log_level: "info".to_string(),
             heartbeat: Default::default(),
             diagnostics: Default::default(),
+            security_scan: SecurityScanConfig::default(),
             policy: PolicyConfig::default(),
             batch: Default::default(),
             queues: Default::default(),

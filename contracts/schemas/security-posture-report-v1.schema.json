@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dorohedoro/contracts/security-posture-report-v1.schema.json",
+  "title": "SecurityPostureReportV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_name",
+    "report_id",
+    "created_at",
+    "agent_id",
+    "hostname",
+    "profile",
+    "interval_sec",
+    "started_at",
+    "finished_at",
+    "duration_ms",
+    "status",
+    "port_states",
+    "asset_versions",
+    "misconfig_checks",
+    "runtime_health",
+    "findings",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": { "const": "v1" },
+    "event_name": { "const": "security.posture.report.v1" },
+    "report_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "agent_id": { "type": "string", "minLength": 1 },
+    "hostname": { "type": "string", "minLength": 1 },
+    "profile": { "enum": ["light", "balanced", "deep"] },
+    "interval_sec": { "type": "integer", "minimum": 1 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "status": { "type": "string", "minLength": 1 },
+    "port_states": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/port_state" }
+    },
+    "asset_versions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset_version" }
+    },
+    "misconfig_checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/misconfig_check" }
+    },
+    "runtime_health": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/runtime_issue" }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "$defs": {
+    "severity": {
+      "type": "string",
+      "enum": ["info", "low", "medium", "high", "critical"]
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "critical", "high", "medium", "low", "info"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "critical": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 0 },
+        "medium": { "type": "integer", "minimum": 0 },
+        "low": { "type": "integer", "minimum": 0 },
+        "info": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id",
+        "category",
+        "severity",
+        "title",
+        "detail",
+        "asset_type",
+        "asset_name",
+        "check_id"
+      ],
+      "properties": {
+        "finding_id": { "type": "string", "minLength": 1 },
+        "finding_fingerprint": { "type": ["string", "null"] },
+        "category": { "type": "string", "minLength": 1 },
+        "severity": { "$ref": "#/$defs/severity" },
+        "title": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 },
+        "asset_type": { "type": "string", "minLength": 1 },
+        "asset_name": { "type": "string", "minLength": 1 },
+        "observed_value": { "type": ["string", "null"] },
+        "expected_value": { "type": ["string", "null"] },
+        "check_id": { "type": "string", "minLength": 1 },
+        "remediation": { "type": ["string", "null"] },
+        "evidence": { "type": ["string", "null"] }
+      }
+    },
+    "port_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port_id", "protocol", "listen_address", "port", "exposure"],
+      "properties": {
+        "port_id": { "type": "string", "minLength": 1 },
+        "protocol": { "type": "string", "minLength": 1 },
+        "listen_address": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "exposure": { "type": "string", "minLength": 1 },
+        "inode": { "type": ["integer", "null"], "minimum": 0 },
+        "process_id": { "type": ["integer", "null"], "minimum": 1 },
+        "process_name": { "type": ["string", "null"] },
+        "executable_path": { "type": ["string", "null"] },
+        "service_unit": { "type": ["string", "null"] },
+        "owner_uid": { "type": ["integer", "null"], "minimum": 0 },
+        "detail": { "type": ["string", "null"] }
+      }
+    },
+    "asset_version": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "requested_name",
+        "source_kind",
+        "installed",
+        "evaluation"
+      ],
+      "properties": {
+        "asset_id": { "type": "string", "minLength": 1 },
+        "requested_name": { "type": "string", "minLength": 1 },
+        "resolved_name": { "type": ["string", "null"] },
+        "source_kind": { "type": "string", "minLength": 1 },
+        "locator": { "type": ["string", "null"] },
+        "installed": { "type": "boolean" },
+        "version": { "type": ["string", "null"] },
+        "min_secure_version": { "type": ["string", "null"] },
+        "evaluation": { "type": "string", "minLength": 1 },
+        "detail": { "type": ["string", "null"] }
+      }
+    },
+    "misconfig_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["check_id", "check_name", "target", "status", "severity", "detail"],
+      "properties": {
+        "check_id": { "type": "string", "minLength": 1 },
+        "check_name": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "severity": { "$ref": "#/$defs/severity" },
+        "detail": { "type": "string", "minLength": 1 },
+        "observed_value": { "type": ["string", "null"] },
+        "expected_value": { "type": ["string", "null"] }
+      }
+    },
+    "runtime_issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_id", "issue_kind", "severity", "detail"],
+      "properties": {
+        "issue_id": { "type": "string", "minLength": 1 },
+        "issue_kind": { "type": "string", "minLength": 1 },
+        "severity": { "$ref": "#/$defs/severity" },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

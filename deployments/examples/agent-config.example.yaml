@@ -39,6 +39,20 @@ heartbeat:
 diagnostics:
   interval_sec: 30
 
+security_scan:
+  enabled: true
+  interval_sec: 86400
+  jitter_sec: 900
+  timeout_sec: 120
+  max_parallel_checks: 4
+  profile: "balanced"
+  allowed_ports: [22, 443]
+  blocked_ports: [23, 2375]
+  package_watchlist: ["openssl", "openssh", "nginx", "docker"]
+  version_rules_path: "/etc/doro-agent/security-rules.yaml"
+  publish_as_diagnostics: true
+  persist_last_report: true
+
 batch:
   max_events: 500
   max_bytes: 524288
