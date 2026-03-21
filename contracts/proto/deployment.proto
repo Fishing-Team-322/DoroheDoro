@@ -3,14 +3,7 @@ syntax = "proto3";
 package dorohedoro.deployment.v1;
 
 option go_package = "github.com/example/dorohedoro/contracts/deploymentproto;deploymentv1";
-
-message DeploymentReplyEnvelope {
-  string status = 1;
-  string code = 2;
-  string message = 3;
-  bytes payload = 4;
-  string correlation_id = 5;
-}
+import "runtime.proto";
 
 enum DeploymentJobType {
   DEPLOYMENT_JOB_TYPE_UNSPECIFIED = 0;
@@ -71,6 +64,7 @@ message CreateDeploymentJobRequest {
   bool preserve_state = 8;
   bool force = 9;
   bool dry_run = 10;
+  dorohedoro.runtime.v1.AuditContext audit = 11;
 }
 
 message CreateDeploymentJobResponse {
@@ -113,6 +107,7 @@ message RetryDeploymentJobRequest {
   RetryStrategy strategy = 3;
   string triggered_by = 4;
   string reason = 5;
+  dorohedoro.runtime.v1.AuditContext audit = 6;
 }
 
 message RetryDeploymentJobResponse {
@@ -124,6 +119,7 @@ message CancelDeploymentJobRequest {
   string job_id = 2;
   string requested_by = 3;
   string reason = 4;
+  dorohedoro.runtime.v1.AuditContext audit = 5;
 }
 
 message CancelDeploymentJobResponse {
@@ -141,6 +137,7 @@ message CreateDeploymentPlanRequest {
   bool preserve_state = 8;
   bool force = 9;
   bool dry_run = 10;
+  dorohedoro.runtime.v1.AuditContext audit = 11;
 }
 
 message CreateDeploymentPlanResponse {

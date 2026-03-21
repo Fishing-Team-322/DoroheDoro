@@ -4,8 +4,8 @@ use async_nats::Client;
 use common::{
     nats_subjects::{AGENTS_BOOTSTRAP_TOKEN_ISSUE, DEPLOYMENTS_JOBS_STATUS, DEPLOYMENTS_JOBS_STEP},
     proto::{
-        agent::{AgentReplyEnvelope, IssueBootstrapTokenRequest, IssueBootstrapTokenResponse},
-        decode_message, deployment, encode_message,
+        agent::{IssueBootstrapTokenRequest, IssueBootstrapTokenResponse},
+        decode_message, deployment, encode_message, runtime,
     },
     AppError, AppResult,
 };
@@ -21,8 +21,8 @@ use crate::{
     models::{
         parse_rfc3339_utc, DeploymentCreateSpec, DeploymentFlags, DeploymentJobPayload,
         DeploymentJobStatus, DeploymentPlan, DeploymentSnapshot, DeploymentStepStatus,
-        DeploymentTargetRecord, DeploymentTargetStatus, ListJobsFilter, RetryStrategy,
-        RunningAttempt,
+        DeploymentTargetRecord, DeploymentTargetStatus, ExecutionAuditContext, ExecutionResult,
+        ExecutionSnapshot, ExecutionTarget, ListJobsFilter, RetryStrategy, RunningAttempt,
     },
     policy::resolver::PolicyResolver,
     render::{
@@ -465,7 +465,7 @@ impl DeploymentService {
             .map_err(|error| {
                 AppError::internal(format!("issue bootstrap token request: {error}"))
             })?;
-        let envelope: AgentReplyEnvelope = decode_message(message.payload.as_ref())?;
+        let envelope: runtime::RuntimeReplyEnvelope = decode_message(message.payload.as_ref())?;
         if envelope.status != "ok" {
             return Err(match envelope.code.as_str() {
                 "invalid_argument" => AppError::invalid_argument(envelope.message),
@@ -545,109 +545,84 @@ impl DeploymentService {
             .await
             .map_err(map_db_error)?;
         self.publish_step(job_id, attempt_id, &start_step).await;
-
-        let target_map = running
-            .snapshot
-            .targets
-            .iter()
-            .map(|target| (target.host.host_id, target))
-            .collect::<HashMap<_, _>>();
-
+        let execution_snapshot = build_execution_snapshot(&running)?;
         for target in &running.targets {
-            if cancellation.is_cancelled() {
-                self.repo
-                    .complete_target(
-                        target.id,
-                        DeploymentTargetStatus::Cancelled,
-                        Some("cancelled before target execution"),
-                    )
-                    .await
-                    .map_err(map_db_error)?;
-                let cancelled_step = self
-                    .repo
-                    .insert_step(
-                        job_id,
-                        attempt_id,
-                        Some(target.id),
-                        "target.cancelled",
-                        DeploymentStepStatus::Skipped,
-                        "target execution cancelled before start",
-                        &serde_json::json!({ "hostname": target.hostname_snapshot }),
-                    )
-                    .await
-                    .map_err(map_db_error)?;
-                self.publish_step(job_id, attempt_id, &cancelled_step).await;
-                continue;
-            }
-
             self.repo
                 .mark_target_running(target.id)
                 .await
                 .map_err(map_db_error)?;
-            let snapshot_target = target_map
-                .get(&target.host_id)
-                .ok_or_else(|| AppError::internal("deployment snapshot target missing"))?;
+        }
+        let job = self
+            .repo
+            .refresh_job_summary(
+                job_id,
+                Some(attempt_id),
+                "executor.running",
+                DeploymentJobStatus::Running,
+            )
+            .await
+            .map_err(map_db_error)?;
+        self.publish_status(&job).await;
 
-            match self
-                .executor
-                .execute_target(&running.snapshot, snapshot_target, &cancellation)
+        let execution_result = match self
+            .executor
+            .execute(&execution_snapshot, &cancellation)
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => executor_failure_result(&running, error),
+        };
+
+        for step in &execution_result.steps {
+            let stored_step = self
+                .repo
+                .insert_step(
+                    job_id,
+                    attempt_id,
+                    None,
+                    &step.step_name,
+                    step.status,
+                    &step.message,
+                    &step.payload_json,
+                )
                 .await
-            {
-                Ok(result) => {
-                    for step in result.steps {
-                        let stored_step = self
-                            .repo
-                            .insert_step(
-                                job_id,
-                                attempt_id,
-                                Some(target.id),
-                                &step.step_name,
-                                step.status,
-                                &step.message,
-                                &step.payload_json,
-                            )
-                            .await
-                            .map_err(map_db_error)?;
-                        self.publish_step(job_id, attempt_id, &stored_step).await;
-                    }
+                .map_err(map_db_error)?;
+            self.publish_step(job_id, attempt_id, &stored_step).await;
+        }
 
-                    self.repo
-                        .complete_target(target.id, result.status, result.error_message.as_deref())
-                        .await
-                        .map_err(map_db_error)?;
-                }
-                Err(error) => {
-                    let stored_step = self
-                        .repo
-                        .insert_step(
-                            job_id,
-                            attempt_id,
-                            Some(target.id),
-                            "executor.error",
-                            DeploymentStepStatus::Failed,
-                            &error.to_string(),
-                            &serde_json::json!({ "hostname": target.hostname_snapshot }),
-                        )
-                        .await
-                        .map_err(map_db_error)?;
-                    self.publish_step(job_id, attempt_id, &stored_step).await;
-                    self.repo
-                        .complete_target(
-                            target.id,
-                            DeploymentTargetStatus::Failed,
-                            Some(&error.to_string()),
-                        )
-                        .await
-                        .map_err(map_db_error)?;
-                }
+        for target in execution_result.targets {
+            for step in target.steps {
+                let stored_step = self
+                    .repo
+                    .insert_step(
+                        job_id,
+                        attempt_id,
+                        Some(target.deployment_target_id),
+                        &step.step_name,
+                        step.status,
+                        &step.message,
+                        &step.payload_json,
+                    )
+                    .await
+                    .map_err(map_db_error)?;
+                self.publish_step(job_id, attempt_id, &stored_step).await;
             }
+
+            self.repo
+                .complete_target(
+                    target.deployment_target_id,
+                    target.status,
+                    target.error_message.as_deref(),
+                )
+                .await
+                .map_err(map_db_error)?;
 
             let job = self
                 .repo
                 .refresh_job_summary(
                     job_id,
                     Some(attempt_id),
-                    &format!("executing {}", target.hostname_snapshot),
+                    &execution_result.current_phase,
                     DeploymentJobStatus::Running,
                 )
                 .await
@@ -669,8 +644,16 @@ impl DeploymentService {
                 None,
                 "attempt.finished",
                 final_status_to_step_status(final_status),
-                final_status.as_str(),
-                &serde_json::json!({ "final_status": final_status.as_str() }),
+                &execution_result.current_phase,
+                &serde_json::json!({
+                    "final_status": final_status.as_str(),
+                    "current_phase": execution_result.current_phase,
+                    "exit_code": execution_result.output.exit_code,
+                    "stdout_ref": execution_result.output.stdout_ref,
+                    "stdout_excerpt": execution_result.output.stdout_excerpt,
+                    "stderr_ref": execution_result.output.stderr_ref,
+                    "stderr_excerpt": execution_result.output.stderr_excerpt,
+                }),
             )
             .await
             .map_err(map_db_error)?;
@@ -678,7 +661,12 @@ impl DeploymentService {
 
         let job = self
             .repo
-            .finalize_attempt(job_id, attempt_id, final_status, final_status.as_str())
+            .finalize_attempt(
+                job_id,
+                attempt_id,
+                final_status,
+                &execution_result.current_phase,
+            )
             .await
             .map_err(map_db_error)?;
         self.publish_status(&job).await;
@@ -744,6 +732,83 @@ impl DeploymentService {
         {
             warn!(error = %error, job_id = %job_id, step_id = %step.id, "failed to publish deployment step event");
         }
+    }
+}
+
+fn build_execution_snapshot(running: &RunningAttempt) -> AppResult<ExecutionSnapshot> {
+    let target_map = running
+        .snapshot
+        .targets
+        .iter()
+        .map(|target| (target.host.host_id, target))
+        .collect::<HashMap<_, _>>();
+
+    let targets = running
+        .targets
+        .iter()
+        .map(|target| {
+            let snapshot_target = target_map
+                .get(&target.host_id)
+                .ok_or_else(|| AppError::internal("deployment snapshot target missing"))?;
+            Ok(ExecutionTarget {
+                deployment_target_id: target.id,
+                host: snapshot_target.host.clone(),
+                bootstrap: snapshot_target.bootstrap.clone(),
+                rendered_vars: snapshot_target.rendered_vars.clone(),
+            })
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+
+    Ok(ExecutionSnapshot {
+        deployment_job_id: running.job.id,
+        deployment_attempt_id: running.attempt.id,
+        audit: ExecutionAuditContext {
+            actor_id: running.attempt.triggered_by.clone(),
+            actor_type: "user".to_string(),
+            request_id: running.attempt.id.to_string(),
+            reason: running.attempt.reason.clone(),
+        },
+        job_type: running.snapshot.job_type,
+        requested_by: running.snapshot.requested_by.clone(),
+        policy: running.snapshot.policy.clone(),
+        credentials: running.snapshot.credentials.clone(),
+        flags: running.snapshot.flags.clone(),
+        targets,
+        executor_kind: running.snapshot.executor_kind,
+        created_at: running.snapshot.created_at,
+    })
+}
+
+fn executor_failure_result(running: &RunningAttempt, error: AppError) -> ExecutionResult {
+    let message = error.to_string();
+    ExecutionResult {
+        current_phase: "executor.error".to_string(),
+        targets: running
+            .targets
+            .iter()
+            .map(|target| crate::models::ExecutionTargetResult {
+                deployment_target_id: target.id,
+                status: DeploymentTargetStatus::Failed,
+                error_message: Some(message.clone()),
+                steps: vec![crate::models::StepExecutionResult {
+                    step_name: "executor.error".to_string(),
+                    status: DeploymentStepStatus::Failed,
+                    message: message.clone(),
+                    payload_json: serde_json::json!({
+                        "hostname": target.hostname_snapshot,
+                        "host_id": target.host_id,
+                    }),
+                }],
+            })
+            .collect(),
+        steps: vec![],
+        output: crate::models::ExecutionOutput {
+            exit_code: None,
+            stdout_ref: None,
+            stdout_excerpt: None,
+            stderr_ref: None,
+            stderr_excerpt: Some(message),
+        },
     }
 }
 

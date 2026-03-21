@@ -1,10 +1,192 @@
 services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /api/edge
+        NEXT_PUBLIC_SITE_URL: https://fishingteam.su
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: /api/edge
+      EDGE_API_INTERNAL_URL: http://edge-api:8080
+      NEXT_PUBLIC_SITE_URL: https://fishingteam.su
+    depends_on:
+      edge-api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:13000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ru/login').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   edge-api:
+    image: dorohedoro-edge-api-server
     build:
       context: ./edge_api
       dockerfile: Dockerfile
     env_file:
       - ./edge_api/.env.server
+    depends_on:
+      nats:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      enrollment-plane:
+        condition: service_healthy
+      control-plane:
+        condition: service_healthy
+      deployment-plane:
+        condition: service_healthy
+      edge-api-certs:
+        condition: service_completed_successfully
     ports:
       - "127.0.0.1:18080:8080"
     restart: unless-stopped
+    volumes:
+      - edge-api-certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  edge-api-certs:
+    image: dorohedoro-edge-api-server
+    build:
+      context: ./edge_api
+      dockerfile: Dockerfile
+    entrypoint: ["/usr/local/bin/dev-certs"]
+    environment:
+      DEV_CERTS_OUT_DIR: /certs
+    volumes:
+      - edge-api-certs:/certs
+
+  nats:
+    image: nats:2.11-alpine
+    command: ["-m", "8222"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: doro
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d doro"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  enrollment-plane:
+    image: dorohedoro-enrollment-plane-server
+    build:
+      context: .
+      dockerfile: ./server-rs/Dockerfile
+      args:
+        RUST_BIN: enrollment-plane
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/doro
+      NATS_URL: nats://nats:4222
+      ENROLLMENT_HTTP_ADDR: 0.0.0.0:8081
+      ENROLLMENT_DEV_BOOTSTRAP_TOKEN: dev-bootstrap-token
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8081/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  control-plane:
+    image: dorohedoro-control-plane-server
+    build:
+      context: .
+      dockerfile: ./server-rs/Dockerfile
+      args:
+        RUST_BIN: control-plane
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/doro
+      NATS_URL: nats://nats:4222
+      ENROLLMENT_HTTP_ADDR: 0.0.0.0:8081
+      CONTROL_HTTP_ADDR: 0.0.0.0:8082
+      ENROLLMENT_DEV_BOOTSTRAP_TOKEN: dev-bootstrap-token
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      enrollment-plane:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8082/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  deployment-plane:
+    image: dorohedoro-deployment-plane-server
+    build:
+      context: .
+      dockerfile: ./server-rs/Dockerfile
+      args:
+        RUST_BIN: deployment-plane
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/doro
+      NATS_URL: nats://nats:4222
+      DEPLOYMENT_HTTP_ADDR: 0.0.0.0:8083
+      DEPLOYMENT_EXECUTOR_KIND: mock
+      EDGE_PUBLIC_URL: https://fishingteam.su
+      EDGE_GRPC_ADDR: edge-api:9090
+      AGENT_STATE_DIR_DEFAULT: /var/lib/doro-agent
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      enrollment-plane:
+        condition: service_healthy
+      control-plane:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8083/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  edge-api-certs:
+  postgres-data:

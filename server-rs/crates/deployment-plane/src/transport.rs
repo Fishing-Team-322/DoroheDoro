@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_nats::{Client, Subject, Subscriber};
 use common::{
     nats_subjects::*,
-    proto::{decode_message, deployment, deployment_ok_envelope, encode_message},
+    proto::{decode_message, deployment, encode_message, ok_envelope, runtime},
     AppError,
 };
 use futures::StreamExt;
@@ -247,7 +247,7 @@ async fn send_ok_reply<T>(
 ) where
     T: prost::Message,
 {
-    let envelope = deployment_ok_envelope(payload, correlation_id.to_string());
+    let envelope = ok_envelope(payload, correlation_id.to_string());
     send_reply(client, reply_subject, envelope).await;
 }
 
@@ -257,14 +257,14 @@ async fn send_error_reply(
     error: AppError,
     correlation_id: impl Into<String>,
 ) {
-    let envelope = error.to_deployment_envelope(correlation_id.into());
+    let envelope = error.to_envelope(correlation_id.into());
     send_reply(client, reply_subject, envelope).await;
 }
 
 async fn send_reply(
     client: &Client,
     reply_subject: &Option<Subject>,
-    envelope: deployment::DeploymentReplyEnvelope,
+    envelope: runtime::RuntimeReplyEnvelope,
 ) {
     let Some(reply_subject) = reply_subject.clone() else {
         warn!("received deployment request without reply subject");

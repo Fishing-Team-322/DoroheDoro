@@ -4,6 +4,10 @@ pub mod heartbeat;
 pub mod sender;
 pub mod state_writer;
 
+pub mod v1 {
+    pub use crate::proto::runtime::v1::*;
+}
+
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -16,6 +20,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     config::SourceConfig,
     error::TransportErrorKind,
+    metadata::{
+        BuildMetadata, ClusterMetadata, CompatibilitySnapshot, IdentityStatusSnapshot,
+        InstallMetadata, PathMetadata, PlatformMetadata, RuntimeMetadataContext,
+    },
     state::{FileOffsetRecord, SpoolStats},
 };
 
@@ -45,6 +53,14 @@ pub struct DiagnosticsSnapshot {
     pub consecutive_send_failures: u32,
     pub transport_state: TransportStateSnapshot,
     pub source_statuses: Vec<SourceStatusSnapshot>,
+    pub platform: PlatformMetadata,
+    pub build: BuildMetadata,
+    pub install: InstallMetadata,
+    pub paths: PathMetadata,
+    pub state: StateSnapshot,
+    pub compatibility: CompatibilitySnapshot,
+    pub cluster: ClusterMetadata,
+    pub identity_status: IdentityStatusSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +87,30 @@ pub struct SourceStatusSnapshot {
     pub durable_pending_bytes: u64,
     pub last_read_at: Option<i64>,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateSnapshot {
+    pub state_db_path: String,
+    pub state_db_exists: bool,
+    pub state_db_accessible: bool,
+    pub persisted_identity_present: bool,
+    pub current_policy_revision: Option<String>,
+    pub last_known_edge_url: Option<String>,
+    pub spool_enabled: bool,
+    pub spooled_batches: usize,
+    pub spooled_bytes: u64,
+    pub last_successful_send_at: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeStaticContext {
+    pub metadata: RuntimeMetadataContext,
+    pub state_db_exists: bool,
+    pub state_db_accessible: bool,
+    pub persisted_identity_present: bool,
+    pub last_known_edge_url: Option<String>,
+    pub identity_status: IdentityStatusSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +140,17 @@ struct RuntimeStatus {
     version: String,
     transport_mode: String,
     current_policy_revision: Option<String>,
+    build: BuildMetadata,
+    platform: PlatformMetadata,
+    install: InstallMetadata,
+    paths: PathMetadata,
+    cluster: ClusterMetadata,
+    compatibility: CompatibilitySnapshot,
+    identity_status: IdentityStatusSnapshot,
+    state_db_exists: bool,
+    state_db_accessible: bool,
+    persisted_identity_present: bool,
+    last_known_edge_url: Option<String>,
     degraded_mode: bool,
     degraded_reason: Option<String>,
     blocked_delivery: bool,
@@ -141,6 +192,7 @@ impl RuntimeStatusHandle {
         hostname: String,
         version: String,
         transport_mode: String,
+        static_context: RuntimeStaticContext,
         spool_enabled: bool,
         sources: &[SourceConfig],
         persisted_offsets: &[FileOffsetRecord],
@@ -182,6 +234,17 @@ impl RuntimeStatusHandle {
                 version,
                 transport_mode,
                 current_policy_revision: None,
+                build: static_context.metadata.build,
+                platform: static_context.metadata.platform,
+                install: static_context.metadata.install,
+                paths: static_context.metadata.paths,
+                cluster: static_context.metadata.cluster,
+                compatibility: static_context.metadata.compatibility,
+                identity_status: static_context.identity_status,
+                state_db_exists: static_context.state_db_exists,
+                state_db_accessible: static_context.state_db_accessible,
+                persisted_identity_present: static_context.persisted_identity_present,
+                last_known_edge_url: static_context.last_known_edge_url,
                 degraded_mode: false,
                 degraded_reason: None,
                 blocked_delivery: false,
@@ -213,6 +276,18 @@ impl RuntimeStatusHandle {
     pub fn set_policy_revision(&self, revision: Option<String>) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.current_policy_revision = revision;
+        }
+    }
+
+    pub fn set_identity_status(&self, status: IdentityStatusSnapshot) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.identity_status = status;
+        }
+    }
+
+    pub fn set_last_known_edge_url(&self, edge_url: Option<String>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_known_edge_url = edge_url;
         }
     }
 
@@ -539,6 +614,7 @@ impl RuntimeStatusHandle {
                 last_error: source.last_error.clone(),
             })
             .collect::<Vec<_>>();
+        let compatibility = build_dynamic_compatibility(&inner.compatibility, &source_statuses);
 
         DiagnosticsSnapshot {
             agent_id: inner.agent_id.clone(),
@@ -582,6 +658,25 @@ impl RuntimeStatusHandle {
                 blocked_reason: inner.blocked_reason.clone(),
             },
             source_statuses,
+            platform: inner.platform.clone(),
+            build: inner.build.clone(),
+            install: inner.install.clone(),
+            paths: inner.paths.clone(),
+            state: StateSnapshot {
+                state_db_path: inner.paths.state_db_path.clone(),
+                state_db_exists: inner.state_db_exists,
+                state_db_accessible: inner.state_db_accessible,
+                persisted_identity_present: inner.persisted_identity_present,
+                current_policy_revision: inner.current_policy_revision.clone(),
+                last_known_edge_url: inner.last_known_edge_url.clone(),
+                spool_enabled: inner.spool_enabled,
+                spooled_batches: inner.spool_stats.batch_count,
+                spooled_bytes: inner.spool_stats.total_bytes,
+                last_successful_send_at: inner.last_successful_send_at,
+            },
+            compatibility,
+            cluster: inner.cluster.clone(),
+            identity_status: inner.identity_status.clone(),
         }
     }
 
@@ -603,6 +698,84 @@ fn parse_inode(file_key: Option<&str>) -> Option<u64> {
         .and_then(|value| value.parse::<u64>().ok())
 }
 
+fn build_dynamic_compatibility(
+    base: &CompatibilitySnapshot,
+    source_statuses: &[SourceStatusSnapshot],
+) -> CompatibilitySnapshot {
+    let mut snapshot = base.clone();
+    for source in source_statuses {
+        if let Some(error) = &source.last_error {
+            snapshot.source_path_issues.push(format!(
+                "source `{}` at `{}` reports `{error}`",
+                source.source_id, source.path
+            ));
+        }
+    }
+    snapshot
+}
+
+#[cfg(test)]
+pub fn test_static_context() -> RuntimeStaticContext {
+    RuntimeStaticContext {
+        metadata: RuntimeMetadataContext {
+            build: crate::metadata::BuildMetadata::current(),
+            platform: crate::metadata::PlatformMetadata {
+                os_family: "linux".to_string(),
+                distro_name: Some("demo".to_string()),
+                distro_version: Some("1".to_string()),
+                kernel_version: Some("6.0.0".to_string()),
+                architecture: "x86_64".to_string(),
+                hostname: "demo-host".to_string(),
+                machine_id_hash: None,
+                service_manager: "systemd".to_string(),
+                systemd_detected: true,
+            },
+            install: crate::metadata::InstallMetadata {
+                configured_mode: "dev".to_string(),
+                resolved_mode: "dev".to_string(),
+                resolution_source: "explicit".to_string(),
+                canonical_layout: false,
+                systemd_expected: false,
+                notes: Vec::new(),
+                warnings: Vec::new(),
+            },
+            paths: crate::metadata::PathMetadata {
+                current_exe: "/tmp/doro-agent".to_string(),
+                config_path: "/tmp/config.yaml".to_string(),
+                state_dir: "/tmp/doro-agent".to_string(),
+                spool_dir: "/tmp/doro-agent/spool".to_string(),
+                state_db_path: "/tmp/doro-agent/state.db".to_string(),
+                canonical_package_bin: "/usr/bin/doro-agent".to_string(),
+                canonical_config_path: "/etc/doro-agent/config.yaml".to_string(),
+                canonical_env_path: "/etc/doro-agent/agent.env".to_string(),
+                canonical_state_dir: "/var/lib/doro-agent".to_string(),
+                canonical_spool_dir: "/var/lib/doro-agent/spool".to_string(),
+                canonical_log_dir: "/var/log/doro-agent".to_string(),
+                service_unit_name: "doro-agent.service".to_string(),
+            },
+            cluster: ClusterMetadata {
+                configured_cluster_id: Some("cluster-a".to_string()),
+                cluster_name: Some("prod".to_string()),
+                service_name: Some("api".to_string()),
+                environment: Some("production".to_string()),
+                configured_cluster_tags: Default::default(),
+                effective_cluster_tags: Default::default(),
+                host_labels: Default::default(),
+            },
+            compatibility: CompatibilitySnapshot::default(),
+            event_enrichment: crate::metadata::EventEnrichmentContext::default(),
+        },
+        state_db_exists: true,
+        state_db_accessible: true,
+        persisted_identity_present: true,
+        last_known_edge_url: Some("https://edge.example.local".to_string()),
+        identity_status: IdentityStatusSnapshot {
+            status: "reused".to_string(),
+            reason: Some("persisted identity accepted".to_string()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -613,7 +786,7 @@ mod tests {
         state::FileOffsetRecord,
     };
 
-    use super::RuntimeStatusHandle;
+    use super::{test_static_context, RuntimeStatusHandle};
 
     #[test]
     fn builds_diagnostics_snapshot() {
@@ -622,6 +795,7 @@ mod tests {
             "demo-host".to_string(),
             "0.1.0".to_string(),
             "mock".to_string(),
+            test_static_context(),
             true,
             &[SourceConfig {
                 kind: "file".to_string(),
@@ -665,5 +839,11 @@ mod tests {
             snapshot.last_error_kind.as_deref(),
             Some("TransientNetwork")
         );
+        assert_eq!(snapshot.identity_status.status, "reused");
+        assert_eq!(
+            snapshot.state.last_known_edge_url.as_deref(),
+            Some("https://edge.example.local")
+        );
+        assert_eq!(snapshot.cluster.cluster_name.as_deref(), Some("prod"));
     }
 }

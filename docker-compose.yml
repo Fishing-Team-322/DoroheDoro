@@ -62,8 +62,12 @@ services:
       CORS_ALLOWED_ORIGINS: http://localhost:3000
     depends_on:
       nats:
-        condition: service_started
+        condition: service_healthy
       enrollment-plane:
+        condition: service_healthy
+      control-plane:
+        condition: service_healthy
+      deployment-plane:
         condition: service_healthy
       edge-api-certs:
         condition: service_completed_successfully
@@ -96,6 +100,12 @@ services:
     ports:
       - "4222:4222"
       - "8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   postgres:
     image: postgres:16-alpine
@@ -103,6 +113,8 @@ services:
       POSTGRES_DB: doro
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
@@ -113,9 +125,12 @@ services:
       start_period: 5s
 
   enrollment-plane:
+    image: dorohedoro-enrollment-plane-dev
     build:
       context: .
       dockerfile: ./server-rs/Dockerfile
+      args:
+        RUST_BIN: enrollment-plane
     environment:
       POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/doro
       NATS_URL: nats://nats:4222
@@ -126,7 +141,7 @@ services:
       postgres:
         condition: service_healthy
       nats:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "8081:8081"
     healthcheck:
@@ -136,5 +151,68 @@ services:
       retries: 10
       start_period: 10s
 
+  control-plane:
+    image: dorohedoro-control-plane-dev
+    build:
+      context: .
+      dockerfile: ./server-rs/Dockerfile
+      args:
+        RUST_BIN: control-plane
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/doro
+      NATS_URL: nats://nats:4222
+      ENROLLMENT_HTTP_ADDR: 0.0.0.0:8081
+      CONTROL_HTTP_ADDR: 0.0.0.0:8082
+      ENROLLMENT_DEV_BOOTSTRAP_TOKEN: dev-bootstrap-token
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8082/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  deployment-plane:
+    image: dorohedoro-deployment-plane-dev
+    build:
+      context: .
+      dockerfile: ./server-rs/Dockerfile
+      args:
+        RUST_BIN: deployment-plane
+    environment:
+      POSTGRES_DSN: postgres://postgres:postgres@postgres:5432/doro
+      NATS_URL: nats://nats:4222
+      DEPLOYMENT_HTTP_ADDR: 0.0.0.0:8083
+      DEPLOYMENT_EXECUTOR_KIND: mock
+      EDGE_PUBLIC_URL: http://localhost:8080
+      EDGE_GRPC_ADDR: edge-api:9090
+      AGENT_STATE_DIR_DEFAULT: /var/lib/doro-agent
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      control-plane:
+        condition: service_healthy
+      enrollment-plane:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD", "/usr/bin/curl", "-fsS", "http://127.0.0.1:8083/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
 volumes:
   edge-api-certs:
+  postgres-data:

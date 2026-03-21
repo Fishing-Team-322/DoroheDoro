@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use async_nats::Client;
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use common::bootstrap;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -16,9 +15,12 @@ use crate::{
     transport,
 };
 
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+
 pub async fn run(config: DeploymentConfig) -> anyhow::Result<()> {
-    let pool = connect_postgres(&config.postgres_dsn).await?;
-    let nats = connect_nats(&config.nats_url).await?;
+    let pool = bootstrap::connect_postgres(&config.shared.postgres_dsn, 5).await?;
+    bootstrap::run_migrations(&MIGRATOR, &pool).await?;
+    let nats = bootstrap::connect_nats(&config.shared.nats_url).await?;
     let executor = build_executor(&config)?;
 
     let repo = DeploymentRepository::new(pool.clone());
@@ -53,7 +55,7 @@ pub async fn run(config: DeploymentConfig) -> anyhow::Result<()> {
 
     info!(
         http_addr = %addr,
-        nats_url = %config.nats_url,
+        nats_url = %config.shared.nats_url,
         executor_kind = config.deployment_executor_kind.as_str(),
         "starting deployment-plane"
     );
@@ -62,7 +64,7 @@ pub async fn run(config: DeploymentConfig) -> anyhow::Result<()> {
         listener,
         health::router(HealthState::new(pool, nats, executor)),
     )
-    .with_graceful_shutdown(shutdown_signal());
+    .with_graceful_shutdown(bootstrap::shutdown_signal());
 
     let server_result = server.await.context("run http server");
     shutdown.cancel();
@@ -77,9 +79,11 @@ pub async fn run(config: DeploymentConfig) -> anyhow::Result<()> {
 
 fn build_executor(config: &DeploymentConfig) -> anyhow::Result<DynDeploymentExecutor> {
     match config.deployment_executor_kind {
-        crate::models::ExecutorKind::Mock => {
-            Ok(Arc::new(MockExecutor::new(MockExecutorOptions::default())))
-        }
+        crate::models::ExecutorKind::Mock => Ok(Arc::new(MockExecutor::new(MockExecutorOptions {
+            step_delay_ms: config.mock_executor_step_delay_ms,
+            fail_mode: config.mock_executor_fail_mode,
+            fail_hostnames: config.mock_executor_fail_hosts.iter().cloned().collect(),
+        }))),
         crate::models::ExecutorKind::Ansible => {
             let runner_bin = config
                 .ansible_runner_bin
@@ -99,42 +103,5 @@ fn build_executor(config: &DeploymentConfig) -> anyhow::Result<DynDeploymentExec
                 temp_dir,
             )))
         }
-    }
-}
-
-async fn connect_postgres(postgres_dsn: &str) -> anyhow::Result<PgPool> {
-    PgPoolOptions::new()
-        .max_connections(5)
-        .connect(postgres_dsn)
-        .await
-        .with_context(|| format!("connect postgres: {postgres_dsn}"))
-}
-
-async fn connect_nats(nats_url: &str) -> anyhow::Result<Client> {
-    async_nats::connect(nats_url)
-        .await
-        .with_context(|| format!("connect nats: {nats_url}"))
-}
-
-async fn shutdown_signal() {
-    #[cfg(unix)]
-    {
-        let ctrl_c = tokio::signal::ctrl_c();
-        let terminate = async {
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .expect("install SIGTERM handler")
-                .recv()
-                .await;
-        };
-
-        tokio::select! {
-            _ = ctrl_c => {},
-            _ = terminate => {},
-        }
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
     }
 }

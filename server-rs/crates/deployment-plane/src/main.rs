@@ -8,7 +8,7 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     let config = DeploymentConfig::from_env()?;
-    init_tracing(&config.rust_log);
+    init_tracing(&config.shared.rust_log);
 
     deployment_plane::run(config).await
 }

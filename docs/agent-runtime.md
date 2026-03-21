@@ -18,29 +18,16 @@ The agent uses a lightweight concurrent pipeline:
 + heartbeat worker
 + diagnostics worker
 + degraded-mode controller
-+ fallback spool only on pressure or send failures
++ fallback spool on pressure, shutdown, or send failures
 ```
 
 Normal hot path is memory-first:
 
-- readers tail files and publish events into the bounded in-memory queue
+- readers tail files and push events into the bounded queue
 - batcher flushes by count, approximate bytes, or timer
 - sender waits for transport `ack`
 - state writer advances `acked_offset` only after successful send
-- sender drains spool fairly instead of using absolute spool-first priority
-
-Fallback spool is not the default path:
-
-- batches are written to spool only during degradation, queue pressure, or shutdown with unsent data
-- spool payloads are stored as files under `spool.dir`
-- SQLite keeps spool metadata and per-source `read_offset` / `acked_offset`
-- if spool metadata survives a crash but its payload file is already gone, startup recovery removes the broken entry
-
-Transport failure handling is explicit:
-
-- transient failures such as `TransientNetwork` stay on normal retry/backoff paths
-- permanent failures such as `Unauthorized`, `ServerRejected`, or serialization failures move the sender into `blocked_delivery`
-- blocked delivery is a hard degraded state: the agent stops tight retry loops, reports the reason in diagnostics, and keeps spooling new live batches when spool is enabled
+- sender drains spool fairly instead of permanent spool-first priority
 
 ## Config shape
 
@@ -55,6 +42,22 @@ log_level: "info"
 
 transport:
   mode: "edge"
+
+install:
+  mode: "auto"
+
+platform:
+  allow_machine_id: false
+
+scope:
+  configured_cluster_id: "cluster-a"
+  cluster_name: "production"
+  service_name: "system-logs"
+  environment: "prod"
+  configured_cluster_tags:
+    tenant: "team-a"
+  host_labels:
+    role: "edge"
 
 heartbeat:
   interval_sec: 30
@@ -103,8 +106,99 @@ Important defaults:
 - `sources[].source_id` defaults to `file:<path>`
 - `diagnostics.interval_sec` defaults to `heartbeat.interval_sec`
 - `spool.dir` defaults to `<state_dir>/spool`
+- `install.mode` defaults to `auto`
+- `platform.allow_machine_id` defaults to `false`
 
-## Local state
+Scalar env overrides exist for:
+
+- `EDGE_URL`
+- `EDGE_GRPC_ADDR`
+- `BOOTSTRAP_TOKEN`
+- `STATE_DIR`
+- `LOG_LEVEL`
+- `HEARTBEAT_INTERVAL_SEC`
+- `DIAGNOSTICS_INTERVAL_SEC`
+- `BATCH_*`
+- `QUEUE_*`
+- `DEGRADED_*`
+- `SPOOL_*`
+- `TRANSPORT_MODE`
+- `INSTALL_MODE`
+- `ALLOW_MACHINE_ID`
+- `CLUSTER_ID`
+- `CLUSTER_NAME`
+- `SERVICE_NAME`
+- `ENVIRONMENT`
+
+`configured_cluster_tags` and `host_labels` intentionally stay YAML-only in this phase.
+
+## Platform, build, and install metadata
+
+Diagnostics now carry a stable nested metadata model.
+
+### `platform`
+
+- `os_family`
+- `distro_name`
+- `distro_version`
+- `kernel_version`
+- `architecture`
+- `hostname`
+- `machine_id_hash`
+- `service_manager`
+- `systemd_detected`
+
+`machine_id_hash` is present only when machine-id collection is explicitly enabled. The agent hashes `/etc/machine-id` or `/var/lib/dbus/machine-id` with SHA-256 and never emits the raw value.
+
+### `build`
+
+- `agent_version`
+- `git_commit`
+- `build_id`
+- `target_triple`
+- `build_profile`
+
+If the build runs outside a git checkout, `git_commit` and `build_id` fall back to `unknown`.
+
+### `install`
+
+- `configured_mode`
+- `resolved_mode`
+- `resolution_source`
+- `canonical_layout`
+- `systemd_expected`
+- `notes`
+- `warnings`
+
+Supported configured modes:
+
+- `auto`
+- `package`
+- `tarball`
+- `ansible`
+- `dev`
+
+Resolved mode can also become `unknown` when the local layout is ambiguous.
+
+## Canonical install contract
+
+Package-oriented system-managed installs use:
+
+- binary: `/usr/bin/doro-agent`
+- config: `/etc/doro-agent/config.yaml`
+- env file: `/etc/doro-agent/agent.env`
+- state: `/var/lib/doro-agent`
+- spool: `/var/lib/doro-agent/spool`
+- logs: `/var/log/doro-agent`
+- systemd unit: `doro-agent.service`
+
+`deployments/systemd/doro-agent.service` and `agent-rs/packaging/systemd/doro-agent.service` now assume that layout.
+
+Tarball installs are supported too, but they are intentionally not tied to a single binary path. Auto detection treats colocated binary/config layouts as tarball-like. Tarball installs may still choose to symlink the binary into `/usr/bin`.
+
+Runtime does not silently relocate state or spool paths. If configured paths are unusable, startup fails with an actionable error.
+
+## Local state and lifecycle
 
 SQLite lives at `state_dir/state.db`.
 
@@ -115,106 +209,148 @@ Important tables:
 - `file_offsets`
 - `spool_batches`
 
-`file_offsets` now stores two durable offsets:
+`agent_runtime_state` keeps:
 
-- `read_offset`: highest locally durable position, including data already durably spooled
+- applied policy revision
+- last known edge URL
+- degraded / blocked delivery flags
+- spool enabled marker
+- consecutive send failures
+- last identity transition status and reason
+
+`file_offsets` store:
+
+- `read_offset`: highest durable local position, including data already durably spooled
 - `acked_offset`: highest position confirmed by the server
-
-Important semantic note:
-
-- persisted SQLite `read_offset` is durable local progress, not the in-memory live cursor
-- diagnostics expose `live_read_offset`, `durable_read_offset`, and `acked_offset` separately
-- `live_read_offset` exists only in memory and may be ahead of the persisted durable position
 
 Restart behavior:
 
 - if there is no spool backlog, readers resume from `acked_offset`
 - if there is durable spooled data, readers resume from `read_offset`
-- the agent does not write every batch to disk by default
+- the agent reuses local identity and current policy revision whenever possible
 
-Spool cleanup and recovery:
+Identity behavior:
 
-- spool cleanup deletes the payload file and then removes metadata
-- if the process crashes between those steps, the next startup or spool load pass recognizes `metadata present + payload missing` as a broken orphan and removes the stale metadata
-- the runtime does not assume partial spool cleanup is impossible
+- `reused`: local identity exists and the server accepts it
+- `newly_enrolled`: no local identity existed
+- `re_enrolled`: local identity existed but the server explicitly rejected it
 
-## File source behavior
+Upgrade and reinstall are expected to preserve `state_dir`. If state survives, the agent should not need a fresh enrollment.
 
-Current file-source runtime supports:
+## Diagnostics model
 
-- `start_at: beginning|end`
-- missing-file recovery
-- copytruncate handling
-- inode rotation detection
-- reopen after rotation
-- current scaling model is one reader task per source
+The serialized diagnostics payload contains both dynamic runtime state and static environment metadata:
 
-Current non-goals for this phase:
+- top-level runtime counters and queue state
+- `platform`
+- `build`
+- `install`
+- `paths`
+- `state`
+- `compatibility`
+- `cluster`
+- `identity_status`
+- `source_statuses`
 
-- journald
-- multiline
-- glob expansion
-- local debug HTTP API
+### `paths`
 
-## Local run
+- `current_exe`
+- `config_path`
+- `state_dir`
+- `spool_dir`
+- `state_db_path`
+- canonical package/systemd reference paths
+
+### `state`
+
+- `state_db_path`
+- `state_db_exists`
+- `state_db_accessible`
+- `persisted_identity_present`
+- `current_policy_revision`
+- `last_known_edge_url`
+- spool stats
+- `last_successful_send_at`
+
+### `compatibility`
+
+- `notes`
+- `warnings`
+- `errors`
+- `permission_issues`
+- `source_path_issues`
+- `insecure_transport`
+
+This block is meant for support and deployment troubleshooting, not just logical runtime state.
+
+## Cluster readiness and event enrichment
+
+Cluster-aware server-side policy logic is still a future task, but the agent is ready to carry local scope metadata.
+
+Current `scope` fields feed:
+
+- diagnostics `cluster`
+- heartbeat summary metadata
+- event label enrichment
+
+Current enrichment keeps the existing wire contract and uses `LogEvent.labels` only. The agent now builds labels through a shared `EventEnrichmentContext` instead of ad-hoc per-source maps.
+
+Current scope-derived event labels are:
+
+- `cluster_id`
+- `cluster_name`
+- `service_name`
+- `environment`
+- `host_labels.*`
+- existing source labels: `path`, `source`, `source_id`
+
+`configured_cluster_tags` are preserved in diagnostics as `effective_cluster_tags`, but they are not expanded into every event label yet.
+
+The agent intentionally does not parse new cluster data from `policy_body_json` in this phase. That remains a follow-up once the shared contract is fixed.
+
+## `doctor` self-check
+
+Run:
 
 ```bash
 cd agent-rs
-cargo test
-cargo run -- --config ./config/agent.example.yaml
+cargo run -- doctor --config ./config/agent.example.yaml
 ```
 
-For a healthy local run:
+`doctor` is non-mutating and checks:
 
-- use `transport.mode=mock`
-- point a source at `/tmp/doro-test.log`
-- append lines and watch logs
-- inspect `state.db` to confirm `acked_offset` advances
+- config syntax
+- install mode resolution
+- systemd detection vs expectation
+- state and spool directory sanity
+- existing SQLite state DB accessibility
+- source file readability
+- insecure HTTP edge transport hints
+- local scope metadata visibility
 
-To validate degraded mode and spool:
+Exit behavior:
 
-1. switch to `transport.mode=edge`
-2. point `edge_grpc_addr` at an unavailable endpoint
-3. append lines to the test file
-4. confirm diagnostics report `degraded_mode=true`
-5. confirm `spool_batches` gets rows and `acked_offset` stops advancing until recovery
-
-Fair draining policy:
-
-- sender processes at most 3 spooled batches in a row
-- after that it checks the live send queue and sends one live batch if available
-- this keeps historical backlog from starving fresh traffic
-
-Useful commands:
-
-```bash
-sqlite3 /var/lib/doro-agent/state.db '.tables'
-sqlite3 /var/lib/doro-agent/state.db 'select path, read_offset, acked_offset from file_offsets;'
-sqlite3 /var/lib/doro-agent/state.db 'select batch_id, attempt_count, next_retry_at_unix_ms from spool_batches;'
-```
+- warnings only: exit `0`
+- at least one hard failure: exit `2`
 
 ## Remote Linux run
 
-1. Build a release binary for Linux.
+1. Build a Linux release binary.
 
 ```bash
 cd agent-rs
 cargo build --release --target x86_64-unknown-linux-gnu
 ```
 
-Release builds use `thin` LTO, `codegen-units = 1`, and symbol stripping. That keeps the binary smaller for mass deployment without changing runtime semantics.
+2. Copy files to the host with the canonical package layout.
 
-2. Copy files to the host.
-
-Expected paths:
-
-- `/usr/local/bin/doro-agent`
+- `/usr/bin/doro-agent`
 - `/etc/doro-agent/config.yaml`
 - `/etc/doro-agent/agent.env`
 - `/var/lib/doro-agent/`
 - `/var/log/doro-agent/`
 
-3. Create the service account and state directory.
+3. Create the service account and directories.
 
 ```bash
 sudo useradd --system --home /var/lib/doro-agent --shell /usr/sbin/nologin doro-agent || true
@@ -222,7 +358,13 @@ sudo mkdir -p /etc/doro-agent /var/lib/doro-agent /var/log/doro-agent
 sudo chown -R doro-agent:doro-agent /var/lib/doro-agent /var/log/doro-agent
 ```
 
-4. Install the systemd unit.
+4. Run doctor before enabling the service.
+
+```bash
+sudo -u doro-agent /usr/bin/doro-agent doctor --config /etc/doro-agent/config.yaml
+```
+
+5. Install the systemd unit.
 
 ```bash
 sudo cp deployments/systemd/doro-agent.service /etc/systemd/system/doro-agent.service
@@ -230,7 +372,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now doro-agent
 ```
 
-5. Inspect logs and state.
+6. Inspect logs and state.
 
 ```bash
 sudo systemctl status doro-agent
@@ -239,21 +381,18 @@ sqlite3 /var/lib/doro-agent/state.db 'select path, read_offset, acked_offset fro
 sqlite3 /var/lib/doro-agent/state.db 'select batch_id, approx_bytes from spool_batches;'
 ```
 
-## Current transport note
+## Transport note
 
 The agent still supports two transport modes:
 
-- `mock` for local validation
-- `edge` for the current Go `edge_api` ingress
+- `mock`
+- `edge`
 
-Known limitation for this phase:
+Diagnostics are the authoritative delivery path for new platform/install metadata in this task. Heartbeat now builds a richer metadata summary too, but current edge ingress does not forward heartbeat metadata end-to-end yet because `edge_api/contracts/proto/edge.proto` still omits it.
 
-- `batch.compress_threshold_bytes` is used only for local spool payload files
-- wire-level batch compression and transport-visible `batch_id` remain follow-up work because this task intentionally did not modify `edge_api/**` or `contracts/**`
-- the agent still has a build-time dependency on `../edge_api/contracts/proto/edge.proto`; this is localized in `agent-rs/build.rs` and remains explicit technical debt until the shared ingress contract is moved under `contracts/**`
+Known follow-up items that are intentionally out of scope here:
 
-## Scaling note
-
-- current runtime uses one blocking file-reader task per configured source
-- this is intentionally lightweight for common deployments with tens of files, not hundreds of high-churn sources on one agent
-- the agent logs a warning when the configured source count exceeds 64 so operators notice when they are pushing beyond the intended profile
+- wire-level batch compression
+- transport-visible `batch_id`
+- server-issued cluster metadata parsing on the agent
+- moving the build-time edge ingress proto dependency into shared `contracts/**`

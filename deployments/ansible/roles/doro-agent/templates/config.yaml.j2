@@ -1,0 +1,50 @@
+edge_url: "{{ doro_agent_edge_url }}"
+edge_grpc_addr: "{{ doro_agent_edge_grpc_addr }}"
+bootstrap_token: "{{ doro_agent_bootstrap_token }}"
+state_dir: "{{ doro_agent_state_dir }}"
+log_level: "{{ doro_agent_log_level }}"
+
+transport:
+  mode: "{{ doro_agent_transport_mode }}"
+
+heartbeat:
+  interval_sec: {{ doro_agent_heartbeat_interval_sec }}
+
+diagnostics:
+  interval_sec: {{ doro_agent_diagnostics_interval_sec }}
+
+batch:
+  max_events: {{ doro_agent_batch_max_events }}
+  max_bytes: {{ doro_agent_batch_max_bytes }}
+  flush_interval_ms: {{ doro_agent_batch_flush_interval_ms }}
+  compress_threshold_bytes: {{ doro_agent_batch_compress_threshold_bytes }}
+
+queues:
+  event_capacity: {{ doro_agent_queue_event_capacity }}
+  send_capacity: {{ doro_agent_queue_send_capacity }}
+  event_bytes_soft_limit: {{ doro_agent_queue_event_bytes_soft_limit }}
+  send_bytes_soft_limit: {{ doro_agent_queue_send_bytes_soft_limit }}
+
+degraded:
+  failure_threshold: {{ doro_agent_degraded_failure_threshold }}
+  server_unavailable_sec: {{ doro_agent_degraded_server_unavailable_sec }}
+  queue_pressure_pct: {{ doro_agent_degraded_queue_pressure_pct }}
+  queue_recover_pct: {{ doro_agent_degraded_queue_recover_pct }}
+  unacked_lag_bytes: {{ doro_agent_degraded_unacked_lag_bytes }}
+  shutdown_spool_grace_sec: {{ doro_agent_degraded_shutdown_spool_grace_sec }}
+
+spool:
+  enabled: {{ doro_agent_spool_enabled | bool | lower }}
+  dir: "{{ doro_agent_spool_dir }}"
+  max_disk_bytes: {{ doro_agent_spool_max_disk_bytes }}
+
+sources:
+{% for source in doro_agent_sources %}
+  - type: "{{ source.type }}"
+    source_id: "{{ source.source_id }}"
+    path: "{{ source.path }}"
+    start_at: "{{ source.start_at }}"
+    source: "{{ source.source }}"
+    service: "{{ source.service }}"
+    severity_hint: "{{ source.severity_hint }}"
+{% endfor %}

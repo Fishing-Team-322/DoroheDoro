@@ -1,0 +1,6 @@
+**
+!.dockerignore
+!contracts/
+!contracts/**
+!server-rs/
+!server-rs/**

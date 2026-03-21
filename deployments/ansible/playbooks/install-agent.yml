@@ -1,0 +1,7 @@
+---
+- name: Install or remove Doro agent
+  hosts: agents
+  become: true
+  gather_facts: true
+  roles:
+    - role: doro-agent

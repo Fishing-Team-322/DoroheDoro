@@ -6,9 +6,7 @@ use uuid::Uuid;
 
 use common::AppResult;
 
-use crate::models::{
-    DeploymentSnapshot, DeploymentTargetSnapshot, ExecutorKind, TargetExecutionResult,
-};
+use crate::models::{ExecutionResult, ExecutionSnapshot, ExecutorKind};
 
 #[async_trait]
 pub trait DeploymentExecutor: Send + Sync {
@@ -16,12 +14,11 @@ pub trait DeploymentExecutor: Send + Sync {
 
     async fn readiness_check(&self) -> AppResult<()>;
 
-    async fn execute_target(
+    async fn execute(
         &self,
-        snapshot: &DeploymentSnapshot,
-        target: &DeploymentTargetSnapshot,
+        snapshot: &ExecutionSnapshot,
         cancellation: &CancellationToken,
-    ) -> AppResult<TargetExecutionResult>;
+    ) -> AppResult<ExecutionResult>;
 
     async fn cancel(&self, _job_id: Uuid) -> AppResult<()> {
         Ok(())

@@ -19,21 +19,21 @@ use common::{
     },
     proto::{
         control::{
-            AddHostGroupMemberRequest, ControlReplyEnvelope, CreateCredentialsRequest,
-            CreateHostGroupRequest, CreateHostRequest, CreatePolicyRequest,
-            CredentialProfileMetadata, Host, HostGroup, HostGroupMember, HostInput, Policy,
+            AddHostGroupMemberRequest, CreateCredentialsRequest, CreateHostGroupRequest,
+            CreateHostRequest, CreatePolicyRequest, CredentialProfileMetadata, Host, HostGroup,
+            HostGroupMember, HostInput, Policy,
         },
         decode_message,
         deployment::{
             self, CancelDeploymentJobRequest, CreateDeploymentJobRequest,
-            CreateDeploymentPlanRequest, CreateDeploymentPlanResponse, DeploymentReplyEnvelope,
-            DeploymentStatusEvent, DeploymentStepEvent, GetDeploymentJobRequest,
-            GetDeploymentJobResponse, ListDeploymentJobsRequest, ListDeploymentJobsResponse,
-            RetryDeploymentJobRequest,
+            CreateDeploymentPlanRequest, CreateDeploymentPlanResponse, DeploymentStatusEvent,
+            DeploymentStepEvent, GetDeploymentJobRequest, GetDeploymentJobResponse,
+            ListDeploymentJobsRequest, ListDeploymentJobsResponse, RetryDeploymentJobRequest,
         },
         encode_message,
+        runtime::{AuditContext, RuntimeReplyEnvelope},
     },
-    RuntimeConfig,
+    SharedRuntimeConfig,
 };
 use control_plane::{
     http as control_http, repository::ControlRepository, service::ControlService,
@@ -46,8 +46,9 @@ use deployment_plane::{
     },
     health::{self, HealthState},
     models::{
-        DeploymentSnapshot, DeploymentStepStatus, DeploymentTargetSnapshot, DeploymentTargetStatus,
-        ExecutorKind, StepExecutionResult, TargetExecutionResult,
+        DeploymentJobStatus, DeploymentStepStatus, DeploymentTargetStatus, ExecutionOutput,
+        ExecutionResult, ExecutionSnapshot, ExecutionTargetResult, ExecutorKind,
+        StepExecutionResult,
     },
     repository::DeploymentRepository,
     service::DeploymentService,
@@ -97,87 +98,168 @@ impl DeploymentExecutor for ScenarioExecutor {
         Ok(())
     }
 
-    async fn execute_target(
+    async fn execute(
         &self,
-        snapshot: &DeploymentSnapshot,
-        target: &DeploymentTargetSnapshot,
+        snapshot: &ExecutionSnapshot,
         cancellation: &CancellationToken,
-    ) -> common::AppResult<TargetExecutionResult> {
-        let execution_no = {
-            let mut guard = self.attempts_by_host.lock().expect("executor state lock");
-            let entry = guard.entry(target.host.hostname.clone()).or_insert(0);
-            *entry += 1;
-            *entry
-        };
+    ) -> common::AppResult<ExecutionResult> {
+        let mut targets = Vec::with_capacity(snapshot.targets.len());
 
-        let mut steps = Vec::new();
-        for (idx, step_name) in ["scenario.connect", "scenario.install", "scenario.verify"]
-            .into_iter()
-            .enumerate()
-        {
-            sleep(self.step_delay).await;
-            if cancellation.is_cancelled() {
+        for target in &snapshot.targets {
+            let execution_no = {
+                let mut guard = self.attempts_by_host.lock().expect("executor state lock");
+                let entry = guard.entry(target.host.hostname.clone()).or_insert(0);
+                *entry += 1;
+                *entry
+            };
+
+            let mut steps = Vec::new();
+            let mut final_status = DeploymentTargetStatus::Succeeded;
+            let mut final_error = None;
+
+            for (idx, step_name) in ["scenario.connect", "scenario.install", "scenario.verify"]
+                .into_iter()
+                .enumerate()
+            {
+                sleep(self.step_delay).await;
+                if cancellation.is_cancelled() {
+                    steps.push(StepExecutionResult {
+                        step_name: step_name.to_string(),
+                        status: DeploymentStepStatus::Skipped,
+                        message: "execution cancelled".to_string(),
+                        payload_json: json!({
+                            "hostname": target.host.hostname,
+                            "job_type": snapshot.job_type.as_str(),
+                            "step_index": idx,
+                        }),
+                    });
+                    final_status = DeploymentTargetStatus::Cancelled;
+                    final_error = Some("cancelled during execution".to_string());
+                    break;
+                }
+
+                let should_fail = execution_no == 1
+                    && step_name == "scenario.install"
+                    && self.fail_first_for.contains(&target.host.hostname);
+                let status = if should_fail {
+                    DeploymentStepStatus::Failed
+                } else {
+                    DeploymentStepStatus::Succeeded
+                };
+                let message = if should_fail {
+                    "scenario executor forced first-attempt failure"
+                } else {
+                    "step completed"
+                };
+
                 steps.push(StepExecutionResult {
                     step_name: step_name.to_string(),
-                    status: DeploymentStepStatus::Skipped,
-                    message: "execution cancelled".to_string(),
+                    status,
+                    message: message.to_string(),
                     payload_json: json!({
                         "hostname": target.host.hostname,
                         "job_type": snapshot.job_type.as_str(),
                         "step_index": idx,
+                        "execution_no": execution_no,
                     }),
                 });
-                return Ok(TargetExecutionResult {
-                    status: DeploymentTargetStatus::Cancelled,
-                    error_message: Some("cancelled during execution".to_string()),
-                    steps,
-                });
-            }
 
-            let should_fail = execution_no == 1
-                && step_name == "scenario.install"
-                && self.fail_first_for.contains(&target.host.hostname);
-            let status = if should_fail {
-                DeploymentStepStatus::Failed
-            } else {
-                DeploymentStepStatus::Succeeded
-            };
-            let message = if should_fail {
-                "scenario executor forced first-attempt failure"
-            } else {
-                "step completed"
-            };
-
-            steps.push(StepExecutionResult {
-                step_name: step_name.to_string(),
-                status,
-                message: message.to_string(),
-                payload_json: json!({
-                    "hostname": target.host.hostname,
-                    "job_type": snapshot.job_type.as_str(),
-                    "step_index": idx,
-                    "execution_no": execution_no,
-                }),
-            });
-
-            if should_fail {
-                return Ok(TargetExecutionResult {
-                    status: DeploymentTargetStatus::Failed,
-                    error_message: Some(format!(
+                if should_fail {
+                    final_status = DeploymentTargetStatus::Failed;
+                    final_error = Some(format!(
                         "scenario executor failed host {} on first attempt",
                         target.host.hostname
-                    )),
-                    steps,
-                });
+                    ));
+                    break;
+                }
             }
+
+            targets.push(ExecutionTargetResult {
+                deployment_target_id: target.deployment_target_id,
+                status: final_status,
+                error_message: final_error,
+                steps,
+            });
         }
 
-        Ok(TargetExecutionResult {
-            status: DeploymentTargetStatus::Succeeded,
-            error_message: None,
-            steps,
+        let aggregate_status = derive_scenario_status(&targets);
+        Ok(ExecutionResult {
+            current_phase: match aggregate_status {
+                DeploymentJobStatus::Succeeded => "scenario.completed".to_string(),
+                DeploymentJobStatus::PartialSuccess => "scenario.partial_failure".to_string(),
+                DeploymentJobStatus::Failed => "scenario.failed".to_string(),
+                DeploymentJobStatus::Cancelled => "scenario.cancelled".to_string(),
+                DeploymentJobStatus::Queued | DeploymentJobStatus::Running => {
+                    "scenario.running".to_string()
+                }
+            },
+            steps: vec![StepExecutionResult {
+                step_name: "scenario.executor".to_string(),
+                status: match aggregate_status {
+                    DeploymentJobStatus::Succeeded | DeploymentJobStatus::PartialSuccess => {
+                        DeploymentStepStatus::Succeeded
+                    }
+                    DeploymentJobStatus::Failed => DeploymentStepStatus::Failed,
+                    DeploymentJobStatus::Cancelled => DeploymentStepStatus::Skipped,
+                    DeploymentJobStatus::Queued | DeploymentJobStatus::Running => {
+                        DeploymentStepStatus::Running
+                    }
+                },
+                message: format!("scenario executor processed {} targets", targets.len()),
+                payload_json: json!({
+                    "fail_first_for": self.fail_first_for,
+                    "step_delay_ms": self.step_delay.as_millis(),
+                }),
+            }],
+            targets,
+            output: ExecutionOutput {
+                exit_code: Some(match aggregate_status {
+                    DeploymentJobStatus::Succeeded => 0,
+                    DeploymentJobStatus::PartialSuccess => 2,
+                    DeploymentJobStatus::Failed => 1,
+                    DeploymentJobStatus::Cancelled => 130,
+                    DeploymentJobStatus::Queued | DeploymentJobStatus::Running => 0,
+                }),
+                stdout_ref: None,
+                stdout_excerpt: Some("scenario executor finished".to_string()),
+                stderr_ref: None,
+                stderr_excerpt: None,
+            },
         })
     }
+}
+
+fn derive_scenario_status(targets: &[ExecutionTargetResult]) -> DeploymentJobStatus {
+    let total = targets.len();
+    let succeeded = targets
+        .iter()
+        .filter(|target| target.status == DeploymentTargetStatus::Succeeded)
+        .count();
+    let failed = targets
+        .iter()
+        .filter(|target| target.status == DeploymentTargetStatus::Failed)
+        .count();
+    let cancelled = targets
+        .iter()
+        .filter(|target| target.status == DeploymentTargetStatus::Cancelled)
+        .count();
+
+    if total == 0 {
+        return DeploymentJobStatus::Failed;
+    }
+    if cancelled == total {
+        return DeploymentJobStatus::Cancelled;
+    }
+    if succeeded == total {
+        return DeploymentJobStatus::Succeeded;
+    }
+    if failed == total {
+        return DeploymentJobStatus::Failed;
+    }
+    if failed > 0 || cancelled > 0 {
+        return DeploymentJobStatus::PartialSuccess;
+    }
+    DeploymentJobStatus::Running
 }
 
 struct TestHarness {
@@ -196,7 +278,7 @@ impl TestHarness {
     async fn start(executor: DynDeploymentExecutor) -> anyhow::Result<Self> {
         dotenvy::dotenv().ok();
 
-        let runtime = RuntimeConfig::from_env()?;
+        let runtime = SharedRuntimeConfig::from_env()?;
         let deployment = DeploymentConfig::from_env()?;
 
         let pool = PgPoolOptions::new()
@@ -368,7 +450,7 @@ impl TestHarness {
             .nats
             .request(subject.to_string(), encode_message(&request).into())
             .await?;
-        let envelope: ControlReplyEnvelope = decode_message(message.payload.as_ref())?;
+        let envelope: RuntimeReplyEnvelope = decode_message(message.payload.as_ref())?;
         ensure!(
             envelope.status == "ok",
             "control subject {subject} failed: {} {}",
@@ -391,7 +473,7 @@ impl TestHarness {
             .nats
             .request(subject.to_string(), encode_message(&request).into())
             .await?;
-        let envelope: DeploymentReplyEnvelope = decode_message(message.payload.as_ref())?;
+        let envelope: RuntimeReplyEnvelope = decode_message(message.payload.as_ref())?;
         ensure!(
             envelope.status == "ok",
             "deployment subject {subject} failed: {} {}",
@@ -400,6 +482,15 @@ impl TestHarness {
         );
         Ok(decode_message(&envelope.payload)?)
     }
+}
+
+fn test_audit() -> Option<AuditContext> {
+    Some(AuditContext {
+        actor_id: "smoke-user".to_string(),
+        actor_type: "test".to_string(),
+        request_id: new_corr_id(),
+        reason: "smoke test".to_string(),
+    })
 }
 
 #[tokio::test]
@@ -462,6 +553,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                 name: "linux-files".to_string(),
                 description: "File collection".to_string(),
                 policy_body_json: r#"{"paths":["/var/log/syslog"]}"#.to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -480,6 +572,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                         .into_iter()
                         .collect(),
                 }),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -498,6 +591,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                         .into_iter()
                         .collect(),
                 }),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -509,6 +603,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                 correlation_id: new_corr_id(),
                 name: "retry-group".to_string(),
                 description: "retry hosts".to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -520,6 +615,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                 correlation_id: new_corr_id(),
                 host_group_id: host_group.host_group_id.clone(),
                 host_id: retry_host.host_id.clone(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -533,6 +629,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                 kind: "ssh_key".to_string(),
                 description: "Smoke SSH key".to_string(),
                 vault_ref: "secret/data/ssh/smoke".to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -551,6 +648,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                 preserve_state: false,
                 force: false,
                 dry_run: true,
+                audit: test_audit(),
             },
         )
         .await?;
@@ -586,6 +684,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                 preserve_state: false,
                 force: false,
                 dry_run: false,
+                audit: test_audit(),
             },
         )
         .await?;
@@ -634,6 +733,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                 strategy: deployment::RetryStrategy::FailedOnly as i32,
                 triggered_by: "smoke-retry".to_string(),
                 reason: "retry failed targets".to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
@@ -735,14 +835,15 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
             CreateDeploymentJobRequest {
                 correlation_id: new_corr_id(),
                 job_type: deployment::DeploymentJobType::Install as i32,
-                policy_id: policy.policy_id,
+                policy_id: policy.policy_id.clone(),
                 target_host_ids: vec![cancel_host.host_id.clone()],
                 target_host_group_ids: Vec::new(),
-                credential_profile_id: credentials.credentials_profile_id,
+                credential_profile_id: credentials.credentials_profile_id.clone(),
                 requested_by: "smoke-user".to_string(),
                 preserve_state: false,
                 force: false,
                 dry_run: false,
+                audit: test_audit(),
             },
         )
         .await?;
@@ -758,6 +859,7 @@ async fn deployment_plan_job_retry_and_cancel_flow() -> anyhow::Result<()> {
                 job_id: cancel_job_id.clone(),
                 requested_by: "smoke-user".to_string(),
                 reason: "cancel smoke job".to_string(),
+                audit: test_audit(),
             },
         )
         .await?;
