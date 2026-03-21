@@ -7,11 +7,12 @@ use tracing::{error, info, warn};
 
 use crate::{
     batching::PendingBatch,
-    error::{AppResult, TransportErrorKind},
+    error::{AppError, AppResult, TransportErrorKind},
     runtime::{
         state_writer::{RuntimeFlagsUpdate, StateWriterHandle},
         RuntimeStatusHandle,
     },
+    state::RuntimeStatePatch,
     transport::AgentTransport,
 };
 
@@ -282,6 +283,12 @@ async fn process_batch(
                     success_runtime_flags(status.is_degraded_mode(), spool_enabled, now),
                 )
                 .await?;
+            state_writer
+                .update_runtime_state(RuntimeStatePatch {
+                    last_handshake_success_at_unix_ms: Some(Some(now)),
+                    ..RuntimeStatePatch::default()
+                })
+                .await?;
             status.update_spool_stats(spool_stats);
             *blocked_retry_at = None;
             for offset in &batch.source_offsets {
@@ -297,6 +304,10 @@ async fn process_batch(
         Err(error) => {
             let error_kind = error.transport_error_kind();
             status.record_send_failure(format!("batch send failed: {error}"), error_kind);
+            status.record_connectivity_error(&error);
+            state_writer
+                .update_runtime_state(connectivity_error_patch(&error))
+                .await?;
 
             if is_permanent_transport_failure(error_kind) {
                 let blocked_reason = format!("permanent transport failure: {error_kind} ({error})");
@@ -492,6 +503,26 @@ async fn spool_in_memory_batch(
         status.record_source_durable_read(&offset.path, offset.file_key.clone(), offset.offset);
     }
     Ok(())
+}
+
+fn connectivity_error_patch(error: &AppError) -> RuntimeStatePatch {
+    let message = error.to_string();
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("tls")
+        || lower.contains("certificate")
+        || lower.contains("rustls")
+        || lower.contains("ssl")
+    {
+        RuntimeStatePatch {
+            last_tls_error: Some(Some(message)),
+            ..RuntimeStatePatch::default()
+        }
+    } else {
+        RuntimeStatePatch {
+            last_connect_error: Some(Some(message)),
+            ..RuntimeStatePatch::default()
+        }
+    }
 }
 
 #[cfg(test)]

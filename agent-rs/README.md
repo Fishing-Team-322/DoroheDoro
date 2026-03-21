@@ -1,20 +1,16 @@
 # doro-agent
 
-`doro-agent` is the standalone Rust `AGENT` service for DoroheDoro. It is a lightweight Linux collector with SQLite local state, bounded queues, degraded mode, fallback spool, environment diagnostics, package-friendly install assumptions, and future-ready cluster metadata enrichment.
+`doro-agent` is the Rust `AGENT` service for DoroheDoro. It is a Linux log collector with SQLite local state, bounded queues, fallback spool, policy-driven file sources, and practical diagnostics for install and transport failures.
 
-## Current runtime highlights
+## Current scope
 
-- YAML config plus scalar env overrides
-- SQLite state in `state_dir/state.db`
-- durable `read_offset` plus `acked_offset` per file source
-- bounded event/send queues with a single batcher, sender, and SQLite state writer
-- degraded mode and blocked-delivery handling for permanent transport failures
-- file-based fallback spool with SQLite metadata
-- Linux platform, build, install, and cluster metadata in diagnostics
-- scope-aware event label enrichment without changing the ingest wire contract
-- `doctor` preflight for post-install and pre-start checks
-- `mock` transport for local smoke tests
-- current `edge_api` unary gRPC JSON transport for real ingress
+- first-run enrollment through the current Go `edge_api` unary gRPC+JSON ingress
+- persisted local identity, applied policy revision, offsets, and spool metadata in `state_dir/state.db`
+- policy-driven file source runtime for `transport.mode=edge`
+- local `mock` mode for smoke tests with static `sources`
+- heartbeat and diagnostics with centralized runtime phases
+- TLS and mTLS client configuration with explicit PEM path checks
+- `doctor` / `check-config` preflight for install, path, permission, and TLS sanity
 
 ## Build
 
@@ -23,147 +19,174 @@ cd agent-rs
 cargo build
 ```
 
-Release build:
+Release:
 
 ```bash
 cd agent-rs
 cargo build --release
 ```
 
-The release profile keeps `thin` LTO, `codegen-units = 1`, and symbol stripping enabled.
-
 ## CLI
 
-Runtime execution still works with the old UX:
+The old direct run form still works:
 
 ```bash
-cd agent-rs
 cargo run -- --config ./config/agent.example.yaml
 ```
 
-Explicit subcommands are now available:
+Explicit subcommands are preferred:
 
 ```bash
 cargo run -- run --config ./config/agent.example.yaml
 cargo run -- doctor --config ./config/agent.example.yaml
+cargo run -- check-config --config ./config/agent.example.yaml
 ```
 
-`doctor` is non-mutating. It validates config parsing, install mode resolution, path sanity, state/spool write expectations, source readability, systemd hints, and current SQLite state DB accessibility. Warnings keep exit code `0`; hard failures exit with code `2`.
+`doctor` and `check-config` are the same non-mutating preflight. Warnings keep exit code `0`. Hard failures exit with code `2`.
 
-## Portability and Linux assumptions
+## Practical run notes
 
-- The agent targets Linux-family hosts and avoids distro-specific code paths.
-- Distro detection uses `/etc/os-release` with fallback to `/usr/lib/os-release`.
-- Kernel version is detected from `/proc/sys/kernel/osrelease` or `uname -r`.
-- systemd presence is detected from `/run/systemd/system` and common systemd env vars.
-- Machine identity is opt-in only. Set `platform.allow_machine_id: true` or `ALLOW_MACHINE_ID=true` to send a hashed machine identifier; raw machine-id is never emitted.
-- If `state_dir` or `spool.dir` cannot be used, runtime fails instead of silently relocating state.
+For the practical preprod run, use:
 
-## Packaging modes
+- [`../deployments/examples/agent-config.example.yaml`](../deployments/examples/agent-config.example.yaml) for a domain-based `edge` example
+- [`../deployments/examples/agent.env.example`](../deployments/examples/agent.env.example) for env overrides
+- [`../deployments/systemd/doro-agent.service`](../deployments/systemd/doro-agent.service) for the package/systemd unit
+- [`config/agent.example.yaml`](./config/agent.example.yaml) only for local `mock` smoke runs
 
-Configured mode lives in `install.mode`:
+In `transport.mode=edge` the active sources come from the fetched policy. Local `sources` in config are ignored in that mode.
 
-- `auto`: resolve from local layout
-- `package`: force canonical package/systemd expectations
-- `tarball`: force colocated self-managed layout
-- `ansible`: force rollout marker for deployment-driven installs
-- `dev`: force local development mode
+Recommended defaults for the 3-host run:
 
-Auto detection prefers:
+- `edge_url`: domain HTTPS URL
+- `edge_grpc_addr`: domain gRPC endpoint
+- `policy.refresh_interval_sec: 30`
+- explicit `tls.ca_path`, `tls.cert_path`, `tls.key_path`
+- keep `state_dir` and `spool.dir` on persistent storage across restarts and upgrades
 
-1. canonical package layout
-2. local dev layout
-3. tarball-like colocated layout
-4. `unknown` with warnings if the layout is ambiguous
+## Install, reinstall, and upgrade behavior
 
-Canonical package layout is:
+- fresh install means there is no usable `state.db` or no persisted identity inside it
+- reinstall or upgrade is expected to preserve `state_dir`
+- if persisted identity exists, the agent reuses it
+- re-enroll happens only when there is no local identity or the server rejects the stored one
+- first boot must complete `enroll -> fetch policy -> parse/apply policy` before file readers start
+- if enrollment succeeded but policy sync failed, the next restart reuses the stored identity and retries policy sync
+- corrupted or unreadable local state is treated as a hard startup error; the agent does not silently reset SQLite state
 
-- binary: `/usr/bin/doro-agent`
-- config: `/etc/doro-agent/config.yaml`
-- env file: `/etc/doro-agent/agent.env`
-- state: `/var/lib/doro-agent`
-- spool: `/var/lib/doro-agent/spool`
-- logs: `/var/log/doro-agent`
-- unit: `doro-agent.service`
+Operationally this means `/var/lib/doro-agent` is the important continuity boundary. Keep it for restarts, reinstalls, and upgrades if you want stable identity, policy revision reuse, and durable offsets.
 
-## Local smoke test
+## Runtime lifecycle
 
-1. Create a test file.
+Central runtime phases:
+
+- `starting`
+- `enrolling`
+- `policy_syncing`
+- `online`
+- `degraded`
+- `stopping`
+- `error`
+
+These phases are used in diagnostics and heartbeat status. `degraded` is entered for conditions such as blocked delivery, repeated send failures, queue pressure, spool pressure, or policy-sync failure while keeping the last good runtime config.
+
+## Policy and source behavior
+
+Supported server policy subset:
+
+- `paths: ["..."]`
+- `sources: ["..."]`
+- `sources: [{ "type": "file", "path": "...", "source_id"?, "start_at"?, "source"?, "service"?, "severity_hint"? }]`
+
+Unsupported policy shapes are rejected. The agent does not accept journald, non-file source types, glob paths, or empty paths in this phase.
+
+Normalization defaults:
+
+- `source_id = file:<path>`
+- `start_at = end`
+- `source = basename(path)` or `host-log`
+- `service = host`
+- `severity_hint = info`
+
+Policy apply rules:
+
+- invalid policy keeps the last good runtime source set
+- source reconcile is done before a new revision is committed during refresh
+- missing or unreadable source files are treated as runtime environment issues, not as policy invalidation
+- active source state remains visible in diagnostics
+
+## gRPC + TLS + mTLS expectations
+
+- `edge` transport keeps the current unary gRPC+JSON wire shape
+- HTTPS endpoints use rustls and optional mTLS client identity
+- `tls.server_name` is optional and only needed when the gRPC endpoint uses an IP literal or a different TLS name
+- if `edge_grpc_addr` is an IP literal and `tls.server_name` is not set, the agent falls back to the `edge_url` host for TLS verification
+- TLS settings are rejected on plaintext HTTP endpoints to avoid silent insecure fallback
+
+`doctor` validates:
+
+- endpoint shape and derived `server_name`
+- HTTP vs HTTPS expectations
+- `tls.ca_path` PEM sanity
+- client certificate and key PEM sanity
+- final transport-client configuration consistency
+
+## `doctor` / `check-config`
+
+Preflight covers:
+
+- config parsing
+- install-mode resolution
+- systemd expectation hints
+- state and spool path availability
+- `state.db` accessibility
+- canonical package log dir hints
+- source readability for local `mock` configs
+- TLS and mTLS PEM checks
+- endpoint and hostname-verification sanity
+
+Typical use on a Linux host:
 
 ```bash
-mkdir -p /tmp/doro-agent
-touch /tmp/doro-test.log
+sudo -u doro-agent /usr/bin/doro-agent check-config --config /etc/doro-agent/config.yaml
 ```
 
-2. Run the local doctor.
+The packaged systemd unit runs this preflight with `ExecStartPre=` before `run`.
+
+## Troubleshooting
+
+If the agent does not come online, check in this order:
+
+1. `doro-agent check-config --config /etc/doro-agent/config.yaml`
+2. `journalctl -u doro-agent -f`
+3. diagnostics `runtime_status`, `runtime_status_reason`, `policy_state`, and `connectivity_state`
+4. SQLite runtime state in `/var/lib/doro-agent/state.db`
+
+Common failure patterns:
+
+- `runtime_status=policy_syncing` or `degraded` with `last_policy_error`: policy fetch or parse/apply failed
+- `connectivity_state.last_tls_error`: broken CA, cert, key, or hostname verification
+- `connectivity_state.last_connect_error`: endpoint unreachable or temporary network failure
+- source status `waiting`: file is missing and the reader is polling for it
+- source status `error`: the file exists but is unreadable or another source-runtime error occurred
+
+Useful SQLite checks:
 
 ```bash
-cd agent-rs
-cargo run -- doctor --config ./config/agent.example.yaml
+sqlite3 /var/lib/doro-agent/state.db 'select * from agent_runtime_state;'
+sqlite3 /var/lib/doro-agent/state.db 'select path, read_offset, acked_offset from file_offsets;'
+sqlite3 /var/lib/doro-agent/state.db 'select batch_id, approx_bytes, attempt_count from spool_batches;'
 ```
 
-3. Start the agent with the bundled mock config.
+## Manual validation checklist
 
-```bash
-cd agent-rs
-cargo run -- --config ./config/agent.example.yaml
-```
+Before the 3-host run, validate:
 
-4. Append lines.
+1. fresh install with empty `/var/lib/doro-agent`
+2. restart with state preserved
+3. reinstall or binary replacement with state preserved
+4. upgrade with the same `state_dir`
+5. domain-based HTTPS/gRPC enrollment
+6. policy refresh after a server-side policy change
+7. heartbeat, diagnostics, and log delivery from three separate Linux hosts
 
-```bash
-echo "first line" >> /tmp/doro-test.log
-echo "second line" >> /tmp/doro-test.log
-```
-
-5. Inspect state.
-
-```bash
-sqlite3 /tmp/doro-agent/state.db 'select path, read_offset, acked_offset from file_offsets;'
-sqlite3 /tmp/doro-agent/state.db 'select batch_id, approx_bytes from spool_batches;'
-```
-
-To force degraded mode and spool, switch to `transport.mode=edge` and point `edge_grpc_addr` at an unavailable endpoint.
-
-## Lifecycle semantics
-
-- Persisted SQLite `read_offset` means durable local progress, not the live cursor.
-- Restart reuses persisted identity and applied policy revision when local state is still present.
-- Re-enroll happens only when no local identity exists or the server explicitly rejects the stored identity.
-- Diagnostics expose `identity_status` as `reused`, `newly_enrolled`, or `re_enrolled`.
-- Upgrade and reinstall are expected to preserve `state_dir`; if state is kept, the agent does not force a fresh enrollment.
-- Uninstall can remove binary/config/unit independently from state. Keeping `/var/lib/doro-agent` preserves identity, policy revision, file offsets, and spool metadata for a later reinstall.
-
-## Diagnostics and cluster readiness
-
-Diagnostics JSON now includes:
-
-- `platform`
-- `build`
-- `install`
-- `paths`
-- `state`
-- `compatibility`
-- `cluster`
-- `identity_status`
-
-Cluster readiness is config-only in this phase:
-
-- `scope.configured_cluster_id`
-- `scope.configured_cluster_tags`
-- `scope.cluster_name`
-- `scope.service_name`
-- `scope.environment`
-- `scope.host_labels`
-
-These fields are reflected in diagnostics and used for event label enrichment. The agent does not parse new server-side cluster metadata from `policy_body_json` yet.
-
-## Transport notes
-
-- `transport.mode=edge` still uses the current Go `edge_api` ingress shape from `edge_api/contracts/proto/edge.proto`.
-- Diagnostics are the authoritative delivery path for the new platform/install metadata today.
-- Heartbeat now builds a richer platform/install summary, but current edge ingress does not forward heartbeat metadata end-to-end yet.
-- `batch.compress_threshold_bytes` still applies only to local spool payload files in this phase.
-- The build-time dependency on `../edge_api/contracts/proto/edge.proto` remains isolated to `build.rs` until shared ingress contracts move under `contracts/**`.
-
-More operational detail lives in [`docs/agent-runtime.md`](../docs/agent-runtime.md).
+More runtime detail lives in [`../docs/agent-runtime.md`](../docs/agent-runtime.md).
