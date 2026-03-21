@@ -3,30 +3,24 @@
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { useAuth } from "@/src/features/auth";
+import { LogoutButton, useAuth } from "@/src/features/auth";
 import { createZodResolver } from "@/src/shared/lib/forms";
 import { useI18n } from "@/src/shared/lib/i18n";
-import {
-  Button,
-  Card,
-  FormControl,
-  FormError,
-  FormField,
-  FormLabel,
-  Input,
-} from "@/src/shared/ui";
-import { PageHeader, Section } from "@/src/widgets/dashboard-layout";
+import { Button, FormError, FormField, Input } from "@/src/shared/ui";
+import { Section } from "@/src/widgets/dashboard-layout";
 
 type ProfileFormValues = {
   displayName: string;
 };
 
 export function ProfilePage() {
-  const { dictionary } = useI18n();
+  const { dictionary, locale } = useI18n();
   const copy = dictionary.profile;
   const { user, updateProfile } = useAuth();
+
   const [formError, setFormError] = useState<string>();
   const [successMessage, setSuccessMessage] = useState<string>();
+
   const profileSchema = z.object({
     displayName: z
       .string()
@@ -67,87 +61,111 @@ export function ProfilePage() {
       });
       setSuccessMessage(copy.success);
     } catch (error) {
-      const message = error instanceof Error ? error.message : copy.fallbackError;
+      const message =
+        error instanceof Error ? error.message : copy.fallbackError;
       setFormError(message);
     }
   });
 
   return (
     <div className="space-y-6">
-      <PageHeader title={copy.title} description={copy.description} />
-
       <Section className="border-t-0 py-0">
-        <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <Card className="space-y-5">
-            <div className="space-y-1">
-              <h2 className="text-lg font-semibold text-[color:var(--foreground)]">
-                {copy.editTitle}
-              </h2>
-              <p className="text-sm text-[color:var(--muted-foreground)]">
-                {copy.editDescription}
-              </p>
-            </div>
-
-            <form className="space-y-5" onSubmit={onSubmit}>
-              <FormField>
-                <FormLabel htmlFor="displayName">{copy.displayNameLabel}</FormLabel>
-                <FormControl hasError={Boolean(form.formState.errors.displayName)}>
-                  <Input id="displayName" {...form.register("displayName")} />
-                </FormControl>
-                <FormError message={form.formState.errors.displayName?.message} />
-              </FormField>
-
-              <FormError message={formError} />
-
-              {successMessage ? (
-                <p className="text-sm text-emerald-600">{successMessage}</p>
-              ) : null}
-
-              <Button
-                type="submit"
-                loading={form.formState.isSubmitting}
-                className="w-full sm:w-auto"
-              >
-                {copy.save}
-              </Button>
-            </form>
-          </Card>
-
-          <Card className="space-y-4">
-            <div className="space-y-1">
-              <h2 className="text-lg font-semibold text-[color:var(--foreground)]">
-                {copy.currentAccountTitle}
-              </h2>
-              <p className="text-sm text-[color:var(--muted-foreground)]">
-                {copy.currentAccountDescription}
-              </p>
-            </div>
-
-            <dl className="space-y-3 text-sm">
-              <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--background)] px-4 py-3">
-                <dt className="text-[color:var(--muted-foreground)]">{copy.fields.email}</dt>
-                <dd className="mt-1 font-medium text-[color:var(--foreground)]">
-                  {user.email}
-                </dd>
-              </div>
-
-              <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--background)] px-4 py-3">
-                <dt className="text-[color:var(--muted-foreground)]">{copy.fields.login}</dt>
-                <dd className="mt-1 font-medium text-[color:var(--foreground)]">
+        <div className="w-full">
+          <div className="rounded-[28px] border border-[color:var(--border)] bg-[color:var(--surface)] px-6 py-6 sm:px-8 sm:py-8 lg:px-10 lg:py-10">
+            <div className="border-b border-[color:var(--border)] pb-6">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="text-4xl font-semibold tracking-tight text-[color:var(--foreground)]">
                   {user.login}
-                </dd>
+                </span>
+                <span className="text-4xl text-[#3d3d3d]">{user.email}</span>
               </div>
+            </div>
 
-              <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--background)] px-4 py-3">
-                <dt className="text-[color:var(--muted-foreground)]">
-                  {copy.fields.displayName}
-                </dt>
-                <dd className="mt-1 font-medium text-[color:var(--foreground)]">
-                  {user.displayName}
-                </dd>
-              </div>
-            </dl>
-          </Card>
+            <div className="py-8">
+              <dl>
+                <div className="grid grid-cols-1 gap-2 py-5 sm:grid-cols-[260px_minmax(0,1fr)] sm:items-center sm:gap-6">
+                  <dt className="text-xl text-[color:var(--muted-foreground)]">
+                    {copy.fields.displayName}
+                  </dt>
+                  <dd className="min-w-0 text-xl font-medium text-[color:var(--foreground)]">
+                    {user.displayName}
+                  </dd>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 py-5 sm:grid-cols-[260px_minmax(0,1fr)] sm:items-center sm:gap-6">
+                  <dt className="text-xl text-[color:var(--muted-foreground)]">
+                    {copy.fields.login}
+                  </dt>
+                  <dd className="min-w-0 text-xl font-medium text-[color:var(--foreground)]">
+                    {user.login}
+                  </dd>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 py-5 sm:grid-cols-[260px_minmax(0,1fr)] sm:items-center sm:gap-6">
+                  <dt className="text-xl text-[color:var(--muted-foreground)]">
+                    {copy.fields.email}
+                  </dt>
+                  <dd className="min-w-0 break-all text-xl font-medium text-[color:var(--foreground)]">
+                    {user.email}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+
+            <div className="border-t border-[color:var(--border)] pt-8">
+              <form onSubmit={onSubmit}>
+                <div className="grid grid-cols-1 gap-4 py-2 sm:grid-cols-[260px_minmax(0,1fr)] sm:items-start sm:gap-6">
+                  <div className="space-y-1">
+                    <h2 className="text-xl font-medium text-[color:var(--foreground)]">
+                      {copy.editTitle}
+                    </h2>
+                    <p className="text-base leading-6 text-[color:var(--muted-foreground)]">
+                      Ну типа сохраняет новое имя
+                    </p>
+                  </div>
+
+                  <div className="min-w-0 max-w-xl space-y-4">
+                    <FormField>
+                      <Input
+                        id="displayName"
+                        label={copy.displayNameLabel}
+                        error={form.formState.errors.displayName?.message}
+                        className="!text-lg"
+                        {...form.register("displayName")}
+                      />
+                    </FormField>
+
+                    <FormError message={formError} />
+
+                    {successMessage ? (
+                      <p className="text-sm font-medium text-emerald-600">
+                        {successMessage}
+                      </p>
+                    ) : null}
+
+                    <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center">
+                      <Button
+                        type="submit"
+                        loading={form.formState.isSubmitting}
+                        className="h-11 px-5"
+                      >
+                        {copy.save}
+                      </Button>
+
+                      <LogoutButton
+                        locale={locale}
+                        variant="ghost"
+                        size="sm"
+                        className="h-11 px-5"
+                      >
+                        {dictionary.auth.logout.full}
+                      </LogoutButton>
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
         </div>
       </Section>
     </div>

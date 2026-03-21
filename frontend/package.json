@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
+    "@radix-ui/react-tooltip": "^1.2.8",
     "motion": "^12.38.0",
     "next": "16.1.6",
     "react": "19.2.3",
