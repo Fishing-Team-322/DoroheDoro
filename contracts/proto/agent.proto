@@ -58,3 +58,20 @@ message DiagnosticsPayload {
   string payload_json = 2;
   int64 sent_at_unix_ms = 3;
 }
+
+message IssueBootstrapTokenRequest {
+  string correlation_id = 1;
+  string policy_id = 2;
+  string policy_revision_id = 3;
+  string requested_by = 4;
+  int64 expires_at_unix_ms = 5;
+}
+
+message IssueBootstrapTokenResponse {
+  string token_id = 1;
+  string bootstrap_token = 2;
+  string policy_id = 3;
+  string policy_revision_id = 4;
+  int64 expires_at_unix_ms = 5;
+  int64 created_at_unix_ms = 6;
+}

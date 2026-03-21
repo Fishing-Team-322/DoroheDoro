@@ -655,12 +655,19 @@ Source-of-truth relational storage для control-plane данных.
 ```text
 agents.enroll.request
 agents.policy.fetch
+agents.bootstrap-token.issue
 agents.heartbeat
 agents.diagnostics
 logs.ingest.raw
 logs.ingest.normalized
 deployments.jobs.create
+deployments.jobs.get
+deployments.jobs.list
+deployments.jobs.retry
+deployments.jobs.cancel
+deployments.plan.create
 deployments.jobs.status
+deployments.jobs.step
 query.logs.search
 query.logs.histogram
 alerts.firing
@@ -939,13 +946,13 @@ WEB
   v
 Edge API
   |
-  | publish deployments.jobs.create
+  | request/reply deployments.jobs.create
   v
 deployment-plane
   |
   | resolve policy + credentials + targets
   | generate bootstrap config
-  | create one-time token
+  | request/reply agents.bootstrap-token.issue
   | invoke ansible-runner
   v
 Target Linux host
