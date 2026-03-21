@@ -92,6 +92,18 @@ pub const ALERTS_RULES_GET: &str = "alerts.rules.get";
 pub const ALERTS_RULES_CREATE: &str = "alerts.rules.create";
 pub const ALERTS_RULES_UPDATE: &str = "alerts.rules.update";
 
+pub const NOTIFICATIONS_DISPATCH_REQUESTED: &str = "notifications.dispatch.requested.v1";
+pub const NOTIFICATIONS_TELEGRAM_DISPATCH_REQUESTED: &str =
+    "notifications.telegram.dispatch.requested.v1";
+pub const NOTIFICATIONS_TELEGRAM_DISPATCH_SUCCEEDED: &str =
+    "notifications.telegram.dispatch.succeeded.v1";
+pub const NOTIFICATIONS_TELEGRAM_DISPATCH_FAILED: &str =
+    "notifications.telegram.dispatch.failed.v1";
+pub const NOTIFICATIONS_TELEGRAM_HEALTHCHECK_REQUESTED: &str =
+    "notifications.telegram.healthcheck.requested.v1";
+pub const NOTIFICATIONS_TELEGRAM_HEALTHCHECK_RESULT: &str =
+    "notifications.telegram.healthcheck.result.v1";
+
 pub const AUDIT_LIST: &str = "audit.list";
 pub const AUDIT_EVENTS_APPEND: &str = "audit.events.append";
 pub const LOGS_INGEST_RAW: &str = "logs.ingest.raw";
@@ -205,6 +217,30 @@ mod tests {
         assert_eq!(ALERTS_RULES_GET, "alerts.rules.get");
         assert_eq!(ALERTS_RULES_CREATE, "alerts.rules.create");
         assert_eq!(ALERTS_RULES_UPDATE, "alerts.rules.update");
+        assert_eq!(
+            NOTIFICATIONS_DISPATCH_REQUESTED,
+            "notifications.dispatch.requested.v1"
+        );
+        assert_eq!(
+            NOTIFICATIONS_TELEGRAM_DISPATCH_REQUESTED,
+            "notifications.telegram.dispatch.requested.v1"
+        );
+        assert_eq!(
+            NOTIFICATIONS_TELEGRAM_DISPATCH_SUCCEEDED,
+            "notifications.telegram.dispatch.succeeded.v1"
+        );
+        assert_eq!(
+            NOTIFICATIONS_TELEGRAM_DISPATCH_FAILED,
+            "notifications.telegram.dispatch.failed.v1"
+        );
+        assert_eq!(
+            NOTIFICATIONS_TELEGRAM_HEALTHCHECK_REQUESTED,
+            "notifications.telegram.healthcheck.requested.v1"
+        );
+        assert_eq!(
+            NOTIFICATIONS_TELEGRAM_HEALTHCHECK_RESULT,
+            "notifications.telegram.healthcheck.result.v1"
+        );
         assert_eq!(AUDIT_LIST, "audit.list");
         assert_eq!(AUDIT_EVENTS_APPEND, "audit.events.append");
         assert_eq!(LOGS_INGEST_RAW, "logs.ingest.raw");

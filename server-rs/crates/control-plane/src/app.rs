@@ -1,21 +1,22 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use common::{bootstrap, ControlPlaneConfig};
+use common::bootstrap;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
+    config::ControlPlaneRuntimeConfig,
     http::{self, HttpState},
     repository::ControlRepository,
     service::ControlService,
-    transport,
+    telegram, transport,
 };
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
-pub async fn run(config: ControlPlaneConfig) -> anyhow::Result<()> {
+pub async fn run(config: ControlPlaneRuntimeConfig) -> anyhow::Result<()> {
     let pool = bootstrap::connect_postgres(&config.shared.postgres_dsn, 5).await?;
     bootstrap::run_migrations(&MIGRATOR, &pool).await?;
     let nats = bootstrap::connect_nats(&config.shared.nats_url).await?;
@@ -32,8 +33,17 @@ pub async fn run(config: ControlPlaneConfig) -> anyhow::Result<()> {
     let service = Arc::new(service_inner);
 
     let shutdown = CancellationToken::new();
-    let subscriber_tasks =
+    let mut subscriber_tasks =
         transport::spawn_handlers(nats.clone(), service, shutdown.clone()).await?;
+    subscriber_tasks.extend(
+        telegram::spawn_runtime(
+            pool.clone(),
+            nats.clone(),
+            config.telegram.clone(),
+            shutdown.clone(),
+        )
+        .await?,
+    );
 
     let listener = TcpListener::bind(&config.http_addr)
         .await
