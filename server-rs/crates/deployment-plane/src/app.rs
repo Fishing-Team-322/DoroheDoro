@@ -16,8 +16,14 @@ use crate::{
     transport,
 };
 
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+
 pub async fn run(config: DeploymentConfig) -> anyhow::Result<()> {
     let pool = connect_postgres(&config.postgres_dsn).await?;
+    MIGRATOR
+        .run(&pool)
+        .await
+        .context("run postgres migrations")?;
     let nats = connect_nats(&config.nats_url).await?;
     let executor = build_executor(&config)?;
 

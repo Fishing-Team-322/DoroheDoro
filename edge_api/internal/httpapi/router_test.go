@@ -34,14 +34,14 @@ func TestRuntimeUnavailableRoutesExposeBoundaryMetadata(t *testing.T) {
 	})
 
 	response := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/logs/histogram", nil)
 	router.ServeHTTP(response, request)
 
 	if response.Code != http.StatusNotImplemented {
 		t.Fatalf("expected 501, got %d body=%s", response.Code, response.Body.String())
 	}
-	if got := response.Header().Get("X-NATS-Subject"); got != "deployments.jobs.list" {
-		t.Fatalf("expected X-NATS-Subject deployments.jobs.list, got %q", got)
+	if got := response.Header().Get("X-NATS-Subject"); got != "query.logs.histogram" {
+		t.Fatalf("expected X-NATS-Subject query.logs.histogram, got %q", got)
 	}
 	if got := response.Header().Get("X-Boundary-State"); got != "awaiting-runtime" {
 		t.Fatalf("expected X-Boundary-State awaiting-runtime, got %q", got)
