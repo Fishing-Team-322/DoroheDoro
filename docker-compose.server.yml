@@ -150,11 +150,17 @@ services:
     image: clickhouse/clickhouse-server:24.12-alpine
     environment:
       CLICKHOUSE_DB: doro
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
     volumes:
       - clickhouse-data:/var/lib/clickhouse
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://default:clickhouse@127.0.0.1:8123/ping | grep -q Ok",
+        ]
       interval: 15s
       timeout: 5s
       retries: 15
@@ -308,7 +314,7 @@ services:
       INGESTION_HTTP_ADDR: 0.0.0.0:8084
       OPENSEARCH_URL: http://opensearch:9200
       OPENSEARCH_INDEX_PREFIX: doro
-      CLICKHOUSE_DSN: http://clickhouse:8123
+      CLICKHOUSE_DSN: http://default:clickhouse@clickhouse:8123
       CLICKHOUSE_DATABASE: doro
       CLICKHOUSE_TABLE: logs
       RUST_LOG: info
@@ -340,7 +346,7 @@ services:
       QUERY_ALERT_HTTP_ADDR: 0.0.0.0:8085
       OPENSEARCH_URL: http://opensearch:9200
       OPENSEARCH_INDEX_PREFIX: doro
-      CLICKHOUSE_DSN: http://clickhouse:8123
+      CLICKHOUSE_DSN: http://default:clickhouse@clickhouse:8123
       CLICKHOUSE_DATABASE: doro
       CLICKHOUSE_TABLE: logs
       RUST_LOG: info

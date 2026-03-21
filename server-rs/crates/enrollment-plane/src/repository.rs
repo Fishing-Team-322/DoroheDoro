@@ -282,7 +282,7 @@ impl EnrollmentRepository {
     ) -> Result<AgentRecord, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
-        let agent = sqlx::query_as::<_, AgentRecord>(
+        sqlx::query(
             "INSERT INTO agents (
                 id,
                 agent_id,
@@ -305,14 +305,7 @@ impl EnrollmentRepository {
                  END,
                  last_seen_at = EXCLUDED.last_seen_at,
                  updated_at = EXCLUDED.updated_at
-             RETURNING
-                agent_id,
-                hostname,
-                status,
-                version,
-                metadata_json,
-                first_seen_at,
-                last_seen_at",
+            ",
         )
         .bind(Uuid::new_v4())
         .bind(agent_id)
@@ -320,7 +313,7 @@ impl EnrollmentRepository {
         .bind(version.unwrap_or_default())
         .bind(metadata_json)
         .bind(seen_at)
-        .fetch_one(&mut *tx)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
@@ -333,6 +326,38 @@ impl EnrollmentRepository {
         .bind(policy.policy_revision_id)
         .bind(seen_at)
         .execute(&mut *tx)
+        .await?;
+
+        let agent = sqlx::query_as::<_, AgentRecord>(
+            "SELECT
+                a.agent_id,
+                a.hostname,
+                a.status,
+                a.version,
+                a.metadata_json,
+                a.first_seen_at,
+                a.last_seen_at,
+                binding.policy_id,
+                binding.policy_revision_id,
+                binding.assigned_at AS policy_assigned_at,
+                pr.revision AS policy_revision,
+                p.name AS policy_name,
+                p.description AS policy_description
+             FROM agents a
+             LEFT JOIN LATERAL (
+                SELECT policy_id, policy_revision_id, assigned_at
+                FROM agent_policy_bindings
+                WHERE agent_id = a.agent_id
+                ORDER BY assigned_at DESC
+                LIMIT 1
+             ) binding ON TRUE
+             LEFT JOIN policy_revisions pr ON pr.id = binding.policy_revision_id
+             LEFT JOIN policies p ON p.id = binding.policy_id
+             WHERE a.agent_id = $1
+             LIMIT 1",
+        )
+        .bind(agent_id)
+        .fetch_one(&mut *tx)
         .await?;
 
         tx.commit().await?;

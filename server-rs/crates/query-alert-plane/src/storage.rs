@@ -338,12 +338,12 @@ impl ClickHouseClient {
         let sql = format!(
             "SELECT count() AS count
              FROM {}.{}
-             WHERE timestamp >= toDateTime64('{}', 3, 'UTC')
-               AND timestamp <= toDateTime64('{}', 3, 'UTC')",
+             WHERE timestamp >= {}
+               AND timestamp <= {}",
             quote_identifier(&self.config.database),
             quote_identifier(&self.config.table),
-            from.to_rfc3339_opts(SecondsFormat::Millis, true),
-            to.to_rfc3339_opts(SecondsFormat::Millis, true)
+            clickhouse_timestamp_expr(&from.to_rfc3339_opts(SecondsFormat::Millis, true)),
+            clickhouse_timestamp_expr(&to.to_rfc3339_opts(SecondsFormat::Millis, true))
         );
         let rows = self.query_json(&sql).await?;
         Ok(rows
@@ -367,8 +367,8 @@ impl ClickHouseClient {
             format!("severity = {}", sql_string(severity)),
             format!("fingerprint = {}", sql_string(fingerprint)),
             format!(
-                "timestamp >= toDateTime64({}, 3, 'UTC')",
-                sql_string(&since.to_rfc3339_opts(SecondsFormat::Millis, true))
+                "timestamp >= {}",
+                clickhouse_timestamp_expr(&since.to_rfc3339_opts(SecondsFormat::Millis, true))
             ),
         ];
         if let Some(query_fragment) = query_fragment.filter(|value| !value.trim().is_empty()) {
@@ -396,11 +396,8 @@ impl ClickHouseClient {
     async fn query_json(&self, sql: &str) -> anyhow::Result<Vec<Value>> {
         let response = self
             .http
-            .post(format!(
-                "{}?query={}",
-                self.config.dsn.trim_end_matches('/'),
-                urlencoding::encode(&format!("{sql} FORMAT JSON"))
-            ))
+            .post(self.config.dsn.trim_end_matches('/'))
+            .body(format!("{sql} FORMAT JSON"))
             .send()
             .await
             .with_context(|| format!("execute clickhouse query: {sql}"))?;
@@ -482,14 +479,14 @@ fn build_clickhouse_where(filter: &query::LogQueryFilter) -> String {
     }
     if !filter.from.trim().is_empty() {
         clauses.push(format!(
-            "timestamp >= toDateTime64({}, 3, 'UTC')",
-            sql_string(filter.from.trim())
+            "timestamp >= {}",
+            clickhouse_timestamp_expr(filter.from.trim())
         ));
     }
     if !filter.to.trim().is_empty() {
         clauses.push(format!(
-            "timestamp <= toDateTime64({}, 3, 'UTC')",
-            sql_string(filter.to.trim())
+            "timestamp <= {}",
+            clickhouse_timestamp_expr(filter.to.trim())
         ));
     }
 
@@ -506,6 +503,13 @@ fn quote_identifier(value: &str) -> String {
 
 fn sql_string(value: &str) -> String {
     format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+fn clickhouse_timestamp_expr(value: &str) -> String {
+    format!(
+        "parseDateTime64BestEffort({}, 3, 'UTC')",
+        sql_string(value)
+    )
 }
 
 fn as_u64(value: &Value) -> u64 {

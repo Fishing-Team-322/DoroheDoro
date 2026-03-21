@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context};
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 use serde_json::json;
@@ -234,11 +234,8 @@ impl ClickHouseClient {
     async fn execute_ddl(&self, query: &str) -> anyhow::Result<()> {
         let response = self
             .http
-            .post(format!(
-                "{}?query={}",
-                self.config.dsn.trim_end_matches('/'),
-                urlencoding::encode(query)
-            ))
+            .post(self.config.dsn.trim_end_matches('/'))
+            .body(query.to_string())
             .send()
             .await
             .with_context(|| format!("execute clickhouse query: {query}"))?;
@@ -261,11 +258,22 @@ fn normalize_ch_timestamp(value: &str) -> anyhow::Result<String> {
     let parsed = DateTime::parse_from_rfc3339(value)
         .with_context(|| format!("parse clickhouse timestamp {value}"))?
         .with_timezone(&Utc);
-    Ok(parsed.to_rfc3339_opts(SecondsFormat::Millis, true))
+    Ok(parsed.format("%Y-%m-%d %H:%M:%S%.3f").to_string())
 }
 
 #[derive(Debug, Deserialize)]
 struct OpenSearchBulkResponse {
     #[serde(default)]
     errors: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_ch_timestamp;
+
+    #[test]
+    fn normalizes_clickhouse_timestamp_format() {
+        let normalized = normalize_ch_timestamp("2026-03-21T20:28:20.245Z").unwrap();
+        assert_eq!(normalized, "2026-03-21 20:28:20.245");
+    }
 }

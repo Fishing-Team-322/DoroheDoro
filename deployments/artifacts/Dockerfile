@@ -6,7 +6,8 @@ WORKDIR /src
 
 COPY . .
 
-RUN bash scripts/release/build-agent-artifacts.sh --version 0.2.0 --output-dir /out && \
+RUN find . -type f -name "*.sh" -exec sed -i 's/\r$//' {} \; && \
+    bash scripts/release/build-agent-artifacts.sh --version 0.2.0 --output-dir /out && \
     bash scripts/release/generate-manifest.sh --version 0.2.0 --output-dir /out && \
     mkdir -p /srv/0.2.0 && \
     cp -r /out/0.2.0/* /srv/0.2.0/ && \
