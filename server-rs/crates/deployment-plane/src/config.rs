@@ -45,6 +45,7 @@ pub struct DeploymentConfig {
     pub ansible_runner_bin: Option<String>,
     pub ansible_playbook_path: Option<String>,
     pub deployment_temp_dir: Option<PathBuf>,
+    pub ansible_successful_workspace_retention: usize,
     pub artifact_manifest_url: Option<String>,
     pub release_base_url: Option<String>,
     pub artifact_version: Option<String>,
@@ -84,6 +85,15 @@ impl DeploymentConfig {
         let ansible_runner_bin = optional_trimmed(&vars, "ANSIBLE_RUNNER_BIN");
         let ansible_playbook_path = optional_trimmed(&vars, "ANSIBLE_PLAYBOOK_PATH");
         let deployment_temp_dir = optional_trimmed(&vars, "DEPLOYMENT_TEMP_DIR").map(PathBuf::from);
+        let ansible_successful_workspace_retention =
+            optional_trimmed(&vars, "ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION")
+                .map(|value| {
+                    value.parse::<usize>().map_err(|_| {
+                        ConfigError::InvalidNumber("ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION")
+                    })
+                })
+                .transpose()?
+                .unwrap_or(10);
         let artifact_manifest_url = optional_trimmed(&vars, "AGENT_ARTIFACT_MANIFEST_URL");
         let release_base_url = optional_trimmed(&vars, "AGENT_RELEASE_BASE_URL");
         let artifact_version = optional_trimmed(&vars, "AGENT_ARTIFACT_VERSION");
@@ -140,6 +150,7 @@ impl DeploymentConfig {
             ansible_runner_bin,
             ansible_playbook_path,
             deployment_temp_dir,
+            ansible_successful_workspace_retention,
             artifact_manifest_url,
             release_base_url,
             artifact_version,
@@ -218,6 +229,7 @@ mod tests {
             ("ANSIBLE_RUNNER_BIN", "/usr/bin/ansible-runner"),
             ("ANSIBLE_PLAYBOOK_PATH", "/srv/playbooks/install.yaml"),
             ("DEPLOYMENT_TEMP_DIR", "/tmp/doro"),
+            ("ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION", "7"),
             (
                 "AGENT_ARTIFACT_MANIFEST_URL",
                 "https://downloads.example.local/manifest.json",
@@ -253,6 +265,7 @@ mod tests {
                 .to_string_lossy(),
             "/tmp/doro"
         );
+        assert_eq!(config.ansible_successful_workspace_retention, 7);
         assert_eq!(
             config.artifact_manifest_url.as_deref(),
             Some("https://downloads.example.local/manifest.json")

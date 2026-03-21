@@ -123,6 +123,7 @@ Shared:
 - `ANSIBLE_RUNNER_BIN`
 - `ANSIBLE_PLAYBOOK_PATH`
 - `DEPLOYMENT_TEMP_DIR`
+- `ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION`
 - `AGENT_ARTIFACT_MANIFEST_URL`
 - `AGENT_RELEASE_BASE_URL`
 - `AGENT_ARTIFACT_VERSION`
@@ -175,6 +176,16 @@ cargo run -p control-plane
 cargo run -p deployment-plane
 cargo run -p ingestion-plane
 cargo run -p query-alert-plane
+```
+
+## Runtime smoke gates
+
+The cross-plane smoke suites are kept as explicit gates because they require a live Postgres and NATS stack.
+
+Run them after the local stack is up:
+
+```bash
+make server-smoke
 ```
 
 ## Useful checks

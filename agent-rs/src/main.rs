@@ -11,6 +11,8 @@ mod proto;
 mod runtime;
 mod sources;
 mod state;
+#[cfg(test)]
+mod test_support;
 mod transport;
 
 use clap::Parser;

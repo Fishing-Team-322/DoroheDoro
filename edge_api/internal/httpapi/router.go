@@ -191,15 +191,6 @@ func NewRouter(deps RouterDeps) http.Handler {
 		api.Get("/stream/agents", func(w http.ResponseWriter, r *http.Request) {
 			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamAgents, Event: "agent"})
 		})
-		api.Get("/stream/clusters", func(w http.ResponseWriter, r *http.Request) {
-			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamClusters, Event: "cluster"})
-		})
-		api.Get("/stream/tickets", func(w http.ResponseWriter, r *http.Request) {
-			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamTickets, Event: "ticket"})
-		})
-		api.Get("/stream/anomalies", func(w http.ResponseWriter, r *http.Request) {
-			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamAnomalies, Event: "anomaly"})
-		})
 	})
 
 	return r
@@ -565,15 +556,5 @@ func writeAgentReplyError(w http.ResponseWriter, r *http.Request, reply envelope
 		middleware.WriteError(w, r, http.StatusServiceUnavailable, "unavailable", message)
 	default:
 		middleware.WriteError(w, r, http.StatusBadGateway, "internal", message)
-	}
-}
-
-func runtimeUnavailable(subject, message string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if strings.TrimSpace(subject) != "" {
-			w.Header().Set("X-NATS-Subject", subject)
-		}
-		w.Header().Set("X-Boundary-State", "awaiting-runtime")
-		middleware.WriteError(w, r, http.StatusNotImplemented, "not_implemented", message)
 	}
 }

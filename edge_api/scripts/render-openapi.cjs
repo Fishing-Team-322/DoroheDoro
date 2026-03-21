@@ -48,11 +48,6 @@ const natsHeaders = {
   'X-NATS-Subject': headerRef('NatsSubject'),
 };
 
-const runtimeHeaders = {
-  ...natsHeaders,
-  'X-Boundary-State': headerRef('BoundaryState'),
-};
-
 const response = (description, schema, headers) => {
   const out = { description };
   if (headers) out.headers = headers;
@@ -73,13 +68,6 @@ const publicErrors = (...codes) => {
     if (code === 401) bag[401] = err('unauthorized', 'Authentication is required or the session is missing.');
     if (code === 403) bag[403] = err('forbidden', 'CSRF or permission validation failed.');
     if (code === 404) bag[404] = err('not_found', 'Requested resource was not found.');
-    if (code === 501) {
-      bag[501] = {
-        description: 'The route exists in the boundary, but the backing Rust runtime plane is not available yet.',
-        headers: runtimeHeaders,
-        content: jsonBody('ErrorEnvelope'),
-      };
-    }
     if (code === 502) bag[502] = err('internal', 'Invalid upstream response or bridge decode failure.');
     if (code === 503) bag[503] = err('unavailable', 'Upstream runtime or NATS bridge is unavailable.');
     if (code === 504) bag[504] = err('deadline_exceeded', 'Upstream request timed out.');
@@ -145,7 +133,6 @@ const spec = {
     headers: {
       RequestId: { description: 'Request correlation ID generated or propagated by the boundary.', schema: str },
       NatsSubject: { description: 'NATS subject bridged by the boundary for the request.', schema: str },
-      BoundaryState: { description: 'Boundary runtime state marker for controlled placeholder routes.', schema: { type: 'string', enum: ['awaiting-runtime'] } },
     },
     schemas: {
       ErrorBody: { type: 'object', properties: { code: str, message: str, request_id: str }, required: ['code', 'message', 'request_id'] },
@@ -294,22 +281,6 @@ const successOp = (tag, summary, requestSchema, status = 200, params = []) =>
     responses: {
       [status]: response('OK.', 'SuccessResponse', natsHeaders),
       ...publicErrors(400, 401, 403, 404, 502, 503, 504),
-    },
-  });
-
-const placeholderOp = (tag, summary, description, params = []) =>
-  secure({
-    tags: [tag],
-    summary,
-    description,
-    ...(params.length ? { parameters: params } : {}),
-    responses: {
-      501: {
-        description: 'Boundary route is present, but the Rust runtime plane is not wired yet.',
-        headers: runtimeHeaders,
-        content: jsonBody('ErrorEnvelope'),
-      },
-      ...publicErrors(401),
     },
   });
 

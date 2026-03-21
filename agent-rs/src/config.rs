@@ -344,8 +344,7 @@ impl AgentConfig {
             self.diagnostics.interval_sec = parse_u64(&value, self.diagnostics.interval_sec);
         }
         if let Some(value) = env::var_os("POLICY_REFRESH_INTERVAL_SEC") {
-            self.policy.refresh_interval_sec =
-                parse_u64(&value, self.policy.refresh_interval_sec);
+            self.policy.refresh_interval_sec = parse_u64(&value, self.policy.refresh_interval_sec);
         }
         if let Some(value) = env::var_os("BATCH_MAX_EVENTS") {
             self.batch.max_events = parse_usize(&value, self.batch.max_events);
@@ -707,19 +706,17 @@ mod tests {
     use std::{
         env, fs,
         path::{Path, PathBuf},
-        sync::{LazyLock, Mutex},
     };
 
     use tempfile::TempDir;
 
-    use super::{AgentConfig, InstallMode, StartAt, TransportMode};
+    use crate::test_support::lock_agent_env;
 
-    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    use super::{AgentConfig, InstallMode, StartAt, TransportMode};
 
     #[test]
     fn loads_phase_two_yaml_config() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        clear_test_env();
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("agent.yaml");
         fs::write(
@@ -770,8 +767,7 @@ sources:
 
     #[test]
     fn applies_defaults_for_source_id_diagnostics_and_spool_dir() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        clear_test_env();
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("agent.yaml");
         fs::write(
@@ -807,8 +803,7 @@ sources:
 
     #[test]
     fn env_overrides_scalar_fields() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        clear_test_env();
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("agent.yaml");
         fs::write(
@@ -849,25 +844,6 @@ sources:
 
         let config = AgentConfig::load(&config_path).unwrap();
 
-        env::remove_var("EDGE_URL");
-        env::remove_var("EDGE_GRPC_ADDR");
-        env::remove_var("POLICY_REFRESH_INTERVAL_SEC");
-        env::remove_var("BATCH_MAX_EVENTS");
-        env::remove_var("BATCH_FLUSH_INTERVAL_MS");
-        env::remove_var("QUEUE_SEND_CAPACITY");
-        env::remove_var("SPOOL_ENABLED");
-        env::remove_var("TRANSPORT_MODE");
-        env::remove_var("INSTALL_MODE");
-        env::remove_var("ALLOW_MACHINE_ID");
-        env::remove_var("TLS_CA_PATH");
-        env::remove_var("TLS_CERT_PATH");
-        env::remove_var("TLS_KEY_PATH");
-        env::remove_var("TLS_SERVER_NAME");
-        env::remove_var("CLUSTER_ID");
-        env::remove_var("CLUSTER_NAME");
-        env::remove_var("SERVICE_NAME");
-        env::remove_var("ENVIRONMENT");
-
         assert_eq!(config.edge_url, "https://edge.example.local");
         assert_eq!(config.edge_grpc_addr, "edge.example.local:7443");
         assert_eq!(config.policy.refresh_interval_sec, 60);
@@ -890,7 +866,10 @@ sources:
             config.tls.key_path.as_deref(),
             Some(Path::new("/etc/doro-agent/agent.key"))
         );
-        assert_eq!(config.tls.server_name.as_deref(), Some("edge.example.local"));
+        assert_eq!(
+            config.tls.server_name.as_deref(),
+            Some("edge.example.local")
+        );
         assert_eq!(
             config.scope.configured_cluster_id.as_deref(),
             Some("cluster-a")
@@ -902,8 +881,7 @@ sources:
 
     #[test]
     fn rejects_partial_tls_keypair() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        clear_test_env();
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("agent.yaml");
         fs::write(
@@ -929,49 +907,5 @@ sources:
         assert!(error
             .to_string()
             .contains("tls.cert_path and tls.key_path must be configured together"));
-    }
-
-    fn clear_test_env() {
-        for key in [
-            "EDGE_URL",
-            "EDGE_GRPC_ADDR",
-            "BOOTSTRAP_TOKEN",
-            "STATE_DIR",
-            "LOG_LEVEL",
-            "HEARTBEAT_INTERVAL_SEC",
-            "DIAGNOSTICS_INTERVAL_SEC",
-            "POLICY_REFRESH_INTERVAL_SEC",
-            "BATCH_MAX_EVENTS",
-            "BATCH_MAX_BYTES",
-            "BATCH_FLUSH_INTERVAL_MS",
-            "BATCH_FLUSH_INTERVAL_SEC",
-            "BATCH_COMPRESS_THRESHOLD_BYTES",
-            "QUEUE_EVENT_CAPACITY",
-            "QUEUE_SEND_CAPACITY",
-            "QUEUE_EVENT_BYTES_SOFT_LIMIT",
-            "QUEUE_SEND_BYTES_SOFT_LIMIT",
-            "DEGRADED_FAILURE_THRESHOLD",
-            "DEGRADED_SERVER_UNAVAILABLE_SEC",
-            "DEGRADED_QUEUE_PRESSURE_PCT",
-            "DEGRADED_QUEUE_RECOVER_PCT",
-            "DEGRADED_UNACKED_LAG_BYTES",
-            "DEGRADED_SHUTDOWN_SPOOL_GRACE_SEC",
-            "SPOOL_ENABLED",
-            "SPOOL_DIR",
-            "SPOOL_MAX_DISK_BYTES",
-            "TRANSPORT_MODE",
-            "INSTALL_MODE",
-            "ALLOW_MACHINE_ID",
-            "TLS_CA_PATH",
-            "TLS_CERT_PATH",
-            "TLS_KEY_PATH",
-            "TLS_SERVER_NAME",
-            "CLUSTER_ID",
-            "CLUSTER_NAME",
-            "SERVICE_NAME",
-            "ENVIRONMENT",
-        ] {
-            env::remove_var(key);
-        }
     }
 }

@@ -64,7 +64,7 @@ Important local compose defaults:
 Server-style workflow:
 
 ```bash
-docker compose -f docker-compose.server.yml up -d --build
+docker compose --env-file .env.server -f docker-compose.server.yml up -d --build
 ```
 
 This stack is the preprod single-host/domain profile:
@@ -75,12 +75,14 @@ This stack is the preprod single-host/domain profile:
 - compose-managed `nginx` publishes `80/443`
 - HTTP, SSE and gRPC all arrive on the same domain
 - agent gRPC+mTLS is proxied to `edge-api:9090`
+- real ingress and trust material is mounted from `SERVER_CERTS_DIR`
 
 Related docs:
 
 - stack overview: [`docs/demo-stack.md`](./docs/demo-stack.md)
 - smoke flow: [`docs/demo-smoke.md`](./docs/demo-smoke.md)
 - single-host deploy notes: [`docs/server-deploy.md`](./docs/server-deploy.md)
+- compose env example: [`.env.server.example`](./.env.server.example)
 
 ## What is live
 
@@ -165,6 +167,8 @@ The agent install contract now renders:
 
 and runs `doro-agent doctor --config ...` as `ExecStartPre`.
 
+The current compat/stub WEB auth remains an internal or preprod-only profile. Treat it as non-production auth even though the rest of the stack is aligned for a practical run.
+
 ## OpenAPI
 
 Source of truth:
@@ -182,6 +186,12 @@ Verify drift:
 
 ```bash
 make swagger-check
+```
+
+Runtime smoke gates against a live Postgres/NATS stack:
+
+```bash
+make server-smoke
 ```
 
 ## Useful checks

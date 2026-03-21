@@ -1,14 +1,50 @@
-# Single-Host Deploy Notes for `fishingteam.su`
+# Single-Host Deploy Notes
 
-This document describes the compose-managed single-host/domain profile.
+This document describes the compose-managed single-host/domain profile for one public domain hosting both `WEB` and `SERVER`.
 
-## Start the server stack
+## 1. Prepare the server profile
+
+Start from [`.env.server.example`](../.env.server.example) and set:
+
+- `PUBLIC_BASE_URL=https://<your-domain>`
+- `EDGE_PUBLIC_URL=https://<your-domain>`
+- `AGENT_PUBLIC_GRPC_ADDR=<your-domain>:443`
+- `NGINX_SERVER_NAME=<your-domain>`
+- `SERVER_CERTS_DIR=/absolute/or/relative/path/to/certs`
+- optional `EDGE_API_SERVER_ENV_FILE` if you keep the edge-api env file outside the repo default
+
+The edge boundary env file is [`../edge_api/.env.server`](../edge_api/.env.server). Keep it aligned with the same domain values:
+
+- `PUBLIC_BASE_URL`
+- `EDGE_PUBLIC_URL`
+- `AGENT_PUBLIC_GRPC_ADDR`
+- `CORS_ALLOWED_ORIGINS`
+- `COOKIE_SECURE=true`
+- `AGENT_MTLS_ENABLED=true`
+
+`SERVER_CERTS_DIR` must contain:
+
+- `server.crt`
+- `server.key`
+- `ca.crt`
+- `agent.crt` optional, only if `vault-init` should seed client cert material
+- `agent.key` optional, only if `vault-init` should seed client key material
+
+The server compose profile now fails fast if `SERVER_CERTS_DIR` is missing instead of silently generating demo certs.
+
+Before any public exposure:
+
+- replace `DEV_TEST_PASSWORD`
+- replace the placeholder Vault SSH secret
+- provide real certificates and CA material
+
+## 2. Start the server stack
 
 ```bash
-docker compose -f docker-compose.server.yml up -d --build
+docker compose --env-file .env.server -f docker-compose.server.yml up -d --build
 ```
 
-The stack now includes:
+The stack includes:
 
 - `nginx`
 - `frontend`
@@ -32,25 +68,6 @@ Public host ports:
 - `443`
 
 Internal runtime services stay private on the compose network.
-
-## Environment contract
-
-The edge boundary uses [`../edge_api/.env.server`](../edge_api/.env.server).
-
-Important values:
-
-- `PUBLIC_BASE_URL=https://fishingteam.su`
-- `EDGE_PUBLIC_URL=https://fishingteam.su`
-- `AGENT_PUBLIC_GRPC_ADDR=fishingteam.su:443`
-- `CORS_ALLOWED_ORIGINS=https://fishingteam.su,https://www.fishingteam.su`
-- `COOKIE_SECURE=true`
-- `AGENT_MTLS_ENABLED=true`
-
-Before public exposure:
-
-- replace `DEV_TEST_PASSWORD`
-- replace the placeholder SSH secret in Vault
-- replace the dev-generated ingress certificates with real certificates for long-lived preprod use
 
 ## Ingress model
 
@@ -108,27 +125,28 @@ Important URLs inside the compose network:
 Public checks:
 
 ```bash
-curl -k https://fishingteam.su/healthz
-curl -k https://fishingteam.su/readyz
-curl -k https://fishingteam.su/openapi.json
-curl -k https://fishingteam.su/api/v1/dashboards/overview
-curl -k https://fishingteam.su/api/v1/alerts
-curl -k https://fishingteam.su/api/v1/audit
+curl -k https://<your-domain>/healthz
+curl -k https://<your-domain>/readyz
+curl -k https://<your-domain>/openapi.json
+curl -k https://<your-domain>/api/v1/dashboards/overview
+curl -k https://<your-domain>/api/v1/alerts
+curl -k https://<your-domain>/api/v1/audit
 ```
 
 ## Practical rollout notes
 
 The intended path is:
 
-`agent -> fishingteam.su:443 -> nginx -> edge-api -> NATS -> server-rs`
+`agent -> <your-domain>:443 -> nginx -> edge-api -> NATS -> server-rs`
 
 Do not expose the internal runtime ports directly on the internet.
 
 For a real 3-host rollout:
 
 1. replace the placeholder Vault SSH secret
-2. verify agent artifact mirror health
-3. create hosts and credentials in WEB
-4. create a deployment plan and job in WEB
-5. watch `/api/v1/stream/deployments`
-6. verify agent enrollment, heartbeat, diagnostics, log delivery, alerts and audit
+2. verify the mounted certificate directory matches the public domain and agent CA
+3. verify agent artifact mirror health
+4. create hosts and credentials in WEB
+5. create a deployment plan and job in WEB
+6. watch `/api/v1/stream/deployments`
+7. verify agent enrollment, heartbeat, diagnostics, log delivery, alerts and audit

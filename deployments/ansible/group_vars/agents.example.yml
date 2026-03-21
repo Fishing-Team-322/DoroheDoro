@@ -2,13 +2,13 @@
 # Copy this file to a private inventory/group_vars location and replace placeholders.
 # It is intentionally example-only and must not contain real secrets in the repo.
 
-doro_agent_artifact_manifest_url: https://fishingteam.su/artifacts/agent/release-manifest.json
-doro_agent_release_base_url: https://fishingteam.su/artifacts/agent
+doro_agent_artifact_manifest_url: https://edge.example.com/artifacts/agent/release-manifest.json
+doro_agent_release_base_url: https://edge.example.com/artifacts/agent
 doro_agent_install_mode: auto
 
 # Single-host public boundary on the same domain as WEB.
-doro_agent_edge_url: https://fishingteam.su
-doro_agent_edge_grpc_addr: fishingteam.su:443
+doro_agent_edge_url: https://edge.example.com
+doro_agent_edge_grpc_addr: edge.example.com:443
 
 # Replace with a real bootstrap token or the runtime-issued token flow.
 doro_agent_bootstrap_token: CHANGE_ME

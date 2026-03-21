@@ -26,21 +26,21 @@ func TestLoadPublicSingleHostContract(t *testing.T) {
 	t.Setenv("AGENT_GRPC_LISTEN_ADDR", ":9090")
 	t.Setenv("NATS_URL", "nats://example:4222")
 	t.Setenv("AGENT_ALLOW_INSECURE_DEV_MODE", "true")
-	t.Setenv("PUBLIC_BASE_URL", "https://fishingteam.su")
-	t.Setenv("EDGE_PUBLIC_URL", "https://fishingteam.su")
-	t.Setenv("AGENT_PUBLIC_GRPC_ADDR", "fishingteam.su:443")
+	t.Setenv("PUBLIC_BASE_URL", "https://edge.example.com")
+	t.Setenv("EDGE_PUBLIC_URL", "https://edge.example.com")
+	t.Setenv("AGENT_PUBLIC_GRPC_ADDR", "edge.example.com:443")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Public.BaseURL != "https://fishingteam.su" {
+	if cfg.Public.BaseURL != "https://edge.example.com" {
 		t.Fatalf("unexpected public base url: %s", cfg.Public.BaseURL)
 	}
-	if cfg.Public.EdgeURL != "https://fishingteam.su" {
+	if cfg.Public.EdgeURL != "https://edge.example.com" {
 		t.Fatalf("unexpected edge public url: %s", cfg.Public.EdgeURL)
 	}
-	if cfg.Public.AgentGRPCAddr != "fishingteam.su:443" {
+	if cfg.Public.AgentGRPCAddr != "edge.example.com:443" {
 		t.Fatalf("unexpected public grpc addr: %s", cfg.Public.AgentGRPCAddr)
 	}
 }

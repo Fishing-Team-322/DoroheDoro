@@ -113,6 +113,7 @@ fn build_executor(config: &DeploymentConfig) -> anyhow::Result<DynDeploymentExec
                 runner_bin,
                 playbook_path,
                 temp_dir,
+                config.ansible_successful_workspace_retention,
                 vault_config,
                 config.agent_tls_material.clone(),
             )))

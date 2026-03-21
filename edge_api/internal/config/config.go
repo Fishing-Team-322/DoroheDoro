@@ -216,12 +216,8 @@ func Load() (Config, error) {
 				LogsIngestRaw:                 env("SUBJECT_LOGS_INGEST_RAW", defaultSubjects.LogsIngestRaw),
 				LogsIngestNormalized:          env("SUBJECT_LOGS_INGEST_NORMALIZED", defaultSubjects.LogsIngestNormalized),
 				StreamLogs:                    env("SUBJECT_UI_STREAM_LOGS", defaultSubjects.StreamLogs),
-				StreamDeployments:             env("SUBJECT_UI_STREAM_DEPLOYMENTS", defaultSubjects.StreamDeployments),
 				StreamAlerts:                  env("SUBJECT_UI_STREAM_ALERTS", defaultSubjects.StreamAlerts),
 				StreamAgents:                  env("SUBJECT_UI_STREAM_AGENTS", defaultSubjects.StreamAgents),
-				StreamClusters:                env("SUBJECT_UI_STREAM_CLUSTERS", defaultSubjects.StreamClusters),
-				StreamTickets:                 env("SUBJECT_UI_STREAM_TICKETS", defaultSubjects.StreamTickets),
-				StreamAnomalies:               env("SUBJECT_UI_STREAM_ANOMALIES", defaultSubjects.StreamAnomalies),
 			},
 		},
 		Timeouts: TimeoutConfig{

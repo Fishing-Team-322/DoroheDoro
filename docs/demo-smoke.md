@@ -165,3 +165,13 @@ Practical target shape:
 - Vault-backed SSH credentials
 - deployment launched from WEB or the same HTTP API
 - agent enrollment, heartbeat, diagnostics, logs, alerts and audit all visible afterwards
+
+## 11. Run the Rust runtime smoke gates
+
+After the local stack is healthy, run:
+
+```bash
+make server-smoke
+```
+
+These ignored-by-default tests validate the `enrollment-plane`, `control-plane`, and `deployment-plane` against live Postgres and NATS dependencies instead of only unit-test mocks.

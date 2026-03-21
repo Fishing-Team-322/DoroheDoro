@@ -45,10 +45,10 @@ Published ports:
 Preprod workflow:
 
 ```bash
-docker compose -f docker-compose.server.yml up -d --build
+docker compose --env-file .env.server -f docker-compose.server.yml up -d --build
 ```
 
-It runs the same internal runtime but adds compose-managed `nginx` as the public ingress.
+It runs the same internal runtime but adds compose-managed `nginx` as the public ingress. Unlike the local stack, the server profile expects operator-provided certs through `SERVER_CERTS_DIR` instead of generating dev certs inside compose.
 
 Published ports:
 

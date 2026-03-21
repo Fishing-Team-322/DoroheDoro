@@ -496,13 +496,15 @@ fn check_tls(config: &AgentConfig) -> Vec<DoctorCheck> {
             return vec![DoctorCheck {
                 status: DoctorStatus::Fail,
                 name: "tls".to_string(),
-                detail: "TLS settings are configured but the gRPC endpoint uses plain HTTP".to_string(),
+                detail: "TLS settings are configured but the gRPC endpoint uses plain HTTP"
+                    .to_string(),
             }];
         }
         return vec![DoctorCheck {
             status: DoctorStatus::Warn,
             name: "tls".to_string(),
-            detail: "plaintext HTTP transport configured; no TLS files are required in dev mode".to_string(),
+            detail: "plaintext HTTP transport configured; no TLS files are required in dev mode"
+                .to_string(),
         }];
     }
 
@@ -518,7 +520,8 @@ fn check_ca_bundle(config: &AgentConfig) -> DoctorCheck {
         return DoctorCheck {
             status: DoctorStatus::Warn,
             name: "tls-ca".to_string(),
-            detail: "tls.ca_path is not configured; the system trust store will be used".to_string(),
+            detail: "tls.ca_path is not configured; the system trust store will be used"
+                .to_string(),
         };
     };
 
@@ -526,7 +529,10 @@ fn check_ca_bundle(config: &AgentConfig) -> DoctorCheck {
         Ok(_) => DoctorCheck {
             status: DoctorStatus::Pass,
             name: "tls-ca".to_string(),
-            detail: format!("TLS CA bundle `{}` is readable and parseable", path.display()),
+            detail: format!(
+                "TLS CA bundle `{}` is readable and parseable",
+                path.display()
+            ),
         },
         Err(error) => DoctorCheck {
             status: DoctorStatus::Fail,
@@ -583,17 +589,13 @@ fn check_transport_client(config: &AgentConfig) -> DoctorCheck {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        env, fs,
-        path::PathBuf,
-        sync::{LazyLock, Mutex},
-    };
+    use std::{fs, path::PathBuf};
 
     use tempfile::TempDir;
 
-    use super::{run, DoctorStatus};
+    use crate::test_support::lock_agent_env;
 
-    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    use super::{run, DoctorStatus};
 
     fn write_config(dir: &TempDir) -> PathBuf {
         let config_path = dir.path().join("agent.yaml");
@@ -626,8 +628,7 @@ sources:
 
     #[test]
     fn doctor_warns_for_missing_state_db_and_source() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        clear_test_env();
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = write_config(&dir);
 
@@ -641,8 +642,7 @@ sources:
 
     #[test]
     fn doctor_passes_when_state_db_exists() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        clear_test_env();
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = write_config(&dir);
         let state_dir = dir.path().join("state");
@@ -660,8 +660,7 @@ sources:
 
     #[test]
     fn doctor_fails_for_invalid_tls_ca_bundle() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        clear_test_env();
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("agent.yaml");
         let ca_path = dir.path().join("ca.pem");
@@ -686,16 +685,19 @@ tls:
         .unwrap();
 
         let report = run(&config_path).unwrap();
-        assert!(report
-            .checks
-            .iter()
-            .any(|check| check.name == "tls-ca" && check.status == DoctorStatus::Fail), "{:#?}", report.checks);
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|check| check.name == "tls-ca" && check.status == DoctorStatus::Fail),
+            "{:#?}",
+            report.checks
+        );
     }
 
     #[test]
     fn doctor_fails_when_tls_is_configured_for_plain_http() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        clear_test_env();
+        let _guard = lock_agent_env();
         let dir = TempDir::new().unwrap();
         let config_path = dir.path().join("agent.yaml");
         fs::write(
@@ -717,53 +719,13 @@ tls:
         .unwrap();
 
         let report = run(&config_path).unwrap();
-        assert!(report
-            .checks
-            .iter()
-            .any(|check| check.name == "tls" && check.status == DoctorStatus::Fail), "{:#?}", report.checks);
-    }
-
-    fn clear_test_env() {
-        for key in [
-            "EDGE_URL",
-            "EDGE_GRPC_ADDR",
-            "BOOTSTRAP_TOKEN",
-            "STATE_DIR",
-            "LOG_LEVEL",
-            "HEARTBEAT_INTERVAL_SEC",
-            "DIAGNOSTICS_INTERVAL_SEC",
-            "POLICY_REFRESH_INTERVAL_SEC",
-            "BATCH_MAX_EVENTS",
-            "BATCH_MAX_BYTES",
-            "BATCH_FLUSH_INTERVAL_MS",
-            "BATCH_FLUSH_INTERVAL_SEC",
-            "BATCH_COMPRESS_THRESHOLD_BYTES",
-            "QUEUE_EVENT_CAPACITY",
-            "QUEUE_SEND_CAPACITY",
-            "QUEUE_EVENT_BYTES_SOFT_LIMIT",
-            "QUEUE_SEND_BYTES_SOFT_LIMIT",
-            "DEGRADED_FAILURE_THRESHOLD",
-            "DEGRADED_SERVER_UNAVAILABLE_SEC",
-            "DEGRADED_QUEUE_PRESSURE_PCT",
-            "DEGRADED_QUEUE_RECOVER_PCT",
-            "DEGRADED_UNACKED_LAG_BYTES",
-            "DEGRADED_SHUTDOWN_SPOOL_GRACE_SEC",
-            "SPOOL_ENABLED",
-            "SPOOL_DIR",
-            "SPOOL_MAX_DISK_BYTES",
-            "TRANSPORT_MODE",
-            "INSTALL_MODE",
-            "ALLOW_MACHINE_ID",
-            "TLS_CA_PATH",
-            "TLS_CERT_PATH",
-            "TLS_KEY_PATH",
-            "TLS_SERVER_NAME",
-            "CLUSTER_ID",
-            "CLUSTER_NAME",
-            "SERVICE_NAME",
-            "ENVIRONMENT",
-        ] {
-            env::remove_var(key);
-        }
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|check| check.name == "tls" && check.status == DoctorStatus::Fail),
+            "{:#?}",
+            report.checks
+        );
     }
 }

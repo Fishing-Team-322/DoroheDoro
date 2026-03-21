@@ -14764,15 +14764,6 @@
         "schema": {
           "type": "string"
         }
-      },
-      "BoundaryState": {
-        "description": "Boundary runtime state marker for controlled placeholder routes.",
-        "schema": {
-          "type": "string",
-          "enum": [
-            "awaiting-runtime"
-          ]
-        }
       }
     },
     "schemas": {

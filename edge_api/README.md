@@ -125,10 +125,10 @@ docker compose up --build
 Single-host/domain stack:
 
 ```bash
-docker compose -f ../docker-compose.server.yml up -d --build
+docker compose --env-file ../.env.server -f ../docker-compose.server.yml up -d --build
 ```
 
-The server stack now includes compose-managed `nginx`, OpenSearch, ClickHouse, Vault, `ingestion-plane`, `query-alert-plane`, and the agent artifact mirror.
+The server stack now includes compose-managed `nginx`, OpenSearch, ClickHouse, Vault, `ingestion-plane`, `query-alert-plane`, and the agent artifact mirror. It expects operator-provided cert material through `SERVER_CERTS_DIR`; the dev certificate generator remains a local/demo helper rather than the canonical server profile.
 
 ## OpenAPI source of truth
 

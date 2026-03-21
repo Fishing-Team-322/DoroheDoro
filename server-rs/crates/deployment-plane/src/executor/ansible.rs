@@ -4,9 +4,11 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::Stdio,
+    time::SystemTime,
 };
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::{io::AsyncReadExt, process::Command};
 use tokio_util::sync::CancellationToken;
@@ -30,6 +32,7 @@ pub struct AnsibleRunnerExecutor {
     runner_bin: PathBuf,
     playbook_path: PathBuf,
     temp_dir: PathBuf,
+    successful_workspace_retention: usize,
     vault_config: VaultRuntimeConfig,
     agent_tls_material: AgentTlsMaterialConfig,
 }
@@ -64,11 +67,27 @@ struct RuntimeSecrets {
     tls_key_pem: Option<String>,
 }
 
+const WORKSPACE_METADATA_FILE: &str = ".doro-workspace.json";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum WorkspaceOutcome {
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceMetadata {
+    outcome: WorkspaceOutcome,
+}
+
 impl AnsibleRunnerExecutor {
     pub fn new(
         runner_bin: impl Into<PathBuf>,
         playbook_path: impl Into<PathBuf>,
         temp_dir: impl Into<PathBuf>,
+        successful_workspace_retention: usize,
         vault_config: VaultRuntimeConfig,
         agent_tls_material: AgentTlsMaterialConfig,
     ) -> Self {
@@ -76,6 +95,7 @@ impl AnsibleRunnerExecutor {
             runner_bin: runner_bin.into(),
             playbook_path: playbook_path.into(),
             temp_dir: temp_dir.into(),
+            successful_workspace_retention,
             vault_config,
             agent_tls_material,
         }
@@ -105,6 +125,95 @@ impl AnsibleRunnerExecutor {
             .ok_or_else(|| AppError::internal("ansible playbook directory has no roles root"))?;
         Self::ensure_exists(&roles_dir, "ansible roles directory")?;
         Ok(roles_dir)
+    }
+
+    fn workspace_metadata_path(workspace_dir: &Path) -> PathBuf {
+        workspace_dir.join(WORKSPACE_METADATA_FILE)
+    }
+
+    fn record_workspace_outcome(
+        &self,
+        workspace_dir: &Path,
+        outcome: WorkspaceOutcome,
+    ) -> AppResult<()> {
+        let payload = serde_json::to_vec_pretty(&WorkspaceMetadata { outcome })
+            .map_err(|error| AppError::internal(format!("encode workspace metadata: {error}")))?;
+        fs::write(Self::workspace_metadata_path(workspace_dir), payload).map_err(|error| {
+            AppError::internal(format!(
+                "write workspace metadata {}: {error}",
+                workspace_dir.display()
+            ))
+        })
+    }
+
+    fn prune_successful_workspaces(&self) -> AppResult<()> {
+        fs::create_dir_all(&self.temp_dir).map_err(|error| {
+            AppError::internal(format!(
+                "create deployment temp dir {}: {error}",
+                self.temp_dir.display()
+            ))
+        })?;
+
+        let mut successful = Vec::new();
+        for entry in fs::read_dir(&self.temp_dir).map_err(|error| {
+            AppError::internal(format!(
+                "read deployment temp dir {}: {error}",
+                self.temp_dir.display()
+            ))
+        })? {
+            let entry = entry.map_err(|error| {
+                AppError::internal(format!(
+                    "read deployment temp dir entry {}: {error}",
+                    self.temp_dir.display()
+                ))
+            })?;
+            if !entry
+                .file_type()
+                .map_err(|error| {
+                    AppError::internal(format!(
+                        "read deployment temp dir entry type {}: {error}",
+                        entry.path().display()
+                    ))
+                })?
+                .is_dir()
+            {
+                continue;
+            }
+
+            let metadata_path = Self::workspace_metadata_path(&entry.path());
+            if !metadata_path.exists() {
+                continue;
+            }
+            let Ok(payload) = fs::read(&metadata_path) else {
+                continue;
+            };
+            let Ok(metadata) = serde_json::from_slice::<WorkspaceMetadata>(&payload) else {
+                continue;
+            };
+            if metadata.outcome != WorkspaceOutcome::Succeeded {
+                continue;
+            }
+
+            let modified = fs::metadata(&metadata_path)
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            successful.push((modified, entry.path()));
+        }
+
+        successful.sort_by(|left, right| right.0.cmp(&left.0));
+        for (_, path) in successful
+            .into_iter()
+            .skip(self.successful_workspace_retention)
+        {
+            fs::remove_dir_all(&path).map_err(|error| {
+                AppError::internal(format!(
+                    "remove pruned ansible workspace {}: {error}",
+                    path.display()
+                ))
+            })?;
+        }
+
+        Ok(())
     }
 
     async fn resolve_runtime_secrets(
@@ -364,6 +473,7 @@ impl DeploymentExecutor for AnsibleRunnerExecutor {
                 self.temp_dir.display()
             ))
         })?;
+        self.prune_successful_workspaces()?;
         Ok(())
     }
 
@@ -503,6 +613,17 @@ impl DeploymentExecutor for AnsibleRunnerExecutor {
                 )?;
                 break;
             }
+        }
+
+        let workspace_outcome = derive_workspace_outcome(overall_exit_code, &targets);
+        if let Err(error) = self
+            .record_workspace_outcome(&workspace.workspace_dir, workspace_outcome)
+            .and_then(|_| self.prune_successful_workspaces())
+        {
+            append_text(
+                &workspace.stderr_path,
+                &format!("\n[workspace-cleanup] {error}\n"),
+            )?;
         }
 
         Ok(ExecutionResult {
@@ -761,6 +882,32 @@ fn append_bytes(path: &Path, bytes: &[u8]) -> AppResult<()> {
     file.write_all(bytes)
         .map_err(internal_path_error("append log"))?;
     Ok(())
+}
+
+fn append_text(path: &Path, text: &str) -> AppResult<()> {
+    append_bytes(path, text.as_bytes())
+}
+
+fn derive_workspace_outcome(
+    overall_exit_code: i32,
+    targets: &[ExecutionTargetResult],
+) -> WorkspaceOutcome {
+    if !targets.is_empty()
+        && targets
+            .iter()
+            .all(|target| target.status == DeploymentTargetStatus::Succeeded)
+        && overall_exit_code == 0
+    {
+        return WorkspaceOutcome::Succeeded;
+    }
+    if targets
+        .iter()
+        .any(|target| target.status == DeploymentTargetStatus::Cancelled)
+        || overall_exit_code == 130
+    {
+        return WorkspaceOutcome::Cancelled;
+    }
+    WorkspaceOutcome::Failed
 }
 
 fn excerpt(bytes: &[u8]) -> String {
