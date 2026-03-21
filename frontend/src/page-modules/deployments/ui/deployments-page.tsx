@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/src/shared/lib/i18n";
+import {
+  deriveDeploymentImageFlow,
+  type DeploymentImageFlow,
+} from "@/src/shared/lib/operations-workbench";
 import {
   getDeployment,
   listDeployments,
@@ -24,6 +28,7 @@ import {
   JsonValue,
   LoadingCard,
 } from "@/src/page-modules/common/ui/runtime-state";
+import { DeploymentImagePanel } from "./deployment-image-panel";
 
 export function DeploymentsPage() {
   const { dictionary } = useI18n();
@@ -75,6 +80,7 @@ export function DeploymentsPage() {
         setDetail(null);
         return;
       }
+
       setDetailLoading(true);
       try {
         const response = await getDeployment(selectedJobId);
@@ -102,11 +108,15 @@ export function DeploymentsPage() {
     };
   }, [selectedJobId]);
 
+  const imageFlow: DeploymentImageFlow | null = useMemo(() => {
+    return detail ? deriveDeploymentImageFlow(detail) : null;
+  }, [detail]);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Deployments"
-        description="Live deployment jobs, attempts, targets and steps from deployment-plane."
+        description="Live deployment jobs, attempts, targets, steps, and image rollout state from deployment-plane."
         breadcrumbs={[
           { label: dictionary.common.dashboard, href: "#" },
           { label: "Deployments" },
@@ -172,7 +182,7 @@ export function DeploymentsPage() {
           </Card>
 
           <Card>
-            <div className="space-y-3">
+            <div className="space-y-4">
               <h2 className="text-base font-semibold text-[color:var(--foreground)]">
                 Job inspector
               </h2>
@@ -182,12 +192,14 @@ export function DeploymentsPage() {
                 <>
                   <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-3">
                     <p className="text-lg font-semibold text-[color:var(--foreground)]">
-                      {detail.item.job_type} · {detail.item.status}
+                      {detail.item.job_type} / {detail.item.status}
                     </p>
                     <p className="mt-1 text-sm text-[color:var(--muted-foreground)]">
                       {detail.item.job_id}
                     </p>
                   </div>
+
+                  {imageFlow ? <DeploymentImagePanel imageFlow={imageFlow} /> : null}
 
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
@@ -205,7 +217,7 @@ export function DeploymentsPage() {
                           key={attempt.deployment_attempt_id}
                           className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-3 text-sm"
                         >
-                          attempt #{attempt.attempt_no} · {attempt.status}
+                          Attempt #{attempt.attempt_no} / {attempt.status}
                         </div>
                       ))
                     )}
@@ -228,11 +240,11 @@ export function DeploymentsPage() {
                           className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-3"
                         >
                           <p className="text-sm font-medium text-[color:var(--foreground)]">
-                            {target.hostname_snapshot} · {target.status}
+                            {target.hostname_snapshot} / {target.status}
                           </p>
                           {target.artifact ? (
                             <p className="mt-1 text-xs text-[color:var(--muted-foreground)]">
-                              {target.artifact.version} · {target.artifact.package_type}
+                              {target.artifact.version} / {target.artifact.package_type}
                             </p>
                           ) : null}
                         </div>
@@ -259,7 +271,7 @@ export function DeploymentsPage() {
                 <EmptyState
                   variant="flush"
                   title="No job selected"
-                  description="Pick a deployment job to inspect attempts, targets and steps."
+                  description="Pick a deployment job to inspect attempts, targets, steps, and rollout phases."
                 />
               )}
             </div>
