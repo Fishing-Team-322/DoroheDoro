@@ -67,6 +67,8 @@ docker exec dorohedoro-edge-api-1 /bin/sh -lc \
    /usr/local/bin/fake-agent"
 ```
 
+This smoke path validates the live boundary with a real client certificate. In the current repository state, this is the reproducible mTLS proof because `agent-rs` itself does not yet expose client-certificate configuration in its install/runtime contract.
+
 ## Expected security behavior
 
 - bad TLS assets -> `edge-api` should fail fast on startup

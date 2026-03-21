@@ -42,9 +42,10 @@ The active live bridge is aligned with `server-rs` on:
 - `agents.policy.fetch`
 - `agents.heartbeat`
 - `agents.diagnostics`
-- `agents.registry.list`
-- `agents.registry.get`
+- `agents.list`
+- `agents.get`
 - `agents.diagnostics.get`
+- `agents.policy.get`
 - `control.policies.list`
 - `control.policies.get`
 - `control.policies.create`
@@ -257,6 +258,12 @@ docker exec dorohedoro-edge-api-1 /bin/sh -lc \
 ```
 
 If you need a separate host-side cert set for manual experiments, generate one explicitly with `go run ./cmd/dev-certs` and point a standalone `edge-api` run at that directory.
+
+Current honest scope note:
+
+- `edge_api` already enforces and logs boundary-side mTLS
+- the reproducible client-cert smoke path today is `fake-agent`
+- real `agent-rs` client-cert rollout still needs runtime/config support on the agent side and is not emulated in Go
 
 Repository-level PKI helpers for reproducible dev/test cert issuance also live in:
 

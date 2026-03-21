@@ -57,6 +57,8 @@ See:
 Detailed smoke:
 
 - [`docs/demo-smoke.md`](./demo-smoke.md)
+- [`deployments/ansible/inventories/three-hosts.example.ini`](../deployments/ansible/inventories/three-hosts.example.ini)
+- [`deployments/ansible/group_vars/agents.example.yml`](../deployments/ansible/group_vars/agents.example.yml)
 
 ## Notes on compose speed
 
