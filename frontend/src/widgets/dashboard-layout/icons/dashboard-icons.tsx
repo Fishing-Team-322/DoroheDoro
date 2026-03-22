@@ -18,7 +18,13 @@ export function LogoGlyph() {
 
 export function MenuIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
       <path d="M4 7h16" />
       <path d="M4 12h16" />
       <path d="M4 17h16" />
@@ -28,7 +34,13 @@ export function MenuIcon(props: IconProps) {
 
 export function SearchIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
       <circle cx="11" cy="11" r="6.5" />
       <path d="m16 16 4 4" />
     </svg>
@@ -37,7 +49,13 @@ export function SearchIcon(props: IconProps) {
 
 export function ChevronLeftIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      {...props}
+    >
       <path d="m15 6-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -45,7 +63,13 @@ export function ChevronLeftIcon(props: IconProps) {
 
 export function ChevronRightIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.9"
+      {...props}
+    >
       <path d="m9 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -53,16 +77,36 @@ export function ChevronRightIcon(props: IconProps) {
 
 export function HomeIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
-      <path d="M4 10.5 12 4l8 6.5" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M6.5 9.5V20h11V9.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
+      <path
+        d="M4 10.5 12 4l8 6.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.5 9.5V20h11V9.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 export function ServerIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
       <rect x="4" y="4" width="16" height="6" rx="2" />
       <rect x="4" y="14" width="16" height="6" rx="2" />
       <path d="M8 7h.01" />
@@ -75,26 +119,81 @@ export function ServerIcon(props: IconProps) {
 
 export function ShieldIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
       <path d="M12 4c2.8 1.7 5.5 2.4 8 2.7 0 6.2-2.6 10.5-8 13.3-5.4-2.8-8-7.1-8-13.3 2.5-.3 5.2-1 8-2.7Z" />
-      <path d="m9.5 12 1.8 1.8 3.7-3.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="m9.5 12 1.8 1.8 3.7-3.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 export function RocketIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
-      <path d="M14.5 4.5c3.2 0 5 1.8 5 5-.1 3.6-2 6.1-5.6 7.6l-3.9-3.9c1.5-3.6 4-5.5 7.6-5.7Z" />
-      <path d="M9.3 14.7 6 18l-1.5-4.5L9 9" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M14.5 9.5h.01" />
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
+      <path
+        d="M14.5 4.5c2.7 0 4.8 2.2 4.8 4.8 0 3.9-2.1 6.9-6.2 9.2l-4.1-4.1c2.3-4.1 5.3-6.2 9.2-6.2Z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.2 14.8 6 18l-1.5-4.5L8.8 9.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="m13.2 15.8 1.8 3.7 1.2-2.5 2.5-1.2-3.7-1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="14.8" cy="9.2" r="1.2" />
+    </svg>
+  );
+}
+
+export function TerminalIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
+      <rect x="3.5" y="5" width="17" height="14" rx="2.5" />
+      <path
+        d="M7 9.5 9.5 12 7 14.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M12 14.5h4.5" strokeLinecap="round" />
     </svg>
   );
 }
 
 export function LogsIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
       <rect x="5" y="4" width="14" height="16" rx="2" />
       <path d="M8 8h8" />
       <path d="M8 12h8" />
@@ -105,15 +204,31 @@ export function LogsIcon(props: IconProps) {
 
 export function ActivityIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
-      <path d="M4 12h4l2.2-5 3.6 10 2.2-5H20" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
+      <path
+        d="M4 12h4l2.2-5 3.6 10 2.2-5H20"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 export function ChartIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
       <path d="M5 19V10" />
       <path d="M12 19V5" />
       <path d="M19 19v-7" />
@@ -124,7 +239,13 @@ export function ChartIcon(props: IconProps) {
 
 export function BellIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
       <path d="M6.5 16.5h11l-1.2-1.8V10a4.3 4.3 0 1 0-8.6 0v4.7L6.5 16.5Z" />
       <path d="M10 18.5a2.2 2.2 0 0 0 4 0" strokeLinecap="round" />
     </svg>
@@ -133,24 +254,64 @@ export function BellIcon(props: IconProps) {
 
 export function PulseIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
-      <path d="M3 12h4l2-4 4.5 9 2.5-5H21" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
+      <path
+        d="M3 12h4l2-4 4.5 9 2.5-5H21"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 export function SettingsIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
       <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
       <path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 1 1-4 0v-.1a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 1 1 0-4h.1a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V4a2 2 0 1 1 4 0v.1a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6H20a2 2 0 1 1 0 4h-.1a1 1 0 0 0-.9.6Z" />
     </svg>
   );
 }
 
+export function UserIcon(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
+      <circle cx="12" cy="8.5" r="3.5" />
+      <path
+        d="M5 19c1.6-3.1 4-4.7 7-4.7S17.4 15.9 19 19"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function GridIcon(props: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      {...props}
+    >
       <rect x="4" y="4" width="6" height="6" rx="1.5" />
       <rect x="14" y="4" width="6" height="6" rx="1.5" />
       <rect x="4" y="14" width="6" height="6" rx="1.5" />

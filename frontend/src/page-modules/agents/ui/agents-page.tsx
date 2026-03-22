@@ -369,7 +369,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                   value: <StatusBadge value="unavailable" />,
                 },
                 {
-                  label: "Diagnostics API",
+                  label: "Diagn. API",
                   value: <StatusBadge value="unavailable" />,
                 },
                 {
@@ -400,7 +400,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
         </SectionCard>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+      <section className="space-y-6">
         <SectionCard
           title="Policies"
           description="Confirmed public sources: `GET /api/v1/policies` and `GET /api/v1/policies/{id}`."
@@ -440,7 +440,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                         key={policy.id}
                         className={
                           policy.id === selectedPolicyId
-                            ? "bg-[color:rgba(56,189,248,0.08)]"
+                            ? "bg-transparent"
                             : undefined
                         }
                         onClick={() => setSelectedPolicyId(policy.id)}

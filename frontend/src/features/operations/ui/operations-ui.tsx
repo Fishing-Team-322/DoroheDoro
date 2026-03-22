@@ -149,10 +149,10 @@ export function NoticeBanner({
 }) {
   return (
     <div className="rounded-xl border border-[color:var(--status-info-border)] bg-[color:var(--status-info-bg)]/80 px-4 py-3">
-      <p className="text-sm font-semibold text-[color:var(--status-info-fg)]">
+      <p className="text-Lg font-semibold text-[color:var(--status-info-fg)]">
         {title}
       </p>
-      <p className="mt-1 text-sm leading-6 text-[color:var(--status-info-fg)]/85">
+      <p className="mt-1 text-base leading-6 text-[color:var(--status-info-fg)]/85">
         {description}
       </p>
     </div>

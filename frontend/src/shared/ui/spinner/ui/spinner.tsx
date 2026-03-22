@@ -1,26 +1,39 @@
 import { HTMLAttributes } from "react";
 import { cn } from "@/src/shared/lib/cn";
+import "./spinner.css";
 
 interface SpinnerProps extends HTMLAttributes<HTMLDivElement> {
   size?: "sm" | "md" | "lg";
+  center?: boolean;
 }
 
 const sizeClasses: Record<NonNullable<SpinnerProps["size"]>, string> = {
-  sm: "h-4 w-4 border-2",
-  md: "h-6 w-6 border-2",
-  lg: "h-8 w-8 border-[3px]",
+  sm: "spinner-sm",
+  md: "spinner-md",
+  lg: "spinner-lg",
 };
 
-export function Spinner({ className, size = "md", ...props }: SpinnerProps) {
+export function Spinner({
+  className,
+  size = "md",
+  center = false,
+  ...props
+}: SpinnerProps) {
   return (
     <div
       className={cn(
-        "animate-spin rounded-full border-gray-300 border-t-blue-600",
+        "spinner",
         sizeClasses[size],
+        center && "center",
         className
       )}
+      aria-label="Loading"
+      role="status"
       {...props}
-    />
+    >
+      {Array.from({ length: 12 }).map((_, index) => (
+        <div key={index} className="spinner-blade" />
+      ))}
+    </div>
   );
 }
-
