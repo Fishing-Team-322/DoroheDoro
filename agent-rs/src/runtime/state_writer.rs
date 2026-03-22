@@ -9,6 +9,7 @@ use tracing::{info, warn};
 use crate::{
     batching::PendingBatch,
     error::{AppError, AppResult},
+    security::SecurityScanStateRecord,
     state::{
         decode_spool_payload, encode_spool_payload, remove_spool_payload, write_spool_payload,
         FileOffsetUpdate, RuntimeStatePatch, SourceOffsetMarker, SpoolBatchRecord, SpoolStats,
@@ -58,6 +59,10 @@ enum StateCommand {
     },
     UpdateRuntimeState {
         patch: RuntimeStatePatch,
+        reply: oneshot::Sender<AppResult<()>>,
+    },
+    SaveSecurityScanState {
+        state: SecurityScanStateRecord,
         reply: oneshot::Sender<AppResult<()>>,
     },
 }
@@ -166,6 +171,20 @@ impl StateWriterHandle {
             .await
             .map_err(|_| AppError::protocol("state writer dropped runtime state reply"))?
     }
+
+    pub async fn save_security_scan_state(&self, state: SecurityScanStateRecord) -> AppResult<()> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(StateCommand::SaveSecurityScanState {
+                state,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| AppError::protocol("state writer has stopped"))?;
+        reply_rx
+            .await
+            .map_err(|_| AppError::protocol("state writer dropped security scan reply"))?
+    }
 }
 
 pub fn spawn_state_writer(
@@ -220,6 +239,10 @@ pub fn spawn_state_writer(
                 }
                 StateCommand::UpdateRuntimeState { patch, reply } => {
                     let result = store.apply_runtime_state_patch(patch).map(|_| ());
+                    let _ = reply.send(result);
+                }
+                StateCommand::SaveSecurityScanState { state, reply } => {
+                    let result = store.save_security_scan_state(&state);
                     let _ = reply.send(result);
                 }
             }

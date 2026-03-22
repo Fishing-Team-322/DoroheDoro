@@ -1,10 +1,13 @@
 # Demo Smoke Flow
 
-Current honest smoke for the integrated slice that exists in this repository today.
+Current image-first smoke for the integrated slice that exists in this repository today.
 
 ## 1. Start the local full stack
 
 ```bash
+export AGENT_IMAGE_REPOSITORY=docker.io/<org>/doro-agent
+export AGENT_IMAGE_TAG=main
+export AGENT_IMAGE_DIGEST=sha256:...
 docker compose up --build
 ```
 
@@ -25,13 +28,25 @@ Healthy services should include:
 - `ingestion-plane`
 - `query-alert-plane`
 
-## 2. Open WEB
+## 2. Check the compatibility manifest
+
+```bash
+curl http://localhost:18081/manifest.json
+```
+
+Expected contract fragments:
+
+- `install_mode=docker_image`
+- `package_type=container`
+- `artifact_path=docker.io/<org>/doro-agent:main`
+
+## 3. Open WEB
 
 - URL: `http://localhost:3000`
 - login: `admin`
 - password: `admin123`
 
-## 3. Check boundary readiness
+## 4. Check boundary readiness
 
 ```bash
 curl http://localhost:8080/readyz
@@ -43,7 +58,7 @@ Expected:
 {"status":"ready"}
 ```
 
-## 4. Replace the placeholder Vault SSH secret before real deployment
+## 5. Replace the placeholder Vault SSH secret before real deployment
 
 The compose stack seeds `secret/data/ssh/dev` with a placeholder value. Replace it before creating a real deployment job:
 
@@ -54,7 +69,7 @@ docker compose exec vault \
   ssh_private_key=@/path/to/real/id_ed25519
 ```
 
-## 5. Create policy, host, host group and credentials metadata
+## 6. Create policy, host, host group and credentials metadata
 
 Example payloads:
 
@@ -76,15 +91,7 @@ curl -X POST http://localhost:8080/api/v1/credentials \
   -d '{"name":"ssh-dev","kind":"ssh_key","description":"Vault-backed SSH key","vault_ref":"secret/data/ssh/dev"}'
 ```
 
-Add the host to the group:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/host-groups/<group_id>/members \
-  -H "Content-Type: application/json" \
-  -d '{"host_id":"<host_id>"}'
-```
-
-## 6. Create deployment plan and job
+## 7. Create deployment plan and job
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/deployments/plan \
@@ -104,7 +111,25 @@ curl http://localhost:8080/api/v1/deployments/<job_id>/steps
 curl http://localhost:8080/api/v1/deployments/<job_id>/targets
 ```
 
-## 7. Verify deployment SSE
+## 8. Verify image-based agent install on the target host
+
+Expected Ansible behavior:
+
+- detects `docker`, otherwise `podman`
+- pulls the image from the manifest
+- runs `doctor` before switching the unit
+- starts the systemd-backed container
+- keeps `/var/lib/doro-agent` across restart and upgrade
+
+Useful host-side checks:
+
+```bash
+systemctl status doro-agent
+cat /var/lib/doro-agent/last-known-good-image.json
+docker ps --format '{{.Names}} {{.Image}}' || podman ps --format '{{.Names}} {{.Image}}'
+```
+
+## 9. Verify deployment SSE
 
 ```bash
 curl -N http://localhost:8080/api/v1/stream/deployments
@@ -112,7 +137,7 @@ curl -N http://localhost:8080/api/v1/stream/deployments
 
 Create another deployment job while the stream is open. You should receive `ready`, `status` and `step` events.
 
-## 8. Enroll an agent over gRPC + mTLS
+## 10. Enroll an agent over gRPC + mTLS
 
 Run the smoke client inside the live `edge-api` container:
 
@@ -134,7 +159,7 @@ Expected:
 - `SendDiagnostics` succeeds
 - `IngestLogs` succeeds
 
-## 9. Inspect agents, logs, alerts and audit
+## 11. Inspect agents, logs, alerts and audit
 
 ```bash
 curl http://localhost:8080/api/v1/agents
@@ -144,34 +169,14 @@ curl http://localhost:8080/api/v1/alerts
 curl http://localhost:8080/api/v1/audit
 ```
 
-This verifies:
+## 12. Negative smoke
 
-- `edge-api -> NATS -> enrollment-plane`
-- `edge-api -> NATS -> ingestion-plane`
-- `edge-api -> NATS -> query-alert-plane`
-- `edge-api -> NATS -> control-plane` audit read-side
+Run the same deployment against:
 
-## 10. Prepare the 3-host practical run
+- a host with Docker only
+- a host with Podman only
+- a host with neither engine
 
-Use:
+Expected failure for the third case:
 
-- [`../deployments/ansible/inventories/three-hosts.example.ini`](../deployments/ansible/inventories/three-hosts.example.ini)
-- [`../deployments/ansible/group_vars/agents.example.yml`](../deployments/ansible/group_vars/agents.example.yml)
-
-Practical target shape:
-
-- one public boundary host under a domain
-- three Linux hosts reachable by Ansible
-- Vault-backed SSH credentials
-- deployment launched from WEB or the same HTTP API
-- agent enrollment, heartbeat, diagnostics, logs, alerts and audit all visible afterwards
-
-## 11. Run the Rust runtime smoke gates
-
-After the local stack is healthy, run:
-
-```bash
-make server-smoke
-```
-
-These ignored-by-default tests validate the `enrollment-plane`, `control-plane`, and `deployment-plane` against live Postgres and NATS dependencies instead of only unit-test mocks.
+- clear operator-readable error about missing Docker or Podman

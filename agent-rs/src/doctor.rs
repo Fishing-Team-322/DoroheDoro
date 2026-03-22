@@ -9,6 +9,7 @@ use crate::{
         can_read_file, detect_source_paths, directory_write_access, path_exists,
         RuntimeMetadataContext, SourcePathStatus, CANONICAL_LOG_DIR,
     },
+    security::{SecurityRulesFile, SECURITY_SCHEMA_VERSION},
     transport::client::{
         build_base_url, derive_server_name, endpoint_uses_tls, load_ca_certificate,
         load_client_identity, EdgeGrpcTransport,
@@ -157,6 +158,7 @@ pub fn run(config_path: &Path) -> AppResult<DoctorReport> {
     }
 
     checks.push(check_state_db(&config.state_dir.join("state.db")));
+    checks.extend(check_security_scan(&config));
     checks.push(check_transport(&config));
     checks.push(check_logs_directory(&context));
     checks.extend(check_tls(&config));
@@ -322,6 +324,107 @@ fn check_state_db(state_db_path: &Path) -> DoctorCheck {
             ),
         },
     }
+}
+
+fn check_security_scan(config: &AgentConfig) -> Vec<DoctorCheck> {
+    let mut checks = Vec::new();
+    if !config.security_scan.enabled {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "security-scan".to_string(),
+            detail: "security posture scan is disabled".to_string(),
+        });
+        return checks;
+    }
+
+    checks.push(DoctorCheck {
+        status: if cfg!(target_os = "linux") {
+            DoctorStatus::Pass
+        } else {
+            DoctorStatus::Warn
+        },
+        name: "security-scan".to_string(),
+        detail: format!(
+            "enabled=true, profile={}, interval={}s, jitter={}s, timeout={}s, max_parallel_checks={}",
+            config.security_scan.profile.as_str(),
+            config.security_scan.interval_sec,
+            config.security_scan.jitter_sec,
+            config.security_scan.timeout_sec,
+            config.security_scan.max_parallel_checks
+        ),
+    });
+
+    let report_dir = config.state_dir.join("security");
+    if config.security_scan.persist_last_report {
+        checks.push(check_directory(
+            "security-cache",
+            &report_dir,
+            "security report cache",
+            true,
+        ));
+    } else {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Pass,
+            name: "security-cache".to_string(),
+            detail: "persist_last_report is disabled".to_string(),
+        });
+    }
+
+    let rules_path = &config.security_scan.version_rules_path;
+    if !rules_path.exists() {
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Warn,
+            name: "security-rules".to_string(),
+            detail: format!(
+                "security rules file `{}` is missing; package checks will run without minimum secure versions",
+                rules_path.display()
+            ),
+        });
+        return checks;
+    }
+
+    match std::fs::read_to_string(rules_path) {
+        Ok(raw) => match serde_yaml::from_str::<SecurityRulesFile>(&raw) {
+            Ok(file) if file.schema_version == SECURITY_SCHEMA_VERSION => {
+                checks.push(DoctorCheck {
+                    status: DoctorStatus::Pass,
+                    name: "security-rules".to_string(),
+                    detail: format!(
+                        "security rules file `{}` loaded with {} package rule(s)",
+                        rules_path.display(),
+                        file.packages.len()
+                    ),
+                })
+            }
+            Ok(file) => checks.push(DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "security-rules".to_string(),
+                detail: format!(
+                    "security rules file `{}` uses unsupported schema version `{}`",
+                    rules_path.display(),
+                    file.schema_version
+                ),
+            }),
+            Err(error) => checks.push(DoctorCheck {
+                status: DoctorStatus::Fail,
+                name: "security-rules".to_string(),
+                detail: format!(
+                    "failed to parse security rules file `{}`: {error}",
+                    rules_path.display()
+                ),
+            }),
+        },
+        Err(error) => checks.push(DoctorCheck {
+            status: DoctorStatus::Fail,
+            name: "security-rules".to_string(),
+            detail: format!(
+                "failed to read security rules file `{}`: {error}",
+                rules_path.display()
+            ),
+        }),
+    }
+
+    checks
 }
 
 fn check_transport(config: &AgentConfig) -> DoctorCheck {

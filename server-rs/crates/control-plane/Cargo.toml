@@ -12,9 +12,12 @@ chrono.workspace = true
 common = { path = "../common" }
 dotenvy.workspace = true
 futures.workspace = true
+hex.workspace = true
 prost.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

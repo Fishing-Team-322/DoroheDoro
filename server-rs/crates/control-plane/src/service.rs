@@ -10,13 +10,17 @@ use uuid::Uuid;
 
 use crate::{
     models::{
-        paging_response, AnomalyInstanceModel, AnomalyRuleModel, AuditEventModel, ClusterDetailsModel, ClusterModel,
-        CredentialProfileModel, HostGroupMemberModel, HostGroupModel, HostModel,
-        IntegrationBindingModel, IntegrationModel, PermissionModel, PolicyModel,
-        PolicyRevisionModel, RoleBindingModel, RoleModel, TicketCommentModel, TicketDetailsModel,
-        TicketModel,
+        paging_response, AnomalyInstanceModel, AnomalyRuleModel, AuditEventModel,
+        ClusterDetailsModel, ClusterModel, CredentialProfileModel, HostGroupMemberModel,
+        HostGroupModel, HostModel, IntegrationBindingModel, IntegrationModel, PermissionModel,
+        PolicyModel, PolicyRevisionModel, RoleBindingModel, RoleModel, TicketCommentModel,
+        TicketDetailsModel, TicketModel,
     },
     repository::{ControlRepository, PermissionDefinition},
+    telegram::{
+        normalize_binding_event_types, normalize_binding_scope, normalize_delivery_severity,
+        normalize_telegram_config, sanitize_integration_model, TELEGRAM_INTEGRATION_KIND,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -984,7 +988,14 @@ impl ControlService {
         list: &ListInput,
     ) -> AppResult<(Vec<IntegrationModel>, PagingResponse)> {
         let query = list.query.as_deref().map(str::to_ascii_lowercase);
-        let integrations = self.repo.list_integrations().await.map_err(map_db_error)?;
+        let integrations = self
+            .repo
+            .list_integrations()
+            .await
+            .map_err(map_db_error)?
+            .into_iter()
+            .map(sanitize_integration_model)
+            .collect::<Vec<_>>();
         let filtered = integrations
             .into_iter()
             .filter(|integration| match &query {
@@ -1008,9 +1019,8 @@ impl ControlService {
             .get_integration(integration_id)
             .await
             .map_err(map_db_error)?
-            .ok_or_else(|| {
-                AppError::not_found(format!("integration {integration_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::not_found(format!("integration {integration_id} not found")))
+            .map(sanitize_integration_model)?;
         let bindings = self
             .repo
             .list_integration_bindings(integration_id)
@@ -1026,17 +1036,20 @@ impl ControlService {
     ) -> AppResult<IntegrationModel> {
         validate_integration_kind(&input.kind)?;
         validate_json_object(&input.config, "config_json")?;
-        self.repo
+        let normalized_config = normalize_telegram_config(&input.kind, &input.name, &input.config)?;
+        let integration = self
+            .repo
             .create_integration(
                 &input.name,
                 &input.kind,
                 &input.description,
-                &input.config,
+                &normalized_config,
                 input.is_active,
                 audit,
             )
             .await
-            .map_err(map_db_error)
+            .map_err(map_db_error)?;
+        Ok(sanitize_integration_model(integration))
     }
 
     pub async fn update_integration(
@@ -1045,12 +1058,23 @@ impl ControlService {
         audit: &AuditInfo,
     ) -> AppResult<IntegrationModel> {
         validate_json_object(&input.config, "config_json")?;
-        self.repo
+        let existing = self
+            .repo
+            .get_integration(input.integration_id)
+            .await
+            .map_err(map_db_error)?
+            .ok_or_else(|| {
+                AppError::not_found(format!("integration {} not found", input.integration_id))
+            })?;
+        let normalized_config =
+            normalize_telegram_config(&existing.kind, &input.name, &input.config)?;
+        let integration = self
+            .repo
             .update_integration(
                 input.integration_id,
                 &input.name,
                 &input.description,
-                &input.config,
+                &normalized_config,
                 input.is_active,
                 audit,
             )
@@ -1058,7 +1082,8 @@ impl ControlService {
             .map_err(map_db_error)?
             .ok_or_else(|| {
                 AppError::not_found(format!("integration {} not found", input.integration_id))
-            })
+            })?;
+        Ok(sanitize_integration_model(integration))
     }
 
     pub async fn bind_integration(
@@ -1066,16 +1091,29 @@ impl ControlService {
         input: IntegrationBindingInput,
         audit: &AuditInfo,
     ) -> AppResult<IntegrationBindingModel> {
-        validate_scope(&input.scope_type, input.scope_id)?;
-        validate_severity(&input.severity_threshold)?;
-        validate_event_types(&input.event_types)?;
+        let integration = self
+            .repo
+            .get_integration(input.integration_id)
+            .await
+            .map_err(map_db_error)?
+            .ok_or_else(|| {
+                AppError::not_found(format!("integration {} not found", input.integration_id))
+            })?;
+        let scope_type = normalize_binding_scope(&input.scope_type, input.scope_id)?;
+        let severity_threshold = normalize_delivery_severity(&input.severity_threshold)?;
+        let event_types = if integration.kind == TELEGRAM_INTEGRATION_KIND {
+            normalize_binding_event_types(&integration.kind, &input.event_types)?
+        } else {
+            validate_event_types(&input.event_types)?;
+            input.event_types.clone()
+        };
         self.repo
             .create_integration_binding(
                 input.integration_id,
-                &input.scope_type,
+                &scope_type,
                 input.scope_id,
-                &input.event_types,
-                &input.severity_threshold,
+                &event_types,
+                &severity_threshold,
                 input.is_active,
                 audit,
             )

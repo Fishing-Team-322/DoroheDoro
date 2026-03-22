@@ -1,0 +1,101 @@
+#!/bin/sh
+set -eu
+
+COMMAND="${1:-}"
+ENGINE="{{ doro_agent_container_engine_resolved }}"
+CONTAINER_NAME="{{ doro_agent_container_name }}"
+CONFIG_DIR="{{ doro_agent_config_dir }}"
+CONFIG_PATH="{{ doro_agent_config_path }}"
+ENV_FILE="{{ doro_agent_env_path }}"
+STATE_DIR="{{ doro_agent_state_dir }}"
+HOST_LOG_DIR="{{ doro_agent_host_log_mount }}"
+CONTAINER_LOG_DIR="{{ doro_agent_container_log_mount }}"
+PULL_POLICY="{{ doro_agent_pull_policy }}"
+DESIRED_IMAGE="{{ doro_agent_desired_image_reference }}"
+
+ensure_engine() {
+  command -v "${ENGINE}" >/dev/null 2>&1
+}
+
+pull_image() {
+  if [ "${PULL_POLICY}" = "always" ]; then
+    "${ENGINE}" pull "${DESIRED_IMAGE}"
+    return 0
+  fi
+  if ! "${ENGINE}" image inspect "${DESIRED_IMAGE}" >/dev/null 2>&1; then
+    "${ENGINE}" pull "${DESIRED_IMAGE}"
+  fi
+}
+
+cleanup_container() {
+  "${ENGINE}" rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  "${ENGINE}" rm -f "${CONTAINER_NAME}-doctor" >/dev/null 2>&1 || true
+}
+
+run_doctor() {
+  cleanup_container
+  "${ENGINE}" run --rm \
+    --name "${CONTAINER_NAME}-doctor" \
+    --env-file "${ENV_FILE}" \
+    --mount "type=bind,src=${CONFIG_DIR},dst=/etc/doro-agent,ro" \
+    --mount "type=bind,src=${STATE_DIR},dst=/var/lib/doro-agent" \
+    --mount "type=bind,src=${HOST_LOG_DIR},dst=${CONTAINER_LOG_DIR},ro" \
+    "${DESIRED_IMAGE}" doctor --config /etc/doro-agent/config.yaml
+}
+
+start_container() {
+  cleanup_container
+  exec "${ENGINE}" run --rm \
+    --name "${CONTAINER_NAME}" \
+    --env-file "${ENV_FILE}" \
+    --cap-drop=ALL \
+    --security-opt=no-new-privileges \
+    --read-only \
+    --tmpfs "/tmp:rw,noexec,nosuid,size={{ doro_agent_container_tmpfs_size }}" \
+    --mount "type=bind,src=${CONFIG_DIR},dst=/etc/doro-agent,ro" \
+    --mount "type=bind,src=${STATE_DIR},dst=/var/lib/doro-agent" \
+    --mount "type=bind,src=${HOST_LOG_DIR},dst=${CONTAINER_LOG_DIR},ro" \
+    "${DESIRED_IMAGE}" run --config /etc/doro-agent/config.yaml
+}
+
+stop_container() {
+  "${ENGINE}" stop --time 10 "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+}
+
+health_container() {
+  STATUS="$("${ENGINE}" inspect --format '{{ "{{" }}if .State.Running{{ "}}" }}running{{ "{{" }}else{{ "}}" }}stopped{{ "{{" }}end{{ "}}" }}' "${CONTAINER_NAME}" 2>/dev/null || true)"
+  if [ "${STATUS}" != "running" ]; then
+    echo "container is not running" >&2
+    return 1
+  fi
+  "${ENGINE}" exec "${CONTAINER_NAME}" /usr/bin/doro-agent doctor --config /etc/doro-agent/config.yaml
+}
+
+case "${COMMAND}" in
+  preflight)
+    ensure_engine || { echo "container engine ${ENGINE} is not available" >&2; exit 1; }
+    pull_image
+    run_doctor
+    ;;
+  start)
+    ensure_engine || { echo "container engine ${ENGINE} is not available" >&2; exit 1; }
+    pull_image
+    start_container
+    ;;
+  stop)
+    ensure_engine || exit 0
+    stop_container
+    ;;
+  cleanup)
+    ensure_engine || exit 0
+    cleanup_container
+    ;;
+  health)
+    ensure_engine || { echo "container engine ${ENGINE} is not available" >&2; exit 1; }
+    health_container
+    ;;
+  *)
+    echo "usage: $0 {preflight|start|stop|cleanup|health}" >&2
+    exit 1
+    ;;
+esac

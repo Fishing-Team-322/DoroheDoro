@@ -12,8 +12,8 @@ use common::{
         CONTROL_HOST_GROUPS_ADD_MEMBER, CONTROL_HOST_GROUPS_CREATE, CONTROL_HOST_GROUPS_LIST,
         CONTROL_HOST_GROUPS_REMOVE_MEMBER, CONTROL_HOST_GROUPS_UPDATE, CONTROL_INTEGRATIONS_BIND,
         CONTROL_INTEGRATIONS_CREATE, CONTROL_POLICIES_CREATE, CONTROL_POLICIES_LIST,
-        CONTROL_POLICIES_REVISIONS, CONTROL_POLICIES_UPDATE, CONTROL_ROLE_BINDINGS_CREATE,
-        CONTROL_ROLES_CREATE, CONTROL_ROLES_PERMISSIONS_SET, TICKETS_ASSIGN, TICKETS_CLOSE,
+        CONTROL_POLICIES_REVISIONS, CONTROL_POLICIES_UPDATE, CONTROL_ROLES_CREATE,
+        CONTROL_ROLES_PERMISSIONS_SET, CONTROL_ROLE_BINDINGS_CREATE, TICKETS_ASSIGN, TICKETS_CLOSE,
         TICKETS_COMMENT_ADD, TICKETS_CREATE, TICKETS_STATUS_CHANGE,
     },
     proto::{
@@ -47,9 +47,9 @@ use control_plane::{
 };
 use prost::Message;
 use reqwest::StatusCode;
+use serde_json::json;
 use serial_test::serial;
 use sqlx::{postgres::PgPoolOptions, PgPool};
-use serde_json::json;
 use tokio::{net::TcpListener, task::JoinHandle, time::sleep};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
@@ -595,12 +595,29 @@ async fn clusters_rbac_integrations_tickets_anomalies_flow() -> anyhow::Result<(
                 name: "ops-telegram".to_string(),
                 kind: "telegram_bot".to_string(),
                 description: "Telegram on-call".to_string(),
-                config_json: json!({ "token": "fake" }).to_string(),
+                config_json: json!({
+                    "bot_name": "ops-telegram",
+                    "parse_mode": "HTML",
+                    "secret_ref": "vault://kv/data/integrations/tg/ops",
+                    "default_chat_id": "-1001234567890",
+                    "message_template_version": "v1",
+                    "delivery_enabled": true
+                })
+                .to_string(),
                 is_active: true,
                 audit: test_audit(),
             },
         )
         .await?;
+    let integration_config: serde_json::Value = serde_json::from_str(&integration.config_json)?;
+    assert_eq!(
+        integration_config
+            .get("has_secret_ref")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert!(integration_config.get("secret_ref").is_none());
+    assert!(integration_config.get("masked_secret_ref").is_some());
 
     let integration_binding: IntegrationBinding = harness
         .request_payload(
@@ -610,7 +627,7 @@ async fn clusters_rbac_integrations_tickets_anomalies_flow() -> anyhow::Result<(
                 integration_id: integration.integration_id.clone(),
                 scope_type: "cluster".to_string(),
                 scope_id: cluster_id.clone(),
-                event_types_json: json!(["ticket.created"]).to_string(),
+                event_types_json: json!(["alerts.firing"]).to_string(),
                 severity_threshold: "high".to_string(),
                 is_active: true,
                 audit: test_audit(),
@@ -652,10 +669,7 @@ async fn clusters_rbac_integrations_tickets_anomalies_flow() -> anyhow::Result<(
         )
         .await?;
     assert_eq!(
-        assigned
-            .ticket
-            .as_ref()
-            .map(|t| t.assignee_user_id.clone()),
+        assigned.ticket.as_ref().map(|t| t.assignee_user_id.clone()),
         Some("ops@example.com".to_string())
     );
 
@@ -685,10 +699,7 @@ async fn clusters_rbac_integrations_tickets_anomalies_flow() -> anyhow::Result<(
         )
         .await?;
     assert_eq!(
-        in_progress
-            .ticket
-            .as_ref()
-            .map(|t| t.status.clone()),
+        in_progress.ticket.as_ref().map(|t| t.status.clone()),
         Some("in_progress".to_string())
     );
 
@@ -704,10 +715,7 @@ async fn clusters_rbac_integrations_tickets_anomalies_flow() -> anyhow::Result<(
         )
         .await?;
     assert_eq!(
-        closed
-            .ticket
-            .as_ref()
-            .map(|t| t.status.clone()),
+        closed.ticket.as_ref().map(|t| t.status.clone()),
         Some("closed".to_string())
     );
 
@@ -793,6 +801,11 @@ async fn run_migrations(pool: &PgPool) -> anyhow::Result<()> {
 async fn truncate_tables(pool: &PgPool) -> anyhow::Result<()> {
     sqlx::query(
         "TRUNCATE TABLE
+            telegram_delivery_attempts,
+            telegram_delivery_batches,
+            telegram_deliveries,
+            telegram_healthcheck_runs,
+            runtime_audit_events,
             control_audit_events,
             anomaly_instances,
             anomaly_rules,

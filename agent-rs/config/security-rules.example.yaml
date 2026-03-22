@@ -1,0 +1,18 @@
+schema_version: "v1"
+packages:
+  - name: "openssl"
+    min_secure_version: "3.0.0"
+    severity: "high"
+    summary: "OpenSSL below 3.0.0 should be reviewed for current CVE exposure."
+  - name: "openssh"
+    min_secure_version: "9.0p1"
+    severity: "medium"
+    aliases: ["openssh-server", "openssh-clients", "ssh", "sshd"]
+    summary: "OpenSSH below 9.0p1 should be reviewed against current hardening baseline."
+  - name: "nginx"
+    min_secure_version: "1.24.0"
+    severity: "medium"
+  - name: "docker"
+    min_secure_version: "24.0.0"
+    severity: "medium"
+    aliases: ["docker.io", "docker-ce"]

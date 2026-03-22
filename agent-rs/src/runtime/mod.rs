@@ -24,6 +24,7 @@ use crate::{
         BuildMetadata, ClusterMetadata, CompatibilitySnapshot, IdentityStatusSnapshot,
         InstallMetadata, PathMetadata, PlatformMetadata, RuntimeMetadataContext,
     },
+    security::SecurityPostureStatusSnapshot,
     state::{FileOffsetRecord, RuntimeStateRecord, SpoolStats},
 };
 
@@ -104,6 +105,7 @@ pub struct DiagnosticsSnapshot {
     pub compatibility: CompatibilitySnapshot,
     pub cluster: ClusterMetadata,
     pub identity_status: IdentityStatusSnapshot,
+    pub security_posture: SecurityPostureStatusSnapshot,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -259,6 +261,7 @@ struct RuntimeStatus {
     send_queue_bytes: usize,
     spool_stats: SpoolStats,
     sources: BTreeMap<String, SourceRuntimeState>,
+    security_posture: SecurityPostureStatusSnapshot,
 }
 
 #[derive(Debug, Clone)]
@@ -335,6 +338,7 @@ impl RuntimeStatusHandle {
                 send_queue_bytes: 0,
                 spool_stats: SpoolStats::default(),
                 sources: source_statuses,
+                security_posture: SecurityPostureStatusSnapshot::default(),
             })),
         }
     }
@@ -400,6 +404,18 @@ impl RuntimeStatusHandle {
                 inner.identity_status.status = status;
             }
             inner.identity_status.reason = runtime_state.identity_status_reason.clone();
+        }
+    }
+
+    pub fn restore_security_posture(&self, snapshot: SecurityPostureStatusSnapshot) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.security_posture = snapshot;
+        }
+    }
+
+    pub fn set_security_posture_snapshot(&self, snapshot: SecurityPostureStatusSnapshot) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.security_posture = snapshot;
         }
     }
 
@@ -876,6 +892,7 @@ impl RuntimeStatusHandle {
             compatibility,
             cluster: inner.cluster.clone(),
             identity_status: inner.identity_status.clone(),
+            security_posture: inner.security_posture.clone(),
         }
     }
 
@@ -1147,5 +1164,6 @@ mod tests {
             Some("https://edge.example.local")
         );
         assert_eq!(snapshot.cluster.cluster_name.as_deref(), Some("prod"));
+        assert_eq!(snapshot.security_posture.last_status, "never_run");
     }
 }

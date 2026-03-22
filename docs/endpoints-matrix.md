@@ -137,6 +137,18 @@ These are the minimum HTTP expectations the Edge API must expose or continue exp
 | request/reply | `query.logs.top_hosts` | Edge API | query path | MVP | Top hosts |
 | request/reply | `query.logs.top_services` | Edge API | query path | MVP | Top services |
 
+### Notification and audit subjects
+
+| Type | Subject | Caller / Publisher | Handler | Status | Notes |
+|---|---|---|---|---|---|
+| publish | `notifications.dispatch.requested.v1` | query/alert producers | control-plane telegram runtime | Next | Generic normalized notification envelope for outbound routing |
+| publish | `notifications.telegram.dispatch.requested.v1` | control-plane telegram runtime | observers / audit consumers | Next | Delivery queued for Telegram |
+| publish | `notifications.telegram.dispatch.succeeded.v1` | control-plane telegram runtime | observers / audit consumers | Next | Delivery succeeded |
+| publish | `notifications.telegram.dispatch.failed.v1` | control-plane telegram runtime | observers / audit consumers | Next | Delivery failed or dead-lettered |
+| publish | `notifications.telegram.healthcheck.requested.v1` | WEB-adjacent control trigger | control-plane telegram runtime | Next | Safe Telegram connection test |
+| publish | `notifications.telegram.healthcheck.result.v1` | control-plane telegram runtime | observers / audit consumers | Next | Healthcheck result with machine-readable status |
+| publish | `audit.events.append` | runtime components | control-plane audit handler | MVP | Shared append-only audit sink used by telegram worker too |
+
 ## Edge API bridge TODO
 
 The Go `edge_api` must bridge the new runtime subjects before the deployment flow is externally reachable:

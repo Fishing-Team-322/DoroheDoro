@@ -187,7 +187,13 @@ async fn run_enroll_handler(
         match service.enroll(request).await {
             Ok(response) => {
                 send_ok_reply(&client, &message.reply, &response, &correlation_id).await;
-                publish_agent_stream_snapshot(&client, service.clone(), &response.agent_id, "enrolled").await;
+                publish_agent_stream_snapshot(
+                    &client,
+                    service.clone(),
+                    &response.agent_id,
+                    "enrolled",
+                )
+                .await;
                 publish_audit_event(
                     &client,
                     AuditAppendEvent {
@@ -488,7 +494,10 @@ async fn publish_agent_stream_snapshot(
 
     match serde_json::to_vec(&payload) {
         Ok(bytes) => {
-            if let Err(error) = client.publish(UI_STREAM_AGENTS.to_string(), bytes.into()).await {
+            if let Err(error) = client
+                .publish(UI_STREAM_AGENTS.to_string(), bytes.into())
+                .await
+            {
                 warn!(agent_id, error = %error, "failed to publish agent stream event");
             }
         }
@@ -501,7 +510,9 @@ async fn publish_agent_stream_snapshot(
 async fn publish_audit_event(client: &Client, event: AuditAppendEvent) {
     match serde_json::to_vec(&event) {
         Ok(bytes) => {
-            if let Err(error) = client.publish(AUDIT_EVENTS_APPEND.to_string(), bytes.into()).await
+            if let Err(error) = client
+                .publish(AUDIT_EVENTS_APPEND.to_string(), bytes.into())
+                .await
             {
                 warn!(entity_type = %event.entity_type, entity_id = %event.entity_id, error = %error, "failed to publish audit append event");
             }

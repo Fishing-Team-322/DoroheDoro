@@ -16,7 +16,10 @@ use crate::{
 pub async fn run(config: IngestionPlaneConfig) -> anyhow::Result<()> {
     let nats = bootstrap::connect_nats(&config.nats_url).await?;
     let service = Arc::new(IngestionService::new(&config, nats.clone()));
-    service.initialize().await.context("initialize ingestion storage")?;
+    service
+        .initialize()
+        .await
+        .context("initialize ingestion storage")?;
 
     let shutdown = CancellationToken::new();
     let subscriber_tasks =

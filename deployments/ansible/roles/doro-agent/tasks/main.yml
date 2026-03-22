@@ -5,13 +5,24 @@
       {% if ansible_architecture in ['x86_64', 'amd64'] %}amd64{% elif ansible_architecture in ['aarch64', 'arm64'] %}arm64{% else %}{{ ansible_architecture }}{% endif %}
     doro_agent_target_distro_family: >-
       {% if 'astra' in (ansible_distribution | lower) %}astra-linux{% elif ansible_os_family == 'Debian' %}debian{% else %}generic-glibc{% endif %}
+    doro_agent_requested_install_mode: "{{ doro_agent_install_mode | lower }}"
+    doro_agent_has_direct_image_input: >-
+      {{
+        (doro_agent_install_mode | lower) in ['docker_image', 'container']
+        and (
+          (doro_agent_image_digest | trim) != ''
+          or ((doro_agent_image_repository | trim) != '' and (doro_agent_image_repository | trim) != 'docker.io/<org>/doro-agent')
+          or ((doro_agent_image_tag | trim) != '' and (doro_agent_image_tag | trim) != 'main')
+        )
+      }}
 
 - name: Ensure manifest source is configured
   ansible.builtin.fail:
-    msg: doro_agent_artifact_manifest_path or doro_agent_artifact_manifest_url must be provided when state=present
+    msg: doro_agent_artifact_manifest_path or doro_agent_artifact_manifest_url must be provided when state=present and no direct image input exists
   when:
     - doro_agent_state == 'present'
     - doro_agent_selected_artifact is not mapping
+    - not doro_agent_has_direct_image_input | bool
     - doro_agent_artifact_manifest_path | trim == ''
     - doro_agent_artifact_manifest_url | trim == ''
 
@@ -23,6 +34,7 @@
   when:
     - doro_agent_state == 'present'
     - doro_agent_selected_artifact is not mapping
+    - not doro_agent_has_direct_image_input | bool
     - doro_agent_artifact_manifest_url | trim != ''
 
 - name: Resolve manifest path
@@ -32,6 +44,7 @@
   when:
     - doro_agent_state == 'present'
     - doro_agent_selected_artifact is not mapping
+    - not doro_agent_has_direct_image_input | bool
 
 - name: Read release manifest
   ansible.builtin.slurp:
@@ -40,6 +53,7 @@
   when:
     - doro_agent_state == 'present'
     - doro_agent_selected_artifact is not mapping
+    - not doro_agent_has_direct_image_input | bool
 
 - name: Parse release manifest
   ansible.builtin.set_fact:
@@ -47,14 +61,16 @@
   when:
     - doro_agent_state == 'present'
     - doro_agent_selected_artifact is not mapping
+    - not doro_agent_has_direct_image_input | bool
 
 - name: Select preferred package type
   ansible.builtin.set_fact:
     doro_agent_preferred_package_type: >-
-      {% if doro_agent_install_mode == 'deb' %}deb{% elif doro_agent_install_mode == 'tar.gz' %}tar.gz{% elif doro_agent_target_distro_family in ['debian', 'astra-linux'] %}deb{% else %}tar.gz{% endif %}
+      {% if doro_agent_requested_install_mode in ['docker_image', 'container'] %}container{% elif doro_agent_requested_install_mode == 'deb' %}deb{% elif doro_agent_requested_install_mode == 'tar.gz' %}tar.gz{% elif doro_agent_target_distro_family in ['debian', 'astra-linux'] %}deb{% else %}container{% endif %}
   when:
     - doro_agent_state == 'present'
     - doro_agent_selected_artifact is not mapping
+    - not doro_agent_has_direct_image_input | bool
 
 - name: Gather artifacts for current arch
   ansible.builtin.set_fact:
@@ -68,6 +84,7 @@
   when:
     - doro_agent_state == 'present'
     - doro_agent_selected_artifact is not mapping
+    - not doro_agent_has_direct_image_input | bool
 
 - name: Select best matching artifact
   ansible.builtin.set_fact:
@@ -105,52 +122,46 @@
   when:
     - doro_agent_state == 'present'
     - doro_agent_selected_artifact is not mapping
+    - not doro_agent_has_direct_image_input | bool
 
 - name: Ensure selected artifact exists
   ansible.builtin.fail:
     msg: >-
       No matching doro-agent artifact found for arch={{ doro_agent_target_arch }}
       distro_family={{ doro_agent_target_distro_family }}
-      install_mode={{ doro_agent_install_mode }}
+      install_mode={{ doro_agent_requested_install_mode }}
   when:
     - doro_agent_state == 'present'
+    - not doro_agent_has_direct_image_input | bool
     - doro_agent_selected_artifact is not mapping
 
-- name: Resolve runtime binary path
+- name: Resolve effective install mode
   ansible.builtin.set_fact:
-    doro_agent_runtime_binary_path: >-
-      {{ doro_agent_package_binary_path if doro_agent_selected_artifact.package_type == 'deb' else doro_agent_tarball_binary_path }}
-  when: doro_agent_state == 'present'
+    doro_agent_effective_install_mode: >-
+      {% if doro_agent_state == 'absent' %}absent{% elif doro_agent_selected_artifact is mapping and ((doro_agent_selected_artifact.install_mode | default('')) == 'docker_image' or (doro_agent_selected_artifact.package_type | default('')) == 'container') %}docker_image{% elif doro_agent_requested_install_mode in ['docker_image', 'container'] %}docker_image{% else %}legacy_binary{% endif %}
 
-- name: Resolve artifact sources
+- name: Resolve image source from selected artifact or direct vars
   ansible.builtin.set_fact:
-    doro_agent_selected_artifact_url: >-
-      {% if doro_agent_selected_artifact.source_uri is defined and (doro_agent_selected_artifact.source_uri | trim) != '' %}
-      {% if doro_agent_selected_artifact.source_uri[:7] == 'http://' or doro_agent_selected_artifact.source_uri[:8] == 'https://' %}
-      {{ doro_agent_selected_artifact.source_uri }}
-      {% else %}
-      {{ '' }}
-      {% endif %}
-      {% elif doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' %}
-      {{ doro_agent_selected_artifact.artifact_path }}
-      {% elif doro_agent_release_base_url | trim != '' %}
-      {{ doro_agent_release_base_url }}/{{ doro_agent_selected_artifact.artifact_path | regex_replace('^\\./', '') | regex_replace('^/', '') }}
-      {% else %}
-      {{ '' }}
-      {% endif %}
-    doro_agent_selected_artifact_local_path: >-
-      {% if doro_agent_selected_artifact.source_uri is defined and (doro_agent_selected_artifact.source_uri | trim) != '' %}
-      {% if doro_agent_selected_artifact.source_uri[:7] == 'http://' or doro_agent_selected_artifact.source_uri[:8] == 'https://' %}
-      {{ '' }}
-      {% else %}
-      {{ doro_agent_selected_artifact.source_uri }}
-      {% endif %}
-      {% elif doro_agent_selected_artifact.artifact_path[:7] == 'http://' or doro_agent_selected_artifact.artifact_path[:8] == 'https://' or doro_agent_release_base_url | trim != '' %}
-      {{ '' }}
-      {% else %}
-      {{ doro_agent_selected_artifact.artifact_path }}
-      {% endif %}
-  when: doro_agent_state == 'present'
+    doro_agent_selected_image_reference: >-
+      {% if doro_agent_selected_artifact is mapping %}{{ doro_agent_selected_artifact.image_reference | default(doro_agent_selected_artifact.source_uri | default(doro_agent_selected_artifact.artifact_path | default(''))) }}{% else %}{{ doro_agent_image_repository }}:{{ doro_agent_image_tag }}{% endif %}
+    doro_agent_selected_image_repository: >-
+      {% if doro_agent_selected_artifact is mapping %}{{ doro_agent_selected_artifact.image_repository | default((doro_agent_selected_artifact.source_uri | default(doro_agent_selected_artifact.artifact_path | default(''))) | regex_replace(':[^/:@]+$', '')) }}{% else %}{{ doro_agent_image_repository }}{% endif %}
+    doro_agent_selected_image_tag: >-
+      {% if doro_agent_selected_artifact is mapping %}{{ doro_agent_selected_artifact.image_tag | default(doro_agent_image_tag) }}{% else %}{{ doro_agent_image_tag }}{% endif %}
+    doro_agent_selected_image_digest: >-
+      {% if doro_agent_selected_artifact is mapping %}{{ doro_agent_selected_artifact.image_digest | default((('sha256:' ~ doro_agent_selected_artifact.sha256) if (doro_agent_selected_artifact.sha256 | default('') | trim) != '' else '')) }}{% else %}{{ ('sha256:' ~ doro_agent_image_digest) if ((doro_agent_image_digest | trim) != '' and not (doro_agent_image_digest | trim).startswith('sha256:')) else (doro_agent_image_digest | trim) }}{% endif %}
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_effective_install_mode == 'docker_image'
+
+- name: Resolve normalized image facts
+  ansible.builtin.set_fact:
+    doro_agent_resolved_image_repository: "{{ doro_agent_selected_image_repository }}"
+    doro_agent_resolved_image_tag: "{{ doro_agent_selected_image_tag }}"
+    doro_agent_resolved_image_digest: "{{ doro_agent_selected_image_digest }}"
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_effective_install_mode == 'docker_image'
 
 - name: Ensure service group exists
   ansible.builtin.group:
@@ -169,17 +180,18 @@
 
 - name: Ensure runtime directories exist
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: "{{ item.path }}"
     state: directory
-    owner: "{{ doro_agent_user }}"
-    group: "{{ doro_agent_group }}"
-    mode: "0750"
+    owner: "{{ item.owner | default(doro_agent_user) }}"
+    group: "{{ item.group | default(doro_agent_group) }}"
+    mode: "{{ item.mode }}"
   loop:
-    - "{{ doro_agent_config_dir }}"
-    - "{{ doro_agent_pki_dir }}"
-    - "{{ doro_agent_state_dir }}"
-    - "{{ doro_agent_log_dir }}"
-    - "{{ doro_agent_docs_dir }}"
+    - { path: "{{ doro_agent_config_dir }}", mode: "0750" }
+    - { path: "{{ doro_agent_pki_dir }}", mode: "0750" }
+    - { path: "{{ doro_agent_state_dir }}", mode: "0750" }
+    - { path: "{{ doro_agent_log_dir }}", mode: "0750" }
+    - { path: "{{ doro_agent_docs_dir }}", mode: "0750" }
+    - { path: "{{ doro_agent_container_runner_dir }}", owner: "root", group: "root", mode: "0755" }
   when: doro_agent_state == 'present'
 
 - name: Install TLS CA bundle
@@ -229,81 +241,6 @@
     - doro_agent_state == 'present'
     - doro_agent_spool_enabled | bool
 
-- name: Create temp work directory
-  ansible.builtin.tempfile:
-    state: directory
-    suffix: doro-agent
-  register: doro_agent_tmp_dir
-  when: doro_agent_state == 'present'
-
-- name: Download artifact from release URL
-  ansible.builtin.get_url:
-    url: "{{ doro_agent_selected_artifact_url }}"
-    dest: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
-    mode: "0644"
-  when:
-    - doro_agent_state == 'present'
-    - doro_agent_selected_artifact_url | trim != ''
-
-- name: Copy artifact from local controller path
-  ansible.builtin.copy:
-    src: "{{ doro_agent_selected_artifact_local_path }}"
-    dest: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
-    mode: "0644"
-  when:
-    - doro_agent_state == 'present'
-    - doro_agent_selected_artifact_url | trim == ''
-
-- name: Install agent deb package
-  ansible.builtin.apt:
-    deb: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
-    state: present
-  when:
-    - doro_agent_state == 'present'
-    - doro_agent_selected_artifact.package_type == 'deb'
-
-- name: Create unpack directory for tarball install
-  ansible.builtin.file:
-    path: "{{ doro_agent_tmp_dir.path }}/bundle"
-    state: directory
-    mode: "0755"
-  when:
-    - doro_agent_state == 'present'
-    - doro_agent_selected_artifact.package_type == 'tar.gz'
-
-- name: Unpack tarball bundle
-  ansible.builtin.unarchive:
-    src: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
-    dest: "{{ doro_agent_tmp_dir.path }}/bundle"
-    remote_src: true
-  when:
-    - doro_agent_state == 'present'
-    - doro_agent_selected_artifact.package_type == 'tar.gz'
-
-- name: Install tarball binary
-  ansible.builtin.copy:
-    src: "{{ doro_agent_tmp_dir.path }}/bundle/{{ doro_agent_selected_artifact.bundle_root }}/bin/doro-agent"
-    dest: "{{ doro_agent_tarball_binary_path }}"
-    owner: root
-    group: root
-    mode: "0755"
-    remote_src: true
-  when:
-    - doro_agent_state == 'present'
-    - doro_agent_selected_artifact.package_type == 'tar.gz'
-
-- name: Install tarball docs
-  ansible.builtin.copy:
-    src: "{{ doro_agent_tmp_dir.path }}/bundle/{{ doro_agent_selected_artifact.bundle_root }}/docs/INSTALL.md"
-    dest: "{{ doro_agent_docs_dir }}/INSTALL.md"
-    owner: root
-    group: root
-    mode: "0644"
-    remote_src: true
-  when:
-    - doro_agent_state == 'present'
-    - doro_agent_selected_artifact.package_type == 'tar.gz'
-
 - name: Render agent config
   ansible.builtin.template:
     src: config.yaml.j2
@@ -324,49 +261,18 @@
   notify: Restart doro-agent
   when: doro_agent_state == 'present'
 
-- name: Render systemd unit
-  ansible.builtin.template:
-    src: doro-agent.service.j2
-    dest: "{{ doro_agent_systemd_unit_path }}"
-    owner: root
-    group: root
-    mode: "0644"
-  notify:
-    - Reload systemd
-    - Restart doro-agent
-  when: doro_agent_state == 'present'
-
-- name: Ensure agent service is enabled and started
-  ansible.builtin.systemd_service:
-    name: "{{ doro_agent_service_name }}"
-    enabled: true
-    state: started
-  when: doro_agent_state == 'present'
-
-- name: Stop agent service
-  ansible.builtin.systemd_service:
-    name: "{{ doro_agent_service_name }}"
-    enabled: false
-    state: stopped
-  failed_when: false
-  when: doro_agent_state == 'absent'
-
-- name: Remove packaged agent
-  ansible.builtin.apt:
-    name: doro-agent
-    state: absent
-    purge: false
-  failed_when: false
+- name: Include docker image install tasks
+  ansible.builtin.include_tasks: docker-image.yml
   when:
-    - doro_agent_state == 'absent'
-    - ansible_os_family == 'Debian'
+    - doro_agent_state == 'present'
+    - doro_agent_effective_install_mode == 'docker_image'
 
-- name: Remove agent service unit and binaries
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - "{{ doro_agent_systemd_unit_path }}"
-    - "{{ doro_agent_tarball_binary_path }}"
-    - "{{ doro_agent_package_binary_path }}"
+- name: Include legacy binary install tasks
+  ansible.builtin.include_tasks: legacy-binary.yml
+  when:
+    - doro_agent_state == 'present'
+    - doro_agent_effective_install_mode == 'legacy_binary'
+
+- name: Include absent tasks
+  ansible.builtin.include_tasks: absent.yml
   when: doro_agent_state == 'absent'
