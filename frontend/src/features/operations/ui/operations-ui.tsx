@@ -43,11 +43,11 @@ export function SectionCard({
     <Card className={cn("space-y-5 p-5 sm:p-6", className)}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold text-[color:var(--foreground)]">
+          <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
             {title}
           </h2>
           {description ? (
-            <p className="max-w-3xl text-sm leading-6 text-[color:var(--muted-foreground)]">
+            <p className="max-w-3xl text-lg leading-6 text-[color:var(--muted-foreground)]">
               {description}
             </p>
           ) : null}

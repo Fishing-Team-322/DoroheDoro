@@ -16,7 +16,11 @@ import {
 import { PageHeader } from "@/src/widgets/dashboard-layout";
 import { ErrorCard, LoadingCard } from "@/src/page-modules/common/ui/runtime-state";
 
-export function CredentialsPage() {
+export function CredentialsPage({
+  embedded = false,
+}: {
+  embedded?: boolean;
+} = {}) {
   const { dictionary } = useI18n();
   const [items, setItems] = useState<CredentialItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,15 +57,17 @@ export function CredentialsPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Credentials"
-        description="Live credentials metadata. Secret material itself stays in Vault."
-        breadcrumbs={[
-          { label: dictionary.common.dashboard, href: "#" },
-          { label: "Credentials" },
-        ]}
-      />
+    <div className={embedded ? "space-y-4" : "space-y-6"}>
+      {!embedded ? (
+        <PageHeader
+          title="Credentials"
+          description="Live credentials metadata. Secret material itself stays in Vault."
+          breadcrumbs={[
+            { label: dictionary.common.dashboard, href: "#" },
+            { label: "Credentials" },
+          ]}
+        />
+      ) : null}
 
       {loading ? <LoadingCard label="Loading credentials..." /> : null}
       {!loading && error ? <ErrorCard message={error} /> : null}

@@ -1,18 +1,77 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { useI18n } from "@/src/shared/lib/i18n";
-import { formatRelativeLabel } from "@/src/shared/lib/dashboard";
-import { getDashboardOverview, type DashboardOverviewResponse } from "@/src/shared/lib/runtime-api";
-import { Card, EmptyState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/src/shared/ui";
+import type { Locale } from "@/src/shared/config";
+import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
+import {
+  getDashboardOverview,
+  listAgents,
+  listAlerts,
+  listDeployments,
+  listLogAnomalies,
+  type AgentItem,
+  type AlertInstanceItem,
+  type DashboardOverviewResponse,
+  type DeploymentJobItem,
+  type LogAnomalyItem,
+} from "@/src/shared/lib/runtime-api";
+import { Badge, Button, Card, EmptyState } from "@/src/shared/ui";
 import { PageHeader } from "@/src/widgets/dashboard-layout";
-import { ErrorCard, LoadingCard } from "@/src/page-modules/common/ui/runtime-state";
+import {
+  ErrorCard,
+  LoadingCard,
+} from "@/src/page-modules/common/ui/runtime-state";
+
+type OverviewState = {
+  dashboard: DashboardOverviewResponse;
+  alerts: AlertInstanceItem[];
+  anomalies: LogAnomalyItem[];
+  deployments: DeploymentJobItem[];
+  agents: AgentItem[];
+};
+
+function isOpenAlertStatus(value?: string) {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return !["resolved", "closed", "delivered"].includes(normalized);
+}
+
+function isHealthyAgentStatus(value?: string) {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  return ["online", "healthy", "ready"].includes(normalized);
+}
+
+function toBadgeVariant(value?: string) {
+  const normalized = value?.trim().toLowerCase() ?? "";
+
+  if (
+    ["critical", "fatal", "high", "error", "failed", "offline"].includes(
+      normalized
+    )
+  ) {
+    return "danger" as const;
+  }
+
+  if (["warning", "warn", "running", "degraded"].includes(normalized)) {
+    return "warning" as const;
+  }
+
+  if (
+    ["healthy", "online", "ready", "resolved", "success", "succeeded"].includes(
+      normalized
+    )
+  ) {
+    return "success" as const;
+  }
+
+  return "default" as const;
+}
 
 export function OverviewPage() {
   const { dictionary, locale } = useI18n();
-  const [data, setData] = useState<DashboardOverviewResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<OverviewState | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,10 +79,30 @@ export function OverviewPage() {
     async function load() {
       setLoading(true);
       setError(null);
+
       try {
-        const response = await getDashboardOverview();
+        const [
+          dashboardResponse,
+          alertsResponse,
+          anomaliesResponse,
+          deploymentsResponse,
+          agentsResponse,
+        ] = await Promise.all([
+          getDashboardOverview(),
+          listAlerts({ limit: 20, offset: 0 }),
+          listLogAnomalies({ limit: 10, offset: 0 }),
+          listDeployments(),
+          listAgents(),
+        ]);
+
         if (!cancelled) {
-          setData(response);
+          setData({
+            dashboard: dashboardResponse,
+            alerts: alertsResponse.items,
+            anomalies: anomaliesResponse.items,
+            deployments: deploymentsResponse.items,
+            agents: agentsResponse.items,
+          });
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -39,213 +118,341 @@ export function OverviewPage() {
     }
 
     void load();
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const histogramMax = Math.max(
-    ...(data?.log_histogram.map((item) => item.count) ?? [0]),
-    1
-  );
+  const openAlerts = data?.alerts.filter((item) => isOpenAlertStatus(item.status)) ?? [];
+  const criticalAlerts = openAlerts
+    .filter((item) =>
+      ["critical", "high", "error", "fatal"].includes(item.severity.toLowerCase())
+    )
+    .slice(0, 5);
+  const healthyAgents =
+    data?.agents.filter((item) => isHealthyAgentStatus(item.status)) ?? [];
+  const degradedAgents =
+    data?.agents.filter((item) => !isHealthyAgentStatus(item.status)) ?? [];
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Overview"
-        description="Live operational summary backed by dashboard, ingest, alert and audit runtime data."
-        breadcrumbs={[
-          { label: dictionary.common.dashboard, href: "#" },
-          { label: "Overview" },
-        ]}
-      />
+      <Card className="overflow-hidden">
+        <div className="space-y-6">
+          <div className="border-b border-[color:var(--border)] pb-6">
+            <h2 className="text-5xl font-semibold text-[color:var(--foreground)]">
+              overview workspace
+            </h2>
+          </div>
 
-      {loading ? <LoadingCard label="Loading overview..." /> : null}
-      {!loading && error ? <ErrorCard message={error} /> : null}
+          {loading ? <LoadingCard label="Loading overview..." /> : null}
+          {!loading && error ? <ErrorCard message={error} /> : null}
 
-      {!loading && !error && data ? (
-        <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {data.metrics.map((metric) => (
-              <Card key={metric.key}>
-                <p className="text-sm font-medium text-[color:var(--muted-foreground)]">
-                  {metric.label}
-                </p>
-                <div className="mt-2 text-3xl font-semibold tracking-tight text-[color:var(--foreground)]">
-                  {metric.value}
-                </div>
-                <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
-                  {metric.description || metric.key}
-                </p>
-              </Card>
-            ))}
-          </section>
+          {!loading && !error && data ? (
+            <>
+              <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                <OverviewMetricCard
+                  label="Open alerts"
+                  value={String(openAlerts.length)}
+                  hint="Security pressure right now"
+                />
+                <OverviewMetricCard
+                  label="Recent anomalies"
+                  value={String(data.anomalies.length)}
+                  hint="Latest correlated detections"
+                />
+                <OverviewMetricCard
+                  label="Deployments"
+                  value={String(data.deployments.length)}
+                  hint="Known rollout jobs"
+                />
+                <OverviewMetricCard
+                  label="Agent health"
+                  value={`${healthyAgents.length}/${data.agents.length}`}
+                  hint="Healthy coverage"
+                />
+                <OverviewMetricCard
+                  label="Ingested events"
+                  value={String(data.dashboard.ingested_events)}
+                  hint={`Active hosts: ${data.dashboard.active_hosts}`}
+                />
+              </section>
 
-          <section className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-            <Card>
-              <div className="space-y-3">
-                <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                  Log histogram
-                </h2>
-                {data.log_histogram.length === 0 ? (
-                  <EmptyState
-                    variant="flush"
-                    title="No log activity yet"
-                    description="Run the agent ingest path to populate analytics."
-                  />
-                ) : (
-                  <>
-                    <div className="flex h-44 items-end gap-2">
-                      {data.log_histogram.map((point) => (
+              <section className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+                <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
+                        Critical alerts
+                      </h2>
+                      <p className="text-base text-[color:var(--muted-foreground)]">
+                        Open high-severity signals that usually need the fastest
+                        response.
+                      </p>
+                    </div>
+
+                    <Link href={withLocalePath(locale, "/security?tab=alerts")}>
+                      <Button variant="outline" size="sm" className="h-10 px-4">
+                        Open Security
+                      </Button>
+                    </Link>
+                  </div>
+
+                  {criticalAlerts.length === 0 ? (
+                    <EmptyState
+                      variant="flush"
+                      title="No critical alerts"
+                      description="High-severity open alerts are not currently piling up."
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {criticalAlerts.map((alert) => (
                         <div
-                          key={point.bucket}
-                          className="flex min-w-0 flex-1 items-end"
+                          key={alert.alert_instance_id}
+                          className="rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
                         >
-                          <div
-                            className="w-full rounded-[2px] bg-gradient-to-t from-emerald-500 to-cyan-300"
-                            style={{
-                              height: `${Math.max(
-                                (point.count / histogramMax) * 100,
-                                10
-                              )}%`,
-                            }}
-                            title={`${point.bucket}: ${point.count}`}
-                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={toBadgeVariant(alert.severity)}>
+                              {alert.severity}
+                            </Badge>
+                            <Badge>{alert.status}</Badge>
+                          </div>
+                          <p className="mt-3 text-base font-semibold text-[color:var(--foreground)]">
+                            {alert.title}
+                          </p>
+                          <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
+                            {alert.host || "n/a"} / {alert.service || "n/a"} /{" "}
+                            {alert.triggered_at}
+                          </p>
                         </div>
                       ))}
                     </div>
+                  )}
+                </section>
 
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Bucket</TableHead>
-                          <TableHead>Count</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {data.log_histogram.slice(-6).map((item) => (
-                          <TableRow key={item.bucket}>
-                            <TableCell>{item.bucket}</TableCell>
-                            <TableCell>{item.count}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </>
-                )}
-              </div>
-            </Card>
+                <QuickLinksPanel locale={locale} />
+              </section>
 
-            <Card>
-              <div className="space-y-3">
-                <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                  Recent activity
-                </h2>
-                {data.recent_activity.length === 0 ? (
-                  <EmptyState
-                    variant="flush"
-                    title="No audit-backed activity yet"
-                    description="Recent control, deployment and alert events will appear here."
-                  />
-                ) : (
-                  <div className="space-y-3">
-                    {data.recent_activity.map((item, index) => (
-                      <div
-                        key={`${item.kind}-${item.timestamp}-${index}`}
-                        className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-3"
-                      >
-                        <p className="text-sm font-medium text-[color:var(--foreground)]">
-                          {item.title}
-                        </p>
-                        <p className="mt-1 text-sm text-[color:var(--muted-foreground)]">
-                          {item.description}
-                        </p>
-                        <p className="mt-2 text-xs uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-                          {formatRelativeLabel(item.timestamp, locale)}
-                        </p>
-                      </div>
-                    ))}
+              <section className="grid gap-4 xl:grid-cols-3">
+                <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
+                      Anomalies summary
+                    </h2>
+                    <p className="text-base text-[color:var(--muted-foreground)]">
+                      Recent anomaly instances and their current state.
+                    </p>
                   </div>
-                )}
-              </div>
-            </Card>
-          </section>
 
-          <section className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              <div className="space-y-3">
-                <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                  Top services
-                </h2>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Service</TableHead>
-                      <TableHead>Count</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.top_services.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={2}>
-                          <EmptyState
-                            variant="flush"
-                            title="No services yet"
-                            description="Services will appear after ingest begins."
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      data.top_services.map((item) => (
-                        <TableRow key={item.key}>
-                          <TableCell>{item.key}</TableCell>
-                          <TableCell>{item.count}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
+                  {data.anomalies.length === 0 ? (
+                    <EmptyState
+                      variant="flush"
+                      title="No anomalies"
+                      description="No recent anomaly instances were returned."
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {data.anomalies.slice(0, 5).map((item) => (
+                        <div
+                          key={item.alert_instance_id}
+                          className="rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={toBadgeVariant(item.severity)}>
+                              {item.severity}
+                            </Badge>
+                            <Badge>{item.status}</Badge>
+                          </div>
+                          <p className="mt-3 text-sm font-semibold text-[color:var(--foreground)]">
+                            {item.title}
+                          </p>
+                          <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
+                            {item.host} / {item.service}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
 
-            <Card>
-              <div className="space-y-3">
-                <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                  Top hosts
-                </h2>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Host</TableHead>
-                      <TableHead>Count</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.top_hosts.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={2}>
-                          <EmptyState
-                            variant="flush"
-                            title="No hosts yet"
-                            description="Hosts will appear after agents start sending logs."
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      data.top_hosts.map((item) => (
-                        <TableRow key={item.key}>
-                          <TableCell>{item.key}</TableCell>
-                          <TableCell>{item.count}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
-          </section>
-        </>
-      ) : null}
+                <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
+                      Deployments summary
+                    </h2>
+                    <p className="text-base text-[color:var(--muted-foreground)]">
+                      Latest rollout jobs and their current phases.
+                    </p>
+                  </div>
+
+                  {data.deployments.length === 0 ? (
+                    <EmptyState
+                      variant="flush"
+                      title="No deployments"
+                      description="No deployment jobs were returned."
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {data.deployments.slice(0, 5).map((job) => (
+                        <div
+                          key={job.job_id}
+                          className="rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={toBadgeVariant(job.status)}>
+                              {job.status}
+                            </Badge>
+                            <Badge>{job.current_phase || "phase:n/a"}</Badge>
+                          </div>
+                          <p className="mt-3 text-sm font-semibold text-[color:var(--foreground)]">
+                            {job.job_type}
+                          </p>
+                          <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
+                            Targets: {job.total_targets} / Executor:{" "}
+                            {job.executor_kind}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
+                      Agent health
+                    </h2>
+                    <p className="text-base text-[color:var(--muted-foreground)]">
+                      Degraded or stale agents that may reduce visibility.
+                    </p>
+                  </div>
+
+                  {degradedAgents.length === 0 ? (
+                    <EmptyState
+                      variant="flush"
+                      title="Agent fleet looks healthy"
+                      description="No degraded agents were detected in the latest registry snapshot."
+                    />
+                  ) : (
+                    <div className="space-y-3">
+                      {degradedAgents.slice(0, 5).map((agent) => (
+                        <div
+                          key={agent.agent_id}
+                          className="rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant={toBadgeVariant(agent.status)}>
+                              {agent.status}
+                            </Badge>
+                            <Badge>{agent.version || "unknown"}</Badge>
+                          </div>
+                          <p className="mt-3 text-sm font-semibold text-[color:var(--foreground)]">
+                            {agent.hostname}
+                          </p>
+                          <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
+                            Last seen {agent.last_seen_at}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </section>
+            </>
+          ) : null}
+        </div>
+      </Card>
     </div>
+  );
+}
+
+function OverviewMetricCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <section className="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+      <p className="text-sm text-[color:var(--muted-foreground)]">{label}</p>
+      <p className="text-3xl font-semibold text-[color:var(--foreground)]">
+        {value}
+      </p>
+      <p className="text-sm text-[color:var(--muted-foreground)]">{hint}</p>
+    </section>
+  );
+}
+
+function QuickLinksPanel({ locale }: { locale: Locale }) {
+  const links = [
+    {
+      title: "Infrastructure",
+      description: "Resources, agents, and access",
+      href: withLocalePath(locale, "/infrastructure"),
+    },
+    {
+      title: "Security",
+      description: "Alerts, findings, policies, anomalies",
+      href: withLocalePath(locale, "/security"),
+    },
+    {
+      title: "Operations",
+      description: "Deployments and log history",
+      href: withLocalePath(locale, "/operations"),
+    },
+    {
+      title: "Live Logs",
+      description: "Open the streaming log view",
+      href: withLocalePath(locale, "/logs/live"),
+    },
+    {
+      title: "Integrations",
+      description: "Telegram instances and bindings",
+      href: withLocalePath(locale, "/integrations"),
+    },
+    {
+      title: "Audit",
+      description: "Recent state-changing events",
+      href: withLocalePath(locale, "/audit"),
+    },
+  ];
+
+  return (
+    <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+      <div>
+        <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
+          Quick links
+        </h2>
+        <p className="text-base text-[color:var(--muted-foreground)]">
+          Shortcuts into the new larger sections.
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {links.map((item) => (
+          <div
+            key={item.title}
+            className="space-y-3 rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
+          >
+            <div className="space-y-1">
+              <p className="text-base font-semibold text-[color:var(--foreground)]">
+                {item.title}
+              </p>
+              <p className="text-sm leading-6 text-[color:var(--muted-foreground)]">
+                {item.description}
+              </p>
+            </div>
+            <Link href={item.href}>
+              <Button variant="outline" size="sm" className="h-10 px-4">
+                Open
+              </Button>
+            </Link>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

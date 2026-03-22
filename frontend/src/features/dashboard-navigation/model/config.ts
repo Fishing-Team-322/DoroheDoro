@@ -1,17 +1,9 @@
 export type DashboardNavItemKey =
   | "overview"
-  | "system"
-  | "inventory"
-  | "policies"
+  | "infrastructure"
   | "security"
-  | "credentials"
-  | "deployments"
-  | "anomalies"
+  | "operations"
   | "integrations"
-  | "agents"
-  | "logs"
-  | "live-logs"
-  | "alerts"
   | "audit"
   | "profile";
 
@@ -19,22 +11,46 @@ export type DashboardNavItem = {
   key: DashboardNavItemKey;
   href: string;
   fallbackLabel: string;
+  matchPaths?: string[];
 };
 
 export const dashboardNavigation: DashboardNavItem[] = [
-  { key: "overview", href: "/overview", fallbackLabel: "Overview" },
-  { key: "system", href: "/system", fallbackLabel: "System" },
-  { key: "inventory", href: "/inventory", fallbackLabel: "Inventory" },
-  { key: "policies", href: "/policies", fallbackLabel: "Policies" },
-  { key: "security", href: "/security", fallbackLabel: "Security" },
-  { key: "credentials", href: "/credentials", fallbackLabel: "Credentials" },
-  { key: "deployments", href: "/deployments", fallbackLabel: "Deployments" },
-  { key: "anomalies", href: "/anomalies", fallbackLabel: "Anomalies" },
-  { key: "integrations", href: "/integrations", fallbackLabel: "Integrations" },
-  { key: "agents", href: "/agents", fallbackLabel: "Agents" },
-  { key: "logs", href: "/logs", fallbackLabel: "Logs" },
-  { key: "live-logs", href: "/logs/live", fallbackLabel: "Live Logs" },
-  { key: "alerts", href: "/alerts", fallbackLabel: "Alerts" },
-  { key: "audit", href: "/audit", fallbackLabel: "Audit" },
-  { key: "profile", href: "/profile", fallbackLabel: "Profile" },
+  {
+    key: "overview",
+    href: "/overview",
+    fallbackLabel: "Overview",
+  },
+  {
+    key: "infrastructure",
+    href: "/infrastructure",
+    fallbackLabel: "Infrastructure",
+    matchPaths: ["/infrastructure", "/system", "/inventory", "/credentials", "/agents"],
+  },
+  {
+    key: "security",
+    href: "/security",
+    fallbackLabel: "Security",
+    matchPaths: ["/security", "/policies", "/alerts", "/anomalies"],
+  },
+  {
+    key: "operations",
+    href: "/operations",
+    fallbackLabel: "Operations",
+    matchPaths: ["/operations", "/deployments", "/logs"],
+  },
+  {
+    key: "integrations",
+    href: "/integrations",
+    fallbackLabel: "Integrations",
+  },
+  {
+    key: "audit",
+    href: "/audit",
+    fallbackLabel: "Audit",
+  },
+  {
+    key: "profile",
+    href: "/profile",
+    fallbackLabel: "Profile",
+  },
 ] as const;

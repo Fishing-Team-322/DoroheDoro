@@ -250,7 +250,7 @@ function buildSecurityFindings(input: {
         "Inspect affected agents, confirm last-seen timestamps, and restore telemetry before broad rollouts.",
       relatedRoute: {
         label: "Open agents",
-        href: "/agents",
+        href: "/infrastructure?tab=agents",
       },
     });
   }
@@ -272,7 +272,7 @@ function buildSecurityFindings(input: {
         "Review correlated anomalies and delivery routing, then acknowledge or resolve stale alerts.",
       relatedRoute: {
         label: "Open alerts",
-        href: "/alerts",
+        href: "/security?tab=alerts",
       },
     });
   }
@@ -292,7 +292,7 @@ function buildSecurityFindings(input: {
         "Confirm whether inactive policies are intentional, and reactivate or archive the stale entries.",
       relatedRoute: {
         label: "Open policies",
-        href: "/policies",
+        href: "/security?tab=policies",
       },
     });
   }
@@ -316,7 +316,7 @@ function buildSecurityFindings(input: {
         "Inspect rollout phases, confirm image health, and avoid widening the blast radius until the failing jobs stabilize.",
       relatedRoute: {
         label: "Open deployments",
-        href: "/deployments",
+        href: "/operations?tab=deployments",
       },
     });
   }
@@ -461,7 +461,7 @@ export async function getAnomalyWorkbenchData(
       timestamp: item.triggeredAt,
       severity: item.severity,
       detail: `${item.host || "unknown host"} / ${item.service || "unknown service"} with ${item.matchingAlerts} correlated open alert(s).`,
-      href: `/alerts?alert=${item.alertId}`,
+      href: `/security?tab=alerts&alert=${item.alertId}`,
     })),
     ...openAlerts.slice(0, mode === "heavy" ? 10 : 6).map((item) => ({
       id: `alert-${item.alert_instance_id}`,
@@ -470,7 +470,7 @@ export async function getAnomalyWorkbenchData(
       timestamp: item.triggered_at,
       severity: item.severity,
       detail: `${item.host || "unknown host"} / ${item.service || "unknown service"} is still open.`,
-      href: `/alerts?alert=${item.alert_instance_id}`,
+      href: `/security?tab=alerts&alert=${item.alert_instance_id}`,
     })),
   ].sort((left, right) => {
     return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();

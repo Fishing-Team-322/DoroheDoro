@@ -1,5 +1,11 @@
-import { LogsPage as LogsPageView } from "@/src/page-modules/logs";
+import { redirect } from "next/navigation";
+import { getLocaleFromParams, withLocalePath } from "@/src/shared/lib/i18n";
 
-export default function LogsPage() {
-  return <LogsPageView />;
+export default async function LogsPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const locale = getLocaleFromParams(await params);
+  redirect(withLocalePath(locale, "/operations?tab=logs"));
 }

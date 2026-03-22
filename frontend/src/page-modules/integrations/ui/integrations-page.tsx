@@ -78,7 +78,9 @@ export function IntegrationsPage() {
   const { showToast } = useToast();
   const [instances, setInstances] = useState<TelegramInstance[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<TelegramInstanceDraft>(createEmptyTelegramInstanceDraft());
+  const [draft, setDraft] = useState<TelegramInstanceDraft>(
+    createEmptyTelegramInstanceDraft()
+  );
   const [formError, setFormError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -86,6 +88,7 @@ export function IntegrationsPage() {
   useEffect(() => {
     const loaded = loadTelegramInstances();
     setInstances(loaded);
+
     if (loaded[0]) {
       setSelectedId(loaded[0].id);
       setDraft(toDraft(loaded[0]));
@@ -97,7 +100,10 @@ export function IntegrationsPage() {
   }, [instances, selectedId]);
 
   const activeInstances = instances.filter((item) => item.enabled).length;
-  const totalBindings = instances.reduce((sum, item) => sum + item.bindings.length, 0);
+  const totalBindings = instances.reduce(
+    (sum, item) => sum + item.bindings.length,
+    0
+  );
 
   const selectInstance = (instance: TelegramInstance) => {
     setSelectedId(instance.id);
@@ -130,10 +136,12 @@ export function IntegrationsPage() {
         nextInstances[0];
 
       setInstances(nextInstances);
+
       if (saved) {
         setSelectedId(saved.id);
         setDraft(toDraft(saved));
       }
+
       setFormError(undefined);
       showToast({
         title: "Telegram instance saved",
@@ -154,6 +162,7 @@ export function IntegrationsPage() {
 
     const nextInstances = deleteTelegramInstance(draft.id);
     setInstances(nextInstances);
+
     const nextSelected = nextInstances[0] ?? null;
     if (nextSelected) {
       setSelectedId(nextSelected.id);
@@ -162,6 +171,7 @@ export function IntegrationsPage() {
       setSelectedId(null);
       setDraft(createEmptyTelegramInstanceDraft());
     }
+
     setFormError(undefined);
   };
 
@@ -175,6 +185,7 @@ export function IntegrationsPage() {
     setTesting(true);
     try {
       const result = await testTelegramInstanceConnection(draft);
+
       if (draft.id) {
         const nextInstances = updateTelegramTestResult(draft.id, result);
         setInstances(nextInstances);
@@ -200,155 +211,187 @@ export function IntegrationsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Integrations"
-        description="Telegram integration workbench with frontend-only persistence, binding editor, and test connection flow."
-        breadcrumbs={[
-          { label: dictionary.common.dashboard, href: "#" },
-          { label: "Integrations" },
-        ]}
-        action={
-          <Button variant="outline" size="sm" className="h-10 px-4" onClick={handleCreateNew}>
-            New instance
-          </Button>
-        }
-      />
-
-      <NoticeBanner
-        title="Frontend-only fallback for Telegram"
-        description="No backend Telegram integration contract was found in the current frontend runtime layer. This page stores data locally in the browser so demos and manual operator walkthroughs stay usable without leaving frontend scope."
-      />
-
-      <section className="grid gap-4 md:grid-cols-3">
-        <Card className="space-y-2 p-4">
-          <p className="text-sm text-[color:var(--muted-foreground)]">Instances</p>
-          <p className="text-3xl font-semibold text-[color:var(--foreground)]">
-            {instances.length}
-          </p>
-        </Card>
-        <Card className="space-y-2 p-4">
-          <p className="text-sm text-[color:var(--muted-foreground)]">Enabled instances</p>
-          <p className="text-3xl font-semibold text-[color:var(--foreground)]">
-            {activeInstances}
-          </p>
-        </Card>
-        <Card className="space-y-2 p-4">
-          <p className="text-sm text-[color:var(--muted-foreground)]">Cluster bindings</p>
-          <p className="text-3xl font-semibold text-[color:var(--foreground)]">
-            {totalBindings}
-          </p>
-        </Card>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-        <SectionCard
-          title="Telegram instances"
-          description="Pick an instance to edit it, or create a new one for a demo/manual routing setup."
-        >
-          {instances.length === 0 ? (
-            <EmptyState
-              variant="flush"
-              title="No integration instances"
-              description="Create the first Telegram instance to start mapping cluster routes."
-            />
-          ) : (
-            <div className="space-y-3">
-              {instances.map((item) => {
-                const active = item.id === selectedId;
-
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => selectInstance(item)}
-                    className={`w-full rounded-xl border p-4 text-left transition-colors ${
-                      active
-                        ? "border-[color:var(--status-info-border)] bg-[color:var(--status-info-bg)]/45"
-                        : "border-[color:var(--border)] bg-[color:var(--surface)] hover:bg-[color:var(--surface-subtle)]"
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant={toBadgeVariant(item.status)}>{item.status}</Badge>
-                      <Badge>{item.enabled ? "enabled" : "paused"}</Badge>
-                    </div>
-
-                    <p className="mt-3 text-base font-semibold text-[color:var(--foreground)]">
-                      {item.name}
-                    </p>
-                    <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
-                      {maskTelegramToken(item.botToken)} / {item.defaultChatId}
-                    </p>
-                    <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
-                      {item.bindings.length} binding(s), last test{" "}
-                      {item.lastTestAt ? formatDateTime(item.lastTestAt) : "not run"}
-                    </p>
-                  </button>
-                );
-              })}
+      <Card className="overflow-hidden">
+        <div className="space-y-6">
+          <div className="flex flex-col gap-4 border-b border-[color:var(--border)] pb-6 xl:flex-row xl:items-center xl:justify-between">
+            <div className="space-y-2">
+              <h2 className="text-5xl font-semibold text-[color:var(--foreground)]">
+                integrations workspace
+              </h2>
             </div>
-          )}
-        </SectionCard>
 
-        <SectionCard
-          title={draft.id ? "Edit instance" : "Create instance"}
-          description="Usable for both quick demos and manual operator data entry. Changes stay inside frontend local storage."
-        >
-          <TelegramInstanceForm
-            draft={draft}
-            onChange={setDraft}
-            onSubmit={handleSave}
-            onTestConnection={() => void handleTestConnection()}
-            onDelete={handleDelete}
-            formError={formError}
-            saveLabel={draft.id ? "Save changes" : "Create instance"}
-            testing={testing}
-            saving={saving}
-            deletable={Boolean(draft.id)}
-          />
-        </SectionCard>
-      </section>
-
-      <SectionCard
-        title="Selected instance detail"
-        description="Compact operator snapshot of the current instance status, routing coverage, and last test result."
-      >
-        {selectedInstance ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <Card className="space-y-2 p-4">
-              <p className="text-sm text-[color:var(--muted-foreground)]">Name</p>
-              <p className="text-base font-semibold text-[color:var(--foreground)]">
-                {selectedInstance.name}
-              </p>
-            </Card>
-            <Card className="space-y-2 p-4">
-              <p className="text-sm text-[color:var(--muted-foreground)]">Last test</p>
-              <p className="text-base font-semibold text-[color:var(--foreground)]">
-                {selectedInstance.lastTestAt
-                  ? formatDateTime(selectedInstance.lastTestAt)
-                  : "Not run"}
-              </p>
-            </Card>
-            <Card className="space-y-2 p-4">
-              <p className="text-sm text-[color:var(--muted-foreground)]">Bindings</p>
-              <p className="text-base font-semibold text-[color:var(--foreground)]">
-                {selectedInstance.bindings.length}
-              </p>
-            </Card>
-            <Card className="space-y-2 p-4">
-              <p className="text-sm text-[color:var(--muted-foreground)]">Test status</p>
-              <p className="text-base font-semibold text-[color:var(--foreground)]">
-                {selectedInstance.lastTestStatus ?? "unknown"}
-              </p>
-            </Card>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-10 px-4"
+                onClick={handleCreateNew}
+              >
+                New instance
+              </Button>
+            </div>
           </div>
-        ) : (
-          <EmptyState
-            variant="flush"
-            title="No instance selected"
-            description="Select an existing instance or create a new one."
+
+          <NoticeBanner
+            title="Frontend-only fallback for Telegram"
+            description="No backend Telegram integration contract was found in the current frontend runtime layer. This page stores data locally in the browser so demos and manual operator walkthroughs stay usable without leaving frontend scope."
           />
-        )}
-      </SectionCard>
+
+          <section className="grid gap-4 md:grid-cols-3">
+            <section className="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+              <p className="text-sm text-[color:var(--muted-foreground)]">
+                Instances
+              </p>
+              <p className="text-3xl font-semibold text-[color:var(--foreground)]">
+                {instances.length}
+              </p>
+            </section>
+
+            <section className="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+              <p className="text-sm text-[color:var(--muted-foreground)]">
+                Enabled instances
+              </p>
+              <p className="text-3xl font-semibold text-[color:var(--foreground)]">
+                {activeInstances}
+              </p>
+            </section>
+
+            <section className="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+              <p className="text-sm text-[color:var(--muted-foreground)]">
+                Cluster bindings
+              </p>
+              <p className="text-3xl font-semibold text-[color:var(--foreground)]">
+                {totalBindings}
+              </p>
+            </section>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <SectionCard
+              title="Telegram instances"
+              description="Pick an instance to edit it, or create a new one for a demo/manual routing setup."
+            >
+              {instances.length === 0 ? (
+                <EmptyState
+                  variant="flush"
+                  title="No integration instances"
+                  description="Create the first Telegram instance to start mapping cluster routes."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {instances.map((item) => {
+                    const active = item.id === selectedId;
+
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => selectInstance(item)}
+                        className={`w-full rounded-xl border p-4 text-left transition-colors ${
+                          active
+                            ? "border-[color:var(--status-info-border)] bg-[color:var(--status-info-bg)]/45"
+                            : "border-[color:var(--border)] bg-[color:var(--surface)] hover:bg-[color:var(--surface-subtle)]"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={toBadgeVariant(item.status)}>
+                            {item.status}
+                          </Badge>
+                          <Badge>{item.enabled ? "enabled" : "paused"}</Badge>
+                        </div>
+
+                        <p className="mt-3 text-base font-semibold text-[color:var(--foreground)]">
+                          {item.name}
+                        </p>
+                        <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
+                          {maskTelegramToken(item.botToken)} / {item.defaultChatId}
+                        </p>
+                        <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
+                          {item.bindings.length} binding(s), last test{" "}
+                          {item.lastTestAt
+                            ? formatDateTime(item.lastTestAt)
+                            : "not run"}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </SectionCard>
+
+            <SectionCard
+              title={draft.id ? "Edit instance" : "Create instance"}
+              description="Usable for both quick demos and manual operator data entry. Changes stay inside frontend local storage."
+            >
+              <TelegramInstanceForm
+                draft={draft}
+                onChange={setDraft}
+                onSubmit={handleSave}
+                onTestConnection={() => void handleTestConnection()}
+                onDelete={handleDelete}
+                formError={formError}
+                saveLabel={draft.id ? "Save changes" : "Create instance"}
+                testing={testing}
+                saving={saving}
+                deletable={Boolean(draft.id)}
+              />
+            </SectionCard>
+          </section>
+
+          <SectionCard
+            title="Selected instance detail"
+            description="Compact operator snapshot of the current instance status, routing coverage, and last test result."
+          >
+            {selectedInstance ? (
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <Card className="space-y-2 p-4">
+                  <p className="text-sm text-[color:var(--muted-foreground)]">
+                    Name
+                  </p>
+                  <p className="text-base font-semibold text-[color:var(--foreground)]">
+                    {selectedInstance.name}
+                  </p>
+                </Card>
+
+                <Card className="space-y-2 p-4">
+                  <p className="text-sm text-[color:var(--muted-foreground)]">
+                    Last test
+                  </p>
+                  <p className="text-base font-semibold text-[color:var(--foreground)]">
+                    {selectedInstance.lastTestAt
+                      ? formatDateTime(selectedInstance.lastTestAt)
+                      : "Not run"}
+                  </p>
+                </Card>
+
+                <Card className="space-y-2 p-4">
+                  <p className="text-sm text-[color:var(--muted-foreground)]">
+                    Bindings
+                  </p>
+                  <p className="text-base font-semibold text-[color:var(--foreground)]">
+                    {selectedInstance.bindings.length}
+                  </p>
+                </Card>
+
+                <Card className="space-y-2 p-4">
+                  <p className="text-sm text-[color:var(--muted-foreground)]">
+                    Test status
+                  </p>
+                  <p className="text-base font-semibold text-[color:var(--foreground)]">
+                    {selectedInstance.lastTestStatus ?? "unknown"}
+                  </p>
+                </Card>
+              </div>
+            ) : (
+              <EmptyState
+                variant="flush"
+                title="No instance selected"
+                description="Select an existing instance or create a new one."
+              />
+            )}
+          </SectionCard>
+        </div>
+      </Card>
     </div>
   );
 }
