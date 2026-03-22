@@ -7,7 +7,7 @@ use common::{
     proto::{
         alerts, decode_message, encode_message, ok_envelope, ok_json_envelope, query, runtime,
     },
-    AppError,
+    AppError, AppResult,
 };
 use futures::StreamExt;
 use serde::{de::DeserializeOwned, Serialize};
@@ -238,6 +238,23 @@ pub async fn spawn_handlers(
 
     tasks.push(tokio::spawn(run_normalized_log_consumer(
         client.subscribe(LOGS_INGEST_NORMALIZED.to_string()).await?,
+        service.clone(),
+        shutdown.clone(),
+    )));
+    tasks.push(tokio::spawn(run_agent_heartbeat_consumer(
+        client.subscribe(AGENTS_HEARTBEAT.to_string()).await?,
+        service.clone(),
+        shutdown.clone(),
+    )));
+    tasks.push(tokio::spawn(run_agent_diagnostics_consumer(
+        client.subscribe(AGENTS_DIAGNOSTICS.to_string()).await?,
+        service.clone(),
+        shutdown.clone(),
+    )));
+    tasks.push(tokio::spawn(run_security_posture_consumer(
+        client
+            .subscribe(SECURITY_POSTURE_REPORTS.to_string())
+            .await?,
         service.clone(),
         shutdown.clone(),
     )));

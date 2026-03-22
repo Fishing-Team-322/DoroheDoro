@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     fs::OpenOptions,
     io::Write,
@@ -68,6 +69,18 @@ struct RuntimeSecrets {
 }
 
 const WORKSPACE_METADATA_FILE: &str = ".doro-workspace.json";
+const STEP_MARKER_PREFIX: &str = "DORO_STEP|";
+const RUNTIME_STEP_ORDER: &[&str] = &[
+    "precheck_runtime",
+    "connect_host",
+    "pull_image",
+    "render_runner",
+    "render_unit",
+    "restart_service",
+    "run_health_check",
+    "persist_last_known_good",
+    "rollback_previous_image",
+];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -538,6 +551,62 @@ impl DeploymentExecutor for AnsibleRunnerExecutor {
                 current_phase = "ansible.failed".to_string();
                 DeploymentTargetStatus::Failed
             };
+            let runtime_steps =
+                normalize_runtime_steps(parse_step_markers(&stdout, &target.host.hostname));
+            let mut step_log = Vec::with_capacity(runtime_steps.len() + 3);
+            step_log.push(StepExecutionResult {
+                step_name: "ansible.workspace.prepared".to_string(),
+                status: DeploymentStepStatus::Succeeded,
+                message: "ansible private_data_dir prepared".to_string(),
+                payload_json: json!({
+                    "hostname": target.host.hostname,
+                    "inventory_path": prepared.inventory_path,
+                    "extravars_path": prepared.extravars_path,
+                    "bootstrap_path": prepared.bootstrap_path,
+                }),
+            });
+            step_log.push(StepExecutionResult {
+                step_name: "vault.secrets.resolved".to_string(),
+                status: DeploymentStepStatus::Succeeded,
+                message: "vault-backed ssh credentials and agent tls material resolved".to_string(),
+                payload_json: json!({
+                    "vault_ref": snapshot.credentials.vault_ref,
+                    "has_ssh_private_key": secrets.ssh_private_key.is_some(),
+                    "has_ssh_password": secrets.ssh_password.is_some(),
+                    "has_tls_ca": secrets.tls_ca_pem.is_some(),
+                    "has_tls_cert": secrets.tls_cert_pem.is_some(),
+                    "has_tls_key": secrets.tls_key_pem.is_some(),
+                }),
+            });
+            step_log.extend(runtime_steps);
+            step_log.push(StepExecutionResult {
+                step_name: if cancelled {
+                    "ansible.runner.cancelled".to_string()
+                } else {
+                    "ansible.runner.completed".to_string()
+                },
+                status: if status == DeploymentTargetStatus::Succeeded {
+                    DeploymentStepStatus::Succeeded
+                } else if status == DeploymentTargetStatus::Cancelled {
+                    DeploymentStepStatus::Skipped
+                } else {
+                    DeploymentStepStatus::Failed
+                },
+                message: format!(
+                    "ansible-runner finished for host `{}` with exit code {exit_code}",
+                    target.host.hostname
+                ),
+                payload_json: json!({
+                    "hostname": target.host.hostname,
+                    "artifact": target.artifact,
+                    "exit_code": exit_code,
+                    "stdout_ref": prepared.stdout_path,
+                    "stderr_ref": prepared.stderr_path,
+                    "stdout_excerpt": excerpt(&stdout),
+                    "stderr_excerpt": excerpt(&stderr),
+                }),
+            });
+
             targets.push(ExecutionTargetResult {
                 deployment_target_id: target.deployment_target_id,
                 status,
@@ -549,60 +618,7 @@ impl DeploymentExecutor for AnsibleRunnerExecutor {
                         target.host.hostname
                     ))
                 },
-                steps: vec![
-                    StepExecutionResult {
-                        step_name: "ansible.workspace.prepared".to_string(),
-                        status: DeploymentStepStatus::Succeeded,
-                        message: "ansible private_data_dir prepared".to_string(),
-                        payload_json: json!({
-                            "hostname": target.host.hostname,
-                            "inventory_path": prepared.inventory_path,
-                            "extravars_path": prepared.extravars_path,
-                            "bootstrap_path": prepared.bootstrap_path,
-                        }),
-                    },
-                    StepExecutionResult {
-                        step_name: "vault.secrets.resolved".to_string(),
-                        status: DeploymentStepStatus::Succeeded,
-                        message: "vault-backed ssh credentials and agent tls material resolved"
-                            .to_string(),
-                        payload_json: json!({
-                            "vault_ref": snapshot.credentials.vault_ref,
-                            "has_ssh_private_key": secrets.ssh_private_key.is_some(),
-                            "has_ssh_password": secrets.ssh_password.is_some(),
-                            "has_tls_ca": secrets.tls_ca_pem.is_some(),
-                            "has_tls_cert": secrets.tls_cert_pem.is_some(),
-                            "has_tls_key": secrets.tls_key_pem.is_some(),
-                        }),
-                    },
-                    StepExecutionResult {
-                        step_name: if cancelled {
-                            "ansible.runner.cancelled".to_string()
-                        } else {
-                            "ansible.runner.completed".to_string()
-                        },
-                        status: if status == DeploymentTargetStatus::Succeeded {
-                            DeploymentStepStatus::Succeeded
-                        } else if status == DeploymentTargetStatus::Cancelled {
-                            DeploymentStepStatus::Skipped
-                        } else {
-                            DeploymentStepStatus::Failed
-                        },
-                        message: format!(
-                            "ansible-runner finished for host `{}` with exit code {exit_code}",
-                            target.host.hostname
-                        ),
-                        payload_json: json!({
-                            "hostname": target.host.hostname,
-                            "artifact": target.artifact,
-                            "exit_code": exit_code,
-                            "stdout_ref": prepared.stdout_path,
-                            "stderr_ref": prepared.stderr_path,
-                            "stdout_excerpt": excerpt(&stdout),
-                            "stderr_excerpt": excerpt(&stderr),
-                        }),
-                    },
-                ],
+                steps: step_log,
             });
             if cancelled {
                 push_cancelled_targets(
@@ -789,6 +805,69 @@ fn push_cancelled_targets(
         });
     }
     Ok(())
+}
+
+fn parse_step_markers(output: &[u8], hostname: &str) -> Vec<StepExecutionResult> {
+    let mut steps = Vec::new();
+    let text = String::from_utf8_lossy(output);
+    for line in text.lines() {
+        if let Some(index) = line.find(STEP_MARKER_PREFIX) {
+            let mut marker = line[index + STEP_MARKER_PREFIX.len()..].trim();
+            marker = marker.trim_start_matches(|c| c == '"' || c == ' ');
+            marker = marker.trim_end_matches(|c| c == '"' || c == ',' || c == ' ');
+            let mut parts = marker.splitn(4, '|');
+            let event_host = parts.next().unwrap_or("").trim();
+            if event_host != hostname {
+                continue;
+            }
+            let step_name = parts.next().unwrap_or("").trim();
+            if step_name.is_empty() {
+                continue;
+            }
+            let status_raw = parts.next().unwrap_or("").trim();
+            let payload_raw = parts.next().unwrap_or("{}").trim().trim_matches('"');
+            let payload_json =
+                serde_json::from_str(payload_raw).unwrap_or_else(|_| json!({ "raw": payload_raw }));
+            let message = payload_json
+                .get("message")
+                .and_then(|value| value.as_str())
+                .unwrap_or("ansible runtime step reported");
+            steps.push(StepExecutionResult {
+                step_name: step_name.to_string(),
+                status: match status_raw {
+                    "succeeded" => DeploymentStepStatus::Succeeded,
+                    "failed" => DeploymentStepStatus::Failed,
+                    "skipped" => DeploymentStepStatus::Skipped,
+                    _ => DeploymentStepStatus::Failed,
+                },
+                message: message.to_string(),
+                payload_json,
+            });
+        }
+    }
+    steps
+}
+
+fn normalize_runtime_steps(steps: Vec<StepExecutionResult>) -> Vec<StepExecutionResult> {
+    let mut by_name: HashMap<String, StepExecutionResult> = HashMap::new();
+    for step in steps {
+        by_name.entry(step.step_name.clone()).or_insert(step);
+    }
+    let mut ordered = Vec::with_capacity(RUNTIME_STEP_ORDER.len());
+    for name in RUNTIME_STEP_ORDER {
+        if let Some(step) = by_name.remove(*name) {
+            ordered.push(step);
+        } else {
+            ordered.push(StepExecutionResult {
+                step_name: name.to_string(),
+                status: DeploymentStepStatus::Skipped,
+                message: "step not reported by ansible-runner".to_string(),
+                payload_json: json!({ "reason": "not_reported" }),
+            });
+        }
+    }
+    ordered.extend(by_name.into_values());
+    ordered
 }
 
 fn unresolved_artifact_result(

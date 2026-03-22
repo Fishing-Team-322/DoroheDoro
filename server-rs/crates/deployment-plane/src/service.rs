@@ -617,6 +617,76 @@ impl DeploymentService {
             .map_err(map_db_error)?;
         self.publish_step(job_id, attempt_id, &start_step).await;
         let execution_snapshot = build_execution_snapshot(&running)?;
+        if let Some(config) = self.artifact_config.as_ref() {
+            let manifest_step = self
+                .repo
+                .insert_step(
+                    job_id,
+                    attempt_id,
+                    None,
+                    "resolve_manifest",
+                    DeploymentStepStatus::Succeeded,
+                    "agent artifact manifest resolved",
+                    &serde_json::json!({
+                        "manifest_url": config.manifest_url,
+                        "release_base_url": config.release_base_url,
+                        "artifact_version": config.artifact_version,
+                        "preferred_package_type": config.preferred_package_type,
+                    }),
+                )
+                .await
+                .map_err(map_db_error)?;
+            self.publish_step(job_id, attempt_id, &manifest_step).await;
+        }
+        for target in &running.targets {
+            if let Some(artifact) = target.artifact_data() {
+                let select_step = self
+                    .repo
+                    .insert_step(
+                        job_id,
+                        attempt_id,
+                        Some(target.id),
+                        "select_artifact",
+                        DeploymentStepStatus::Succeeded,
+                        &format!(
+                            "selected artifact `{}` for host `{}`",
+                            artifact.install_mode, target.hostname_snapshot
+                        ),
+                        &serde_json::json!({
+                            "hostname": target.hostname_snapshot,
+                            "artifact_version": artifact.version,
+                            "package_type": artifact.package_type,
+                            "install_mode": artifact.install_mode,
+                            "source_uri": artifact.source_uri,
+                            "image_reference": artifact.image_reference,
+                            "image_digest": artifact.image_digest,
+                        }),
+                    )
+                    .await
+                    .map_err(map_db_error)?;
+                self.publish_step(job_id, attempt_id, &select_step).await;
+            }
+            let rendered_vars = target.rendered_vars_json.clone();
+            let render_step = self
+                .repo
+                .insert_step(
+                    job_id,
+                    attempt_id,
+                    Some(target.id),
+                    "render_inventory",
+                    DeploymentStepStatus::Succeeded,
+                    &format!("rendered ansible inventory vars for host `{}`", target.hostname_snapshot),
+                    &serde_json::json!({
+                        "hostname": target.hostname_snapshot,
+                        "state_dir": rendered_vars.get("doro_agent_state_dir").cloned().unwrap_or(serde_json::Value::Null),
+                        "install_mode": rendered_vars.get("doro_agent_install_mode").cloned().unwrap_or(serde_json::Value::Null),
+                        "edge_url": rendered_vars.get("doro_agent_edge_url").cloned().unwrap_or(serde_json::Value::Null),
+                    }),
+                )
+                .await
+                .map_err(map_db_error)?;
+            self.publish_step(job_id, attempt_id, &render_step).await;
+        }
         for target in &running.targets {
             self.repo
                 .mark_target_running(target.id)

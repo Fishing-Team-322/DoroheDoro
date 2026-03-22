@@ -74,7 +74,8 @@ impl DetectionConfig {
 }
 
 fn parse_mode(value: &str) -> Result<DetectionMode, ConfigError> {
-    DetectionMode::from_str(value).ok_or(ConfigError::InvalidEnum("DETECTION_MODE"))
+    DetectionMode::from_str(value)
+        .ok_or_else(|| ConfigError::InvalidNumber("DETECTION_MODE".to_string()))
 }
 
 fn parse_u32(
@@ -85,7 +86,7 @@ fn parse_u32(
     if let Some(value) = optional_trimmed(vars, key) {
         value
             .parse::<u32>()
-            .map_err(|_| ConfigError::InvalidNumber(key))
+            .map_err(|_| ConfigError::InvalidNumber(key.to_string()))
     } else {
         Ok(default)
     }
@@ -99,7 +100,7 @@ fn parse_u64(
     if let Some(value) = optional_trimmed(vars, key) {
         value
             .parse::<u64>()
-            .map_err(|_| ConfigError::InvalidNumber(key))
+            .map_err(|_| ConfigError::InvalidNumber(key.to_string()))
     } else {
         Ok(default)
     }
@@ -124,6 +125,7 @@ pub struct QueryAlertPlaneConfig {
     pub clickhouse: ClickHouseConfig,
     pub rare_fingerprint: RareFingerprintConfig,
     pub anomaly: AnomalyEngineConfig,
+    pub detection: DetectionConfig,
 }
 
 impl QueryAlertPlaneConfig {
@@ -154,6 +156,7 @@ impl QueryAlertPlaneConfig {
             },
             rare_fingerprint: RareFingerprintConfig::from_vars(&vars)?,
             anomaly: AnomalyEngineConfig::from_vars(&vars)?,
+            detection: DetectionConfig::from_vars(&vars)?,
         })
     }
 }
@@ -209,17 +212,6 @@ impl AnomalyEngineConfig {
     }
 }
 
-fn parse_bool(vars: &HashMap<String, String>, key: &str, default: bool) -> bool {
-    vars.get(key)
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(default)
-}
-
 fn parse_number<T>(vars: &HashMap<String, String>, key: &str, default: T) -> Result<T, ConfigError>
 where
     T: std::str::FromStr,
@@ -240,6 +232,7 @@ where
 mod tests {
     use super::{DetectionConfig, QueryAlertPlaneConfig};
     use crate::pipeline::DetectionMode;
+    use common::config::collect_vars;
 
     #[test]
     fn loads_query_alert_config() {
@@ -269,5 +262,39 @@ mod tests {
         assert_eq!(config.rare_fingerprint.severity, "low");
         assert_eq!(config.anomaly.evaluation_interval_secs, 45);
         assert_eq!(config.anomaly.rule_cache_ttl_secs, 20);
+        assert_eq!(config.detection.mode, DetectionMode::Medium);
+        assert!(config.detection.security_findings_enabled);
+    }
+
+    #[test]
+    fn loads_detection_config_overrides() {
+        let vars = collect_vars([
+            ("DETECTION_MODE", "heavy"),
+            ("DETECTION_LIGHT_WINDOW_MIN", "1"),
+            ("DETECTION_MEDIUM_WINDOW_MIN", "2"),
+            ("DETECTION_HEAVY_WINDOW_MIN", "3"),
+            ("DETECTION_MIN_SAMPLES", "4"),
+            ("DETECTION_COOLDOWN_SEC", "5"),
+            ("DETECTION_AUTO_RESOLVE_SEC", "6"),
+            ("DETECTION_MAX_GROUPS_PER_CYCLE", "7"),
+            ("DETECTION_SECURITY_FINDINGS_ENABLED", "false"),
+            ("DETECTION_AGENT_HEALTH_ENABLED", "false"),
+            ("DETECTION_LOG_PATTERN_ENABLED", "false"),
+            ("DETECTION_SAFE_MODE", "true"),
+        ]);
+        let config = DetectionConfig::from_vars(&vars).unwrap();
+
+        assert_eq!(config.mode, DetectionMode::Heavy);
+        assert_eq!(config.light_window_min, 1);
+        assert_eq!(config.medium_window_min, 2);
+        assert_eq!(config.heavy_window_min, 3);
+        assert_eq!(config.min_samples, 4);
+        assert_eq!(config.cooldown_sec, 5);
+        assert_eq!(config.auto_resolve_sec, 6);
+        assert_eq!(config.max_groups_per_cycle, 7);
+        assert!(!config.security_findings_enabled);
+        assert!(!config.agent_health_enabled);
+        assert!(!config.log_pattern_enabled);
+        assert!(config.safe_mode);
     }
 }

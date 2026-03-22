@@ -4,8 +4,8 @@ use sqlx::{postgres::PgRow, PgPool, Row};
 use uuid::Uuid;
 
 use crate::models::{
-    AlertInstanceRecord, AlertRuleRecord, AnomalyInstanceRecord, AnomalyRuleRecord,
-    AuditActivityRecord,
+    AlertInstanceRecord, AlertRuleRecord, AnomalyBaselineRecord, AnomalyInstanceRecord,
+    AnomalyRuleRecord, AuditActivityRecord,
 };
 
 #[derive(Clone)]
@@ -591,6 +591,117 @@ impl QueryAlertRepository {
         .bind(payload_json)
         .fetch_optional(&self.pool)
         .await
+    }
+
+    pub async fn get_anomaly_baseline(
+        &self,
+        host: &str,
+        service: &str,
+        signal_kind: &str,
+        window_minutes: i32,
+    ) -> Result<Option<AnomalyBaselineRecord>, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyBaselineRecord>(
+            "SELECT id, tenant_id, host, service, signal_kind, window_minutes, samples,
+                    mean, stddev, p95, payload_json, last_refreshed_at, created_at, updated_at
+             FROM anomaly_baselines
+             WHERE host = $1
+               AND service = $2
+               AND signal_kind = $3
+               AND window_minutes = $4
+             LIMIT 1",
+        )
+        .bind(host)
+        .bind(service)
+        .bind(signal_kind)
+        .bind(window_minutes)
+        .fetch_optional(&self.pool)
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upsert_anomaly_baseline(
+        &self,
+        host: &str,
+        service: &str,
+        signal_kind: &str,
+        window_minutes: i32,
+        samples: i32,
+        mean: f64,
+        stddev: f64,
+        p95: Option<f64>,
+        payload_json: &Value,
+    ) -> Result<AnomalyBaselineRecord, sqlx::Error> {
+        sqlx::query_as::<_, AnomalyBaselineRecord>(
+            "INSERT INTO anomaly_baselines (
+                id, tenant_id, host, service, signal_kind, window_minutes,
+                samples, mean, stddev, p95, payload_json, last_refreshed_at, created_at, updated_at
+            )
+            VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW(), NOW())
+            ON CONFLICT (host, service, signal_kind, window_minutes)
+            DO UPDATE
+            SET samples = EXCLUDED.samples,
+                mean = EXCLUDED.mean,
+                stddev = EXCLUDED.stddev,
+                p95 = EXCLUDED.p95,
+                payload_json = EXCLUDED.payload_json,
+                last_refreshed_at = NOW(),
+                updated_at = NOW()
+            RETURNING id, tenant_id, host, service, signal_kind, window_minutes, samples,
+                      mean, stddev, p95, payload_json, last_refreshed_at, created_at, updated_at",
+        )
+        .bind(Uuid::new_v4())
+        .bind(host)
+        .bind(service)
+        .bind(signal_kind)
+        .bind(window_minutes)
+        .bind(samples)
+        .bind(mean)
+        .bind(stddev)
+        .bind(p95)
+        .bind(payload_json)
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_anomaly_score(
+        &self,
+        rule_id: Option<Uuid>,
+        detector: &str,
+        signal_kind: &str,
+        host: &str,
+        service: &str,
+        correlation_key: &str,
+        detection_mode: &str,
+        signal_id: &str,
+        score: f64,
+        threshold: f64,
+        evidence_json: &Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO anomaly_scores (
+                id, rule_id, detector, signal_kind, host, service,
+                correlation_key, detection_mode, signal_id, score, threshold, evidence_json
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, $12
+            )",
+        )
+        .bind(Uuid::new_v4())
+        .bind(rule_id)
+        .bind(detector)
+        .bind(signal_kind)
+        .bind(host)
+        .bind(service)
+        .bind(correlation_key)
+        .bind(detection_mode)
+        .bind(signal_id)
+        .bind(score)
+        .bind(threshold)
+        .bind(evidence_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn count_open_alerts(&self) -> Result<u64, sqlx::Error> {
