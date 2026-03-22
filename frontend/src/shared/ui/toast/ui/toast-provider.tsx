@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "@/src/shared/lib/cn";
+import { getSiteCopy, useOptionalI18n } from "@/src/shared/lib/i18n";
 
 type ToastVariant = "default" | "success" | "danger";
 
@@ -78,6 +79,12 @@ function ToastItem({
   toast: ToastRecord;
   onClose: () => void;
 }) {
+  const i18n = useOptionalI18n();
+  const dismissLabel =
+    i18n != null
+      ? getSiteCopy(i18n.locale).toast.dismiss
+      : "Dismiss notification";
+
   useEffect(() => {
     const timeout = window.setTimeout(onClose, toast.durationMs ?? 4_000);
     return () => window.clearTimeout(timeout);
@@ -109,7 +116,7 @@ function ToastItem({
           type="button"
           onClick={onClose}
           className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-inherit/70 transition-colors hover:bg-white/10 hover:text-inherit"
-          aria-label="Dismiss notification"
+          aria-label={dismissLabel}
         >
           <svg
             viewBox="0 0 20 20"

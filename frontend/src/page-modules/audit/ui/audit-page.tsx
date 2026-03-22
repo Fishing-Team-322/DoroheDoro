@@ -19,8 +19,40 @@ import {
   LoadingCard,
 } from "@/src/page-modules/common/ui/runtime-state";
 
+const copyByLocale = {
+  en: {
+    loadError: "Failed to load audit",
+    title: "Audit workspace",
+    loading: "Loading audit...",
+    emptyTitle: "No audit events",
+    emptyDescription:
+      "Audit entries will appear after control, deployment, enrollment and alert mutations.",
+    columns: {
+      event: "Event",
+      entity: "Entity",
+      actor: "Actor",
+      created: "Created",
+    },
+  },
+  ru: {
+    loadError: "Не удалось загрузить аудит",
+    title: "аудит",
+    loading: "Загрузка аудита...",
+    emptyTitle: "Нет audit-событий",
+    emptyDescription:
+      "Записи аудита появятся после изменений control, deployment, enrollment и alert-сущностей.",
+    columns: {
+      event: "Событие",
+      entity: "Сущность",
+      actor: "Актор",
+      created: "Создано",
+    },
+  },
+} as const;
+
 export function AuditPage() {
-  const { dictionary } = useI18n();
+  const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const [items, setItems] = useState<AuditEventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +72,7 @@ export function AuditPage() {
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "Failed to load audit");
+          setError(loadError instanceof Error ? loadError.message : copy.loadError);
         }
       } finally {
         if (!cancelled) {
@@ -54,7 +86,7 @@ export function AuditPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [copy.loadError]);
 
   return (
     <div className="space-y-6">
@@ -62,11 +94,11 @@ export function AuditPage() {
         <div className="space-y-6">
           <div className="border-b border-[color:var(--border)] pb-6">
             <h2 className="text-5xl font-semibold text-[color:var(--foreground)]">
-              audit workspace
+              {copy.title}
             </h2>
           </div>
 
-          {loading ? <LoadingCard label="Loading audit..." /> : null}
+          {loading ? <LoadingCard label={copy.loading} /> : null}
           {!loading && error ? <ErrorCard message={error} /> : null}
 
           {!loading && !error ? (
@@ -74,17 +106,17 @@ export function AuditPage() {
               {items.length === 0 ? (
                 <EmptyState
                   variant="flush"
-                  title="No audit events"
-                  description="Audit entries will appear after control, deployment, enrollment and alert mutations."
+                  title={copy.emptyTitle}
+                  description={copy.emptyDescription}
                 />
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Event</TableHead>
-                      <TableHead>Entity</TableHead>
-                      <TableHead>Actor</TableHead>
-                      <TableHead>Created</TableHead>
+                      <TableHead>{copy.columns.event}</TableHead>
+                      <TableHead>{copy.columns.entity}</TableHead>
+                      <TableHead>{copy.columns.actor}</TableHead>
+                      <TableHead>{copy.columns.created}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

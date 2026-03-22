@@ -4,6 +4,11 @@ import type { ReactNode, TextareaHTMLAttributes } from "react";
 import type { ApiError, ApiResponseMeta } from "@/src/shared/lib/api";
 import { cn } from "@/src/shared/lib/cn";
 import {
+  getSiteCopy,
+  translateValueLabel,
+  useOptionalI18n,
+} from "@/src/shared/lib/i18n";
+import {
   Badge,
   Button,
   Card,
@@ -21,6 +26,10 @@ import {
   TableRow,
 } from "@/src/shared/ui";
 import { getDeploymentStatusCategory } from "../api";
+
+function resolveLocale(locale?: string) {
+  return locale === "ru" ? "ru" : "en";
+}
 
 export function PageStack({ children }: { children: ReactNode }) {
   return <div className="space-y-6">{children}</div>;
@@ -62,12 +71,18 @@ export function SectionCard({
 }
 
 export function LoadingState({
-  label = "Loading data...",
+  label,
   compact = false,
 }: {
   label?: string;
   compact?: boolean;
 }) {
+  const i18n = useOptionalI18n();
+  const fallback =
+    i18n != null
+      ? getSiteCopy(i18n.locale).runtimeState.loadingData
+      : "Loading data...";
+
   return (
     <div
       className={cn(
@@ -76,7 +91,7 @@ export function LoadingState({
       )}
     >
       <Spinner size="sm" />
-      <span>{label}</span>
+      <span>{label ?? fallback}</span>
     </div>
   );
 }
@@ -84,18 +99,22 @@ export function LoadingState({
 export function ErrorState({
   error,
   retry,
-  title = "Request failed",
+  title,
 }: {
   error?: ApiError;
   retry?: () => void;
   title?: string;
 }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
+  const copy = getSiteCopy(locale).operationsUi;
+
   return (
     <div className="rounded-xl border border-[color:var(--status-danger-border)] bg-[color:var(--status-danger-bg)]/70 p-4">
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-semibold text-[color:var(--status-danger-fg)]">
-            {title}
+            {title ?? getSiteCopy(locale).runtimeState.requestFailed}
           </p>
           {error?.code ? (
             <Badge variant="danger" className="uppercase">
@@ -105,20 +124,32 @@ export function ErrorState({
         </div>
 
         <p className="text-sm leading-6 text-[color:var(--status-danger-fg)]/90">
-          {error?.message ?? "The backend returned an unexpected error."}
+          {error?.message ?? copy.backendUnexpected}
         </p>
 
         {error?.requestId || error?.status || error?.natsSubject ? (
           <div className="flex flex-wrap gap-3 text-xs text-[color:var(--status-danger-fg)]/80">
-            {error.status != null ? <span>Status: {error.status}</span> : null}
-            {error.requestId ? <span>Request ID: {error.requestId}</span> : null}
-            {error.natsSubject ? <span>Subject: {error.natsSubject}</span> : null}
+            {error.status != null ? (
+              <span>
+                {copy.statusLabel}: {error.status}
+              </span>
+            ) : null}
+            {error.requestId ? (
+              <span>
+                {copy.requestIdLabel}: {error.requestId}
+              </span>
+            ) : null}
+            {error.natsSubject ? (
+              <span>
+                {copy.subjectLabel}: {error.natsSubject}
+              </span>
+            ) : null}
           </div>
         ) : null}
 
         {retry ? (
           <Button variant="outline" size="sm" className="h-9 px-3" onClick={retry}>
-            Retry
+            {copy.retry}
           </Button>
         ) : null}
       </div>
@@ -127,7 +158,7 @@ export function ErrorState({
 }
 
 export function UnavailableState({
-  title = "Unavailable",
+  title,
   description,
   action,
 }: {
@@ -135,8 +166,15 @@ export function UnavailableState({
   description: string;
   action?: ReactNode;
 }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
+
   return (
-    <EmptyState title={title} description={description} action={action} />
+    <EmptyState
+      title={title ?? getSiteCopy(locale).common.unavailable}
+      description={description}
+      action={action}
+    />
   );
 }
 
@@ -160,6 +198,8 @@ export function NoticeBanner({
 }
 
 export function StatusBadge({ value }: { value?: string }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
   const normalized = (value ?? "unknown").trim() || "unknown";
   const category = getDeploymentStatusCategory(normalized);
 
@@ -176,7 +216,7 @@ export function StatusBadge({ value }: { value?: string }) {
       }
       className="uppercase"
     >
-      {normalized}
+      {translateValueLabel(normalized, locale)}
     </Badge>
   );
 }
@@ -234,15 +274,18 @@ export function DetailGrid({
 
 export function LabelMap({
   labels,
-  emptyLabel = "No labels",
+  emptyLabel,
 }: {
   labels?: Record<string, string>;
   emptyLabel?: string;
 }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
+  const fallback = emptyLabel ?? getSiteCopy(locale).operationsUi.noLabels;
   const entries = Object.entries(labels ?? {});
 
   if (entries.length === 0) {
-    return <span className="text-[color:var(--muted-foreground)]">{emptyLabel}</span>;
+    return <span className="text-[color:var(--muted-foreground)]">{fallback}</span>;
   }
 
   return (
@@ -258,14 +301,18 @@ export function LabelMap({
 
 export function TokenList({
   items,
-  emptyLabel = "No items",
+  emptyLabel,
 }: {
   items: string[];
   emptyLabel?: string;
 }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
+  const fallback = emptyLabel ?? getSiteCopy(locale).operationsUi.noItems;
+
   if (items.length === 0) {
     return (
-      <span className="text-[color:var(--muted-foreground)]">{emptyLabel}</span>
+      <span className="text-[color:var(--muted-foreground)]">{fallback}</span>
     );
   }
 
@@ -282,14 +329,19 @@ export function TokenList({
 
 export function JsonPreview({
   value,
-  emptyLabel = "No JSON payload available.",
+  emptyLabel,
 }: {
   value: unknown;
   emptyLabel?: string;
 }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
+
   if (value == null) {
     return (
-      <p className="text-sm text-[color:var(--muted-foreground)]">{emptyLabel}</p>
+      <p className="text-sm text-[color:var(--muted-foreground)]">
+        {emptyLabel ?? getSiteCopy(locale).operationsUi.noJson}
+      </p>
     );
   }
 
@@ -301,6 +353,10 @@ export function JsonPreview({
 }
 
 export function RequestMetaLine({ meta }: { meta?: ApiResponseMeta }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
+  const copy = getSiteCopy(locale).operationsUi;
+
   if (!meta) {
     return null;
   }
@@ -308,8 +364,16 @@ export function RequestMetaLine({ meta }: { meta?: ApiResponseMeta }) {
   return (
     <div className="flex flex-wrap gap-3 text-xs text-[color:var(--muted-foreground)]">
       <span>HTTP {meta.status}</span>
-      {meta.requestId ? <span>Request ID: {meta.requestId}</span> : null}
-      {meta.natsSubject ? <span>Subject: {meta.natsSubject}</span> : null}
+      {meta.requestId ? (
+        <span>
+          {copy.requestIdLabel}: {meta.requestId}
+        </span>
+      ) : null}
+      {meta.natsSubject ? (
+        <span>
+          {copy.subjectLabel}: {meta.natsSubject}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -373,8 +437,8 @@ export function CursorPagination({
   hasNext,
   onPrevious,
   onNext,
-  previousLabel = "Previous",
-  nextLabel = "Next",
+  previousLabel,
+  nextLabel,
 }: {
   hasPrevious: boolean;
   hasNext: boolean;
@@ -383,6 +447,10 @@ export function CursorPagination({
   previousLabel?: string;
   nextLabel?: string;
 }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
+  const copy = getSiteCopy(locale).operationsUi;
+
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Button
@@ -392,7 +460,7 @@ export function CursorPagination({
         disabled={!hasPrevious}
         onClick={onPrevious}
       >
-        {previousLabel}
+        {previousLabel ?? copy.previous}
       </Button>
       <Button
         variant="outline"
@@ -401,7 +469,7 @@ export function CursorPagination({
         disabled={!hasNext}
         onClick={onNext}
       >
-        {nextLabel}
+        {nextLabel ?? copy.next}
       </Button>
     </div>
   );
@@ -462,15 +530,23 @@ export function FilterField({
 
 export function NamedCountList({
   items,
-  emptyLabel = "No data available.",
+  emptyLabel,
   onSelect,
 }: {
   items: Array<{ name: string; count: number }>;
   emptyLabel?: string;
   onSelect?: (value: string) => void;
 }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
+
   if (items.length === 0) {
-    return <EmptyState variant="flush" title={emptyLabel} />;
+    return (
+      <EmptyState
+        variant="flush"
+        title={emptyLabel ?? getSiteCopy(locale).operationsUi.noDataAvailable}
+      />
+    );
   }
 
   const max = Math.max(...items.map((item) => item.count), 1);
@@ -493,7 +569,7 @@ export function NamedCountList({
               {item.name}
             </span>
             <span className="text-sm text-[color:var(--muted-foreground)]">
-              {formatNumber(item.count)}
+              {formatNumber(item.count, locale)}
             </span>
           </div>
           <div className="mt-2 h-2 rounded-full bg-[color:var(--surface)]">
@@ -510,13 +586,21 @@ export function NamedCountList({
 
 export function HistogramBars({
   items,
-  emptyLabel = "No histogram data available.",
+  emptyLabel,
 }: {
   items: Array<{ ts: string; count: number }>;
   emptyLabel?: string;
 }) {
+  const i18n = useOptionalI18n();
+  const locale = resolveLocale(i18n?.locale);
+
   if (items.length === 0) {
-    return <EmptyState variant="flush" title={emptyLabel} />;
+    return (
+      <EmptyState
+        variant="flush"
+        title={emptyLabel ?? getSiteCopy(locale).operationsUi.noHistogramData}
+      />
+    );
   }
 
   const max = Math.max(...items.map((item) => item.count), 1);
@@ -531,7 +615,10 @@ export function HistogramBars({
               style={{
                 height: `${Math.max(8, (item.count / max) * 100)}%`,
               }}
-              title={`${item.count} at ${formatDateTime(item.ts)}`}
+              title={`${formatNumber(item.count, locale)} | ${formatDateTime(
+                item.ts,
+                locale
+              )}`}
             />
           </div>
         ))}
@@ -540,7 +627,7 @@ export function HistogramBars({
       <div className="grid grid-cols-2 gap-2 text-xs text-[color:var(--muted-foreground)] sm:grid-cols-4">
         {items.map((item) => (
           <div key={`${item.ts}-legend`} className="truncate">
-            {formatShortDateTime(item.ts)}: {formatNumber(item.count)}
+            {formatShortDateTime(item.ts, locale)}: {formatNumber(item.count, locale)}
           </div>
         ))}
       </div>
@@ -619,9 +706,10 @@ export function SelectField({
   );
 }
 
-export function formatDateTime(value?: string): string {
+export function formatDateTime(value?: string, locale?: string): string {
+  const resolvedLocale = resolveLocale(locale);
   if (!value) {
-    return "n/a";
+    return getSiteCopy(resolvedLocale).common.na;
   }
 
   const date = new Date(value);
@@ -629,15 +717,16 @@ export function formatDateTime(value?: string): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(resolvedLocale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
 }
 
-export function formatShortDateTime(value?: string): string {
+export function formatShortDateTime(value?: string, locale?: string): string {
+  const resolvedLocale = resolveLocale(locale);
   if (!value) {
-    return "n/a";
+    return getSiteCopy(resolvedLocale).common.na;
   }
 
   const date = new Date(value);
@@ -645,7 +734,7 @@ export function formatShortDateTime(value?: string): string {
     return value;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(resolvedLocale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -653,9 +742,10 @@ export function formatShortDateTime(value?: string): string {
   }).format(date);
 }
 
-export function formatRelativeTime(value?: string): string {
+export function formatRelativeTime(value?: string, locale?: string): string {
+  const resolvedLocale = resolveLocale(locale);
   if (!value) {
-    return "n/a";
+    return getSiteCopy(resolvedLocale).common.na;
   }
 
   const date = new Date(value);
@@ -665,7 +755,7 @@ export function formatRelativeTime(value?: string): string {
 
   const deltaSeconds = Math.round((date.getTime() - Date.now()) / 1000);
   const absSeconds = Math.abs(deltaSeconds);
-  const formatter = new Intl.RelativeTimeFormat(undefined, {
+  const formatter = new Intl.RelativeTimeFormat(resolvedLocale, {
     numeric: "auto",
   });
 
@@ -687,20 +777,23 @@ export function formatRelativeTime(value?: string): string {
   return formatter.format(deltaDays, "day");
 }
 
-export function formatNumber(value?: number): string {
+export function formatNumber(value?: number, locale?: string): string {
+  const resolvedLocale = resolveLocale(locale);
   if (value == null || Number.isNaN(value)) {
     return "0";
   }
 
-  return new Intl.NumberFormat().format(value);
+  return new Intl.NumberFormat(resolvedLocale).format(value);
 }
 
 export function formatParamsSummary(
-  value?: Record<string, unknown>
+  value?: Record<string, unknown>,
+  locale?: string
 ): string {
+  const resolvedLocale = resolveLocale(locale);
   const entries = Object.entries(value ?? {});
   if (entries.length === 0) {
-    return "No params";
+    return getSiteCopy(resolvedLocale).operationsUi.noParams;
   }
 
   return entries
@@ -709,9 +802,13 @@ export function formatParamsSummary(
     .join(", ");
 }
 
-export function formatMaybeValue(value?: string | number | null): string {
+export function formatMaybeValue(
+  value?: string | number | null,
+  locale?: string
+): string {
+  const resolvedLocale = resolveLocale(locale);
   if (value == null || value === "") {
-    return "n/a";
+    return getSiteCopy(resolvedLocale).common.na;
   }
 
   return String(value);

@@ -22,8 +22,118 @@ import {
   TextAreaField,
 } from "./operations-ui";
 
+const copyByLocale = {
+  en: {
+    selectPolicy: "Select a policy",
+    planPreviewLoaded: {
+      title: "Plan preview loaded",
+      description: "The backend returned a deployment plan preview.",
+    },
+    deploymentCreated: {
+      title: "Deployment created",
+      description: (id: string) => `Job ${id} was accepted by the backend.`,
+    },
+    createError: "Failed to create deployment.",
+    page: {
+      title: "Create Deployment",
+      description:
+        "Build a deployment request only from fields that are confirmed in the frontend's current public HTTP contract.",
+    },
+    notice: {
+      title: "Partial contract visibility",
+      description:
+        "This UI only collects confirmed HTTP fields: `policy_id`, optional `agent_ids`, and optional `params`. Target groups, credentials, job type, and other deployment-plane fields are not exposed here until the public HTTP schema is finalized.",
+    },
+    builder: {
+      title: "Request Builder",
+      description:
+        "Uses `GET /api/v1/policies`, `POST /api/v1/deployments/plan`, and `POST /api/v1/deployments`.",
+      preview: "Preview Plan",
+      create: "Create Deployment",
+      policy: "Policy",
+      lookupFailed: "Policies lookup failed",
+      agentIds: "Agent IDs (optional)",
+      agentIdsHelp:
+        "One agent id per line or comma-separated. These are sent only when provided.",
+      params: "Params JSON (optional)",
+      paramsHelp:
+        "Provide a flat JSON object. Values will be serialized to strings, matching the current documented HTTP shape.",
+      previewTitle: "Request Preview",
+      previewDescription:
+        "This is the exact payload assembled from known fields.",
+    },
+    response: {
+      title: "Plan Response",
+      description:
+        "The preview result is shown exactly as returned by the backend.",
+      loading: "Loading plan preview...",
+      empty: "Run a plan preview to inspect the backend response.",
+    },
+    validation: {
+      selectPolicy:
+        "Select a policy before previewing or creating a deployment.",
+      paramsObject: "Params must be a JSON object.",
+      paramsJson: "Params must be valid JSON.",
+    },
+  },
+  ru: {
+    selectPolicy: "Выберите политику",
+    planPreviewLoaded: {
+      title: "Превью плана загружено",
+      description: "Бэкенд вернул превью deployment-плана.",
+    },
+    deploymentCreated: {
+      title: "Раскатка создана",
+      description: (id: string) => `Задача ${id} принята бэкендом.`,
+    },
+    createError: "Не удалось создать deployment.",
+    page: {
+      title: "Создание раскатки",
+      description:
+        "Соберите deployment-запрос только из полей, которые подтверждены текущим публичным HTTP-контрактом фронтенда.",
+    },
+    notice: {
+      title: "Частичная видимость контракта",
+      description:
+        "Этот UI собирает только подтвержденные HTTP-поля: `policy_id`, опциональные `agent_ids` и опциональные `params`. Target groups, credentials, job type и другие deployment-поля не показываются, пока публичная HTTP-схема не финализирована.",
+    },
+    builder: {
+      title: "Конструктор запроса",
+      description:
+        "Использует `GET /api/v1/policies`, `POST /api/v1/deployments/plan` и `POST /api/v1/deployments`.",
+      preview: "Превью плана",
+      create: "Создать раскатку",
+      policy: "Политика",
+      lookupFailed: "Не удалось получить список политик",
+      agentIds: "Agent IDs (опционально)",
+      agentIdsHelp:
+        "Один agent id на строку или через запятую. Поле отправляется только если заполнено.",
+      params: "Params JSON (опционально)",
+      paramsHelp:
+        "Передайте плоский JSON-объект. Значения будут сериализованы в строки в соответствии с текущей documented HTTP shape.",
+      previewTitle: "Превью запроса",
+      previewDescription:
+        "Это точный payload, собранный из известных полей.",
+    },
+    response: {
+      title: "Ответ плана",
+      description:
+        "Результат превью показывается ровно в том виде, в каком его вернул бэкенд.",
+      loading: "Загрузка превью плана...",
+      empty: "Запустите превью плана, чтобы посмотреть ответ бэкенда.",
+    },
+    validation: {
+      selectPolicy:
+        "Выберите политику перед превью или созданием раскатки.",
+      paramsObject: "Params должны быть JSON-объектом.",
+      paramsJson: "Params должны быть валидным JSON.",
+    },
+  },
+} as const;
+
 export function CreateDeploymentPage() {
   const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -55,15 +165,15 @@ export function CreateDeploymentPage() {
   const policyOptions = useMemo(() => {
     const items = policiesQuery.data?.items ?? [];
     return [
-      { value: "", label: "Select a policy" },
+      { value: "", label: copy.selectPolicy },
       ...items.map((policy) => ({
         value: policy.id,
         label: `${policy.name} (${policy.id})`,
       })),
     ];
-  }, [policiesQuery.data?.items]);
+  }, [copy.selectPolicy, policiesQuery.data?.items]);
 
-  const parsedPayload = parseDraftPayload({
+  const parsedPayload = parseDraftPayload(locale, {
     policyId,
     agentIdsText,
     paramsText,
@@ -119,8 +229,8 @@ export function CreateDeploymentPage() {
       setPlanResult(result.data);
       setPlanMeta(result.meta);
       showToast({
-        title: "Plan preview loaded",
-        description: "The backend returned a deployment plan preview.",
+        title: copy.planPreviewLoaded.title,
+        description: copy.planPreviewLoaded.description,
       });
     } catch (caughtError) {
       setPlanError(caughtError);
@@ -149,8 +259,8 @@ export function CreateDeploymentPage() {
     try {
       const result = await createDeployment(payload);
       showToast({
-        title: "Deployment created",
-        description: `Job ${result.data.id} was accepted by the backend.`,
+        title: copy.deploymentCreated.title,
+        description: copy.deploymentCreated.description(result.data.id),
         variant: "success",
       });
 
@@ -161,7 +271,7 @@ export function CreateDeploymentPage() {
       setFormError(
         caughtError instanceof Error
           ? caughtError.message
-          : "Failed to create deployment."
+          : copy.createError
       );
     } finally {
       setCreateLoading(false);
@@ -171,18 +281,18 @@ export function CreateDeploymentPage() {
   return (
     <PageStack>
       <PageHeader
-        title="Create Deployment"
-        description="Build a deployment request only from fields that are confirmed in the frontend's current public HTTP contract."
+        title={copy.page.title}
+        description={copy.page.description}
       />
 
       <NoticeBanner
-        title="Partial contract visibility"
-        description="This UI only collects confirmed HTTP fields: `policy_id`, optional `agent_ids`, and optional `params`. Target groups, credentials, job type, and other deployment-plane fields are not exposed here until the public HTTP schema is finalized."
+        title={copy.notice.title}
+        description={copy.notice.description}
       />
 
       <SectionCard
-        title="Request Builder"
-        description="Uses `GET /api/v1/policies`, `POST /api/v1/deployments/plan`, and `POST /api/v1/deployments`."
+        title={copy.builder.title}
+        description={copy.builder.description}
         action={
           <div className="flex flex-wrap gap-2">
             <Button
@@ -193,7 +303,7 @@ export function CreateDeploymentPage() {
               onClick={() => void handlePlan()}
               disabled={createLoading}
             >
-              Preview Plan
+              {copy.builder.preview}
             </Button>
             <Button
               size="sm"
@@ -202,14 +312,14 @@ export function CreateDeploymentPage() {
               onClick={() => void handleCreate()}
               disabled={planLoading}
             >
-              Create Deployment
+              {copy.builder.create}
             </Button>
           </div>
         }
       >
         <div className="space-y-5">
           <div className="space-y-2">
-            <FormLabel>Policy</FormLabel>
+            <FormLabel>{copy.builder.policy}</FormLabel>
             <Select
               value={policyId}
               onChange={(event) => {
@@ -223,7 +333,7 @@ export function CreateDeploymentPage() {
             />
             {policiesQuery.error ? (
               <ErrorState
-                title="Policies lookup failed"
+                title={copy.builder.lookupFailed}
                 error={policiesQuery.error}
                 retry={() => void policiesQuery.refetch()}
               />
@@ -234,8 +344,8 @@ export function CreateDeploymentPage() {
 
           <TextAreaField
             id="agent_ids"
-            label="Agent IDs (optional)"
-            helperText="One agent id per line or comma-separated. These are sent only when provided."
+            label={copy.builder.agentIds}
+            helperText={copy.builder.agentIdsHelp}
             value={agentIdsText}
             onChange={(event) => setAgentIdsText(event.target.value)}
             placeholder={"agent-01\nagent-02"}
@@ -243,8 +353,8 @@ export function CreateDeploymentPage() {
 
           <TextAreaField
             id="params_json"
-            label="Params JSON (optional)"
-            helperText="Provide a flat JSON object. Values will be serialized to strings, matching the current documented HTTP shape."
+            label={copy.builder.params}
+            helperText={copy.builder.paramsHelp}
             value={paramsText}
             onChange={(event) => setParamsText(event.target.value)}
             placeholder='{"rollout":"canary","window":"15m"}'
@@ -258,8 +368,8 @@ export function CreateDeploymentPage() {
           ) : null}
 
           <SectionCard
-            title="Request Preview"
-            description="This is the exact payload assembled from known fields."
+            title={copy.builder.previewTitle}
+            description={copy.builder.previewDescription}
             className="border border-[color:var(--border)] bg-[color:var(--surface)]"
           >
             <JsonPreview value={serializePayloadPreview(requestPayloadPreview)} />
@@ -268,12 +378,12 @@ export function CreateDeploymentPage() {
       </SectionCard>
 
       <SectionCard
-        title="Plan Response"
-        description="The preview result is shown exactly as returned by the backend."
+        title={copy.response.title}
+        description={copy.response.description}
       >
         {planLoading ? (
           <div className="text-sm text-[color:var(--muted-foreground)]">
-            Loading plan preview...
+            {copy.response.loading}
           </div>
         ) : planError ? (
           <ErrorState error={planError as never} />
@@ -284,7 +394,7 @@ export function CreateDeploymentPage() {
           </div>
         ) : (
           <div className="text-sm text-[color:var(--muted-foreground)]">
-            Run a plan preview to inspect the backend response.
+            {copy.response.empty}
           </div>
         )}
       </SectionCard>
@@ -292,17 +402,20 @@ export function CreateDeploymentPage() {
   );
 }
 
-function parseDraftPayload(input: {
+function parseDraftPayload(
+  locale: "ru" | "en",
+  input: {
   policyId: string;
   agentIdsText: string;
   paramsText: string;
 }):
   | { payload: DeploymentMutationPayload; error?: undefined; field?: undefined }
   | { payload?: undefined; error: string; field?: "policy" | "params" } {
+  const copy = copyByLocale[locale];
   const policyId = input.policyId.trim();
   if (!policyId) {
     return {
-      error: "Select a policy before previewing or creating a deployment.",
+      error: copy.validation.selectPolicy,
       field: "policy",
     };
   }
@@ -318,7 +431,7 @@ function parseDraftPayload(input: {
       const parsed = JSON.parse(input.paramsText);
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         return {
-          error: "Params must be a JSON object.",
+          error: copy.validation.paramsObject,
           field: "params",
         };
       }
@@ -328,7 +441,7 @@ function parseDraftPayload(input: {
       );
     } catch {
       return {
-        error: "Params must be valid JSON.",
+        error: copy.validation.paramsJson,
         field: "params",
       };
     }

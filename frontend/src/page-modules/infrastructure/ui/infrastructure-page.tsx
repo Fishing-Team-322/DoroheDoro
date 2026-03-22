@@ -21,7 +21,11 @@ import {
   formatDateTime,
   formatMaybeValue,
 } from "@/src/features/operations/ui/operations-ui";
-import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
+import {
+  translateValueLabel,
+  useI18n,
+  withLocalePath,
+} from "@/src/shared/lib/i18n";
 import {
   listAgents,
   listCredentials,
@@ -30,6 +34,185 @@ import {
   type AgentItem,
 } from "@/src/shared/lib/runtime-api";
 import { Button, Card, EmptyState } from "@/src/shared/ui";
+
+const copyByLocale = {
+  en: {
+    tabs: {
+      overview: "Overview",
+      resources: "Resources",
+      agents: "Agents",
+      access: "Access",
+    },
+    pageTitle: "Infrastructure workspace",
+    loadOverviewError: "Failed to load infrastructure overview",
+    loadingOverview: "Loading infrastructure overview...",
+    overview: {
+      metrics: {
+        publicHealth: { label: "Public health", hint: "System probe" },
+        backendReadiness: { label: "Backend readiness", hint: "Bridge readiness" },
+        resources: { label: "Resources", hintSuffix: "host group(s)" },
+        agents: { label: "Agents", hint: "Healthy coverage" },
+        credentials: { label: "Credentials", hint: "Vault-backed metadata" },
+      },
+      operatorContext: {
+        title: "Operator context",
+        description:
+          "Fast summary of the current session plus the infrastructure surfaces that usually gate day-to-day work.",
+        fields: {
+          sessionSubject: "Session subject",
+          role: "Role",
+          authMode: "Auth mode",
+          hosts: "Hosts",
+          hostGroups: "Host groups",
+          credentialProfiles: "Credential profiles",
+        },
+      },
+      quickLinks: {
+        title: "Quick links",
+        description:
+          "Deep links keep related infrastructure work inside this section instead of sending operators back to a fragmented sidebar.",
+        items: {
+          resources: {
+            title: "Open resources",
+            description: "System and inventory in one place.",
+          },
+          agents: {
+            title: "Open agents",
+            description: "Agent registry, health, and shortcuts.",
+          },
+          access: {
+            title: "Open access",
+            description: "Credential profiles and access metadata.",
+          },
+          liveLogs: {
+            title: "Open live logs",
+            description: "Jump straight into the log stream.",
+          },
+        },
+        action: "Open",
+      },
+      agentHealth: {
+        title: "Agent health",
+        description:
+          "Degraded agents stay visible here so infrastructure drift is obvious before operators jump into the full agents tab.",
+        emptyTitle: "All tracked agents look healthy",
+        emptyDescription:
+          "No degraded or offline agents were detected in the current registry snapshot.",
+        versionPrefix: "Version",
+        lastSeenPrefix: "last seen",
+      },
+    },
+    system: {
+      loadError: "Failed to load system state",
+      title: "System",
+      description:
+        "Runtime health, readiness, and current authentication context grouped into the infrastructure resources view.",
+      loading: "Loading system state...",
+      metrics: {
+        publicHealth: "Public health",
+        backendReadiness: "Backend readiness",
+        sessionSubject: "Session subject",
+        role: "Role",
+        authMode: "Auth mode",
+      },
+      details: {
+        publicProbe: "Public probe",
+        readiness: "Readiness",
+        currentSubject: "Current subject",
+        currentRole: "Current role",
+        authenticationMode: "Authentication mode",
+      },
+    },
+  },
+  ru: {
+    tabs: {
+      overview: "Обзор",
+      resources: "Ресурсы",
+      agents: "Агенты",
+      access: "Доступы",
+    },
+    pageTitle: "инфраструктура",
+    loadOverviewError: "Не удалось загрузить обзор инфраструктуры",
+    loadingOverview: "Загрузка обзора инфраструктуры...",
+    overview: {
+      metrics: {
+        publicHealth: { label: "Публичное здоровье", hint: "Системная проба" },
+        backendReadiness: { label: "Готовность backend", hint: "Готовность bridge" },
+        resources: { label: "Ресурсы", hintSuffix: "групп хостов" },
+        agents: { label: "Агенты", hint: "Healthy-покрытие" },
+        credentials: { label: "Доступы", hint: "Метаданные из Vault" },
+      },
+      operatorContext: {
+        title: "Контекст оператора",
+        description:
+          "Быстрая сводка по текущей сессии и инфраструктурным поверхностям, которые чаще всего ограничивают повседневную работу.",
+        fields: {
+          sessionSubject: "Субъект сессии",
+          role: "Роль",
+          authMode: "Режим авторизации",
+          hosts: "Хосты",
+          hostGroups: "Группы хостов",
+          credentialProfiles: "Профили доступов",
+        },
+      },
+      quickLinks: {
+        title: "Быстрые ссылки",
+        description:
+          "Deep links удерживают связанную инфраструктурную работу внутри раздела, не возвращая оператора в разрозненный sidebar.",
+        items: {
+          resources: {
+            title: "Открыть ресурсы",
+            description: "System и inventory в одном месте.",
+          },
+          agents: {
+            title: "Открыть агентов",
+            description: "Реестр агентов, здоровье и быстрые действия.",
+          },
+          access: {
+            title: "Открыть доступы",
+            description: "Профили доступов и access metadata.",
+          },
+          liveLogs: {
+            title: "Открыть live-логи",
+            description: "Сразу перейти в поток логов.",
+          },
+        },
+        action: "Открыть",
+      },
+      agentHealth: {
+        title: "Состояние агентов",
+        description:
+          "Деградированные агенты остаются видимыми здесь, чтобы дрейф инфраструктуры был заметен до перехода на полную вкладку агентов.",
+        emptyTitle: "Все отслеживаемые агенты выглядят здоровыми",
+        emptyDescription:
+          "В текущем снимке реестра не обнаружено деградированных или offline-агентов.",
+        versionPrefix: "Версия",
+        lastSeenPrefix: "последний сигнал",
+      },
+    },
+    system: {
+      loadError: "Не удалось загрузить состояние системы",
+      title: "Система",
+      description:
+        "Runtime health, readiness и текущий контекст авторизации, собранные во view инфраструктурных ресурсов.",
+      loading: "Загрузка состояния системы...",
+      metrics: {
+        publicHealth: "Публичное здоровье",
+        backendReadiness: "Готовность backend",
+        sessionSubject: "Субъект сессии",
+        role: "Роль",
+        authMode: "Режим авторизации",
+      },
+      details: {
+        publicProbe: "Публичная проба",
+        readiness: "Готовность",
+        currentSubject: "Текущий субъект",
+        currentRole: "Текущая роль",
+        authenticationMode: "Режим аутентификации",
+      },
+    },
+  },
+} as const;
 
 type InfrastructureTab = "overview" | "resources" | "agents" | "access";
 
@@ -67,6 +250,7 @@ function getActiveTab(value: string | null): InfrastructureTab {
 
 export function InfrastructurePage() {
   const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const searchParams = useSearchParams();
   const activeTab = getActiveTab(searchParams.get("tab"));
 
@@ -74,26 +258,26 @@ export function InfrastructurePage() {
     () => [
       {
         id: "overview" as const,
-        label: "Overview",
+        label: copy.tabs.overview,
         href: withLocalePath(locale, "/infrastructure?tab=overview"),
       },
       {
         id: "resources" as const,
-        label: "Resources",
+        label: copy.tabs.resources,
         href: withLocalePath(locale, "/infrastructure?tab=resources"),
       },
       {
         id: "agents" as const,
-        label: "Agents",
+        label: copy.tabs.agents,
         href: withLocalePath(locale, "/infrastructure?tab=agents"),
       },
       {
         id: "access" as const,
-        label: "Access",
+        label: copy.tabs.access,
         href: withLocalePath(locale, "/infrastructure?tab=access"),
       },
     ],
-    [locale]
+    [copy.tabs.access, copy.tabs.agents, copy.tabs.overview, copy.tabs.resources, locale]
   );
 
   return (
@@ -103,7 +287,7 @@ export function InfrastructurePage() {
           <div className="flex flex-col gap-4 border-b border-[color:var(--border)] pb-6 xl:flex-row xl:items-center xl:justify-between">
             <div className="space-y-2">
               <h2 className="text-5xl font-semibold text-[color:var(--foreground)]">
-                infrastructure workspace
+                {copy.pageTitle}
               </h2>
             </div>
 
@@ -150,6 +334,7 @@ function InfrastructureOverviewSection({
   embedded?: boolean;
 }) {
   const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const [data, setData] = useState<InfrastructureOverviewData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -188,9 +373,9 @@ function InfrastructureOverviewSection({
           (item) => !isHealthyAgentStatus(item.status)
         );
 
-        setData({
-          health: healthResponse.data.status,
-          readiness: readinessResponse.data.status,
+          setData({
+            health: healthResponse.data.status,
+            readiness: readinessResponse.data.status,
           subject: authResponse.data.user?.subject ?? "n/a",
           role: authResponse.data.user?.role ?? "n/a",
           authMode: authResponse.data.auth?.mode ?? "n/a",
@@ -206,7 +391,7 @@ function InfrastructureOverviewSection({
           setError(
             loadError instanceof Error
               ? loadError.message
-              : "Failed to load infrastructure overview"
+              : copy.loadOverviewError
           );
         }
       } finally {
@@ -221,103 +406,122 @@ function InfrastructureOverviewSection({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [copy.loadOverviewError]);
 
   const content = (
     <div className="space-y-6">
-      {loading ? <LoadingState label="Loading infrastructure overview..." /> : null}
+      {loading ? <LoadingState label={copy.loadingOverview} /> : null}
 
       {!loading && (error || !data) ? (
-        <ErrorCard message={error ?? "Failed to load infrastructure overview"} />
+        <ErrorCard message={error ?? copy.loadOverviewError} />
       ) : null}
 
       {!loading && !error && data ? (
         <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <MetricCard
-              label="Public health"
-              value={data.health}
+              label={copy.overview.metrics.publicHealth.label}
+              value={translateValueLabel(data.health, locale)}
               status={data.health}
-              hint="System probe"
+              hint={copy.overview.metrics.publicHealth.hint}
             />
             <MetricCard
-              label="Backend readiness"
-              value={data.readiness}
+              label={copy.overview.metrics.backendReadiness.label}
+              value={translateValueLabel(data.readiness, locale)}
               status={data.readiness}
-              hint="Bridge readiness"
+              hint={copy.overview.metrics.backendReadiness.hint}
             />
             <MetricCard
-              label="Resources"
+              label={copy.overview.metrics.resources.label}
               value={String(data.hosts)}
-              hint={`${data.hostGroups} host group(s)`}
+              hint={`${data.hostGroups} ${copy.overview.metrics.resources.hintSuffix}`}
             />
             <MetricCard
-              label="Agents"
+              label={copy.overview.metrics.agents.label}
               value={`${data.agentsHealthy}/${data.agentsTotal}`}
-              hint="Healthy coverage"
+              hint={copy.overview.metrics.agents.hint}
             />
             <MetricCard
-              label="Credentials"
+              label={copy.overview.metrics.credentials.label}
               value={String(data.credentials)}
-              hint="Vault-backed metadata"
+              hint={copy.overview.metrics.credentials.hint}
             />
           </section>
 
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
             <SectionCard
-              title="Operator context"
-              description="Fast summary of the current session plus the infrastructure surfaces that usually gate day-to-day work."
+              title={copy.overview.operatorContext.title}
+              description={copy.overview.operatorContext.description}
             >
               <DetailGrid
                 items={[
-                  { label: "Session subject", value: data.subject },
-                  { label: "Role", value: data.role },
-                  { label: "Auth mode", value: data.authMode },
-                  { label: "Hosts", value: String(data.hosts) },
-                  { label: "Host groups", value: String(data.hostGroups) },
-                  { label: "Credential profiles", value: String(data.credentials) },
+                  {
+                    label: copy.overview.operatorContext.fields.sessionSubject,
+                    value: data.subject,
+                  },
+                  { label: copy.overview.operatorContext.fields.role, value: data.role },
+                  {
+                    label: copy.overview.operatorContext.fields.authMode,
+                    value: data.authMode,
+                  },
+                  {
+                    label: copy.overview.operatorContext.fields.hosts,
+                    value: String(data.hosts),
+                  },
+                  {
+                    label: copy.overview.operatorContext.fields.hostGroups,
+                    value: String(data.hostGroups),
+                  },
+                  {
+                    label: copy.overview.operatorContext.fields.credentialProfiles,
+                    value: String(data.credentials),
+                  },
                 ]}
               />
             </SectionCard>
 
             <SectionCard
-              title="Quick links"
-              description="Deep links keep related infrastructure work inside this section instead of sending operators back to a fragmented sidebar."
+              title={copy.overview.quickLinks.title}
+              description={copy.overview.quickLinks.description}
             >
               <div className="grid gap-3 sm:grid-cols-2">
                 <QuickLinkCard
-                  title="Open resources"
-                  description="System and inventory in one place."
+                  title={copy.overview.quickLinks.items.resources.title}
+                  description={copy.overview.quickLinks.items.resources.description}
                   href={withLocalePath(locale, "/infrastructure?tab=resources")}
+                  actionLabel={copy.overview.quickLinks.action}
                 />
                 <QuickLinkCard
-                  title="Open agents"
-                  description="Agent registry, health, and shortcuts."
+                  title={copy.overview.quickLinks.items.agents.title}
+                  description={copy.overview.quickLinks.items.agents.description}
                   href={withLocalePath(locale, "/infrastructure?tab=agents")}
+                  actionLabel={copy.overview.quickLinks.action}
                 />
                 <QuickLinkCard
-                  title="Open access"
-                  description="Credential profiles and access metadata."
+                  title={copy.overview.quickLinks.items.access.title}
+                  description={copy.overview.quickLinks.items.access.description}
                   href={withLocalePath(locale, "/infrastructure?tab=access")}
+                  actionLabel={copy.overview.quickLinks.action}
                 />
                 <QuickLinkCard
-                  title="Open live logs"
-                  description="Jump straight into the log stream."
+                  title={copy.overview.quickLinks.items.liveLogs.title}
+                  description={copy.overview.quickLinks.items.liveLogs.description}
                   href={withLocalePath(locale, "/logs/live")}
+                  actionLabel={copy.overview.quickLinks.action}
                 />
               </div>
             </SectionCard>
           </section>
 
           <SectionCard
-            title="Agent health"
-            description="Degraded agents stay visible here so infrastructure drift is obvious before operators jump into the full agents tab."
+            title={copy.overview.agentHealth.title}
+            description={copy.overview.agentHealth.description}
           >
             {data.unhealthyAgents.length === 0 ? (
               <EmptyState
                 variant="flush"
-                title="All tracked agents look healthy"
-                description="No degraded or offline agents were detected in the current registry snapshot."
+                title={copy.overview.agentHealth.emptyTitle}
+                description={copy.overview.agentHealth.emptyDescription}
               />
             ) : (
               <div className="space-y-3">
@@ -335,8 +539,10 @@ function InfrastructureOverviewSection({
                       <StatusBadge value={agent.status} />
                     </div>
                     <p className="text-sm text-[color:var(--muted-foreground)]">
-                      Version {formatMaybeValue(agent.version)} / last seen{" "}
-                      {formatDateTime(agent.last_seen_at)}
+                      {copy.overview.agentHealth.versionPrefix}{" "}
+                      {formatMaybeValue(agent.version, locale)} /{" "}
+                      {copy.overview.agentHealth.lastSeenPrefix}{" "}
+                      {formatDateTime(agent.last_seen_at, locale)}
                     </p>
                   </Card>
                 ))}
@@ -375,6 +581,8 @@ function InfrastructureResourcesSection({
 }
 
 function InfrastructureSystemPanel() {
+  const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const [state, setState] = useState<{
     health: string;
     readiness: string;
@@ -413,7 +621,7 @@ function InfrastructureSystemPanel() {
       } catch (loadError) {
         if (!cancelled) {
           setError(
-            loadError instanceof Error ? loadError.message : "Failed to load system state"
+            loadError instanceof Error ? loadError.message : copy.system.loadError
           );
         }
       } finally {
@@ -428,36 +636,49 @@ function InfrastructureSystemPanel() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [copy.system.loadError]);
 
   return (
     <SectionCard
-      title="System"
-      description="Runtime health, readiness, and current authentication context grouped into the infrastructure resources view."
+      title={copy.system.title}
+      description={copy.system.description}
     >
-      {loading ? <LoadingState compact label="Loading system state..." /> : null}
+      {loading ? <LoadingState compact label={copy.system.loading} /> : null}
       {!loading && error ? <ErrorCard message={error} /> : null}
       {!loading && !error && state ? (
         <div className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <MetricCard label="Public health" value={state.health} status={state.health} />
             <MetricCard
-              label="Backend readiness"
-              value={state.readiness}
+              label={copy.system.metrics.publicHealth}
+              value={translateValueLabel(state.health, locale)}
+              status={state.health}
+            />
+            <MetricCard
+              label={copy.system.metrics.backendReadiness}
+              value={translateValueLabel(state.readiness, locale)}
               status={state.readiness}
             />
-            <MetricCard label="Session subject" value={state.subject} />
-            <MetricCard label="Role" value={state.role} />
-            <MetricCard label="Auth mode" value={state.authMode} />
+            <MetricCard label={copy.system.metrics.sessionSubject} value={state.subject} />
+            <MetricCard label={copy.system.metrics.role} value={state.role} />
+            <MetricCard label={copy.system.metrics.authMode} value={state.authMode} />
           </div>
 
           <DetailGrid
             items={[
-              { label: "Public probe", value: state.health },
-              { label: "Readiness", value: state.readiness },
-              { label: "Current subject", value: state.subject },
-              { label: "Current role", value: state.role },
-              { label: "Authentication mode", value: state.authMode },
+              {
+                label: copy.system.details.publicProbe,
+                value: translateValueLabel(state.health, locale),
+              },
+              {
+                label: copy.system.details.readiness,
+                value: translateValueLabel(state.readiness, locale),
+              },
+              { label: copy.system.details.currentSubject, value: state.subject },
+              { label: copy.system.details.currentRole, value: state.role },
+              {
+                label: copy.system.details.authenticationMode,
+                value: state.authMode,
+              },
             ]}
           />
         </div>
@@ -470,10 +691,12 @@ function QuickLinkCard({
   title,
   description,
   href,
+  actionLabel,
 }: {
   title: string;
   description: string;
   href: string;
+  actionLabel: string;
 }) {
   return (
     <Card className="space-y-3 p-4">
@@ -488,7 +711,7 @@ function QuickLinkCard({
 
       <Link href={href}>
         <Button variant="outline" size="sm" className="h-10 px-4">
-          Open
+          {actionLabel}
         </Button>
       </Link>
     </Card>

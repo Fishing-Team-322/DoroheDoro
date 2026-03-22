@@ -10,7 +10,11 @@ import {
   type SecurityFinding,
   type SecurityPostureData,
 } from "@/src/shared/lib/operations-workbench";
-import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
+import {
+  translateValueLabel,
+  useI18n,
+  withLocalePath,
+} from "@/src/shared/lib/i18n";
 import { AlertsPage } from "@/src/page-modules/alerts";
 import { AnomaliesPage } from "@/src/page-modules/anomalies";
 import { PoliciesPage } from "@/src/page-modules/policies";
@@ -19,12 +23,122 @@ import {
   NoticeBanner,
   SectionCard,
 } from "@/src/features/operations/ui/operations-ui";
-import { PageHeader } from "@/src/widgets/dashboard-layout";
 import {
   ErrorCard,
   LoadingCard,
 } from "@/src/page-modules/common/ui/runtime-state";
 import { SecurityOverviewCard } from "./security-overview-card";
+
+const copyByLocale = {
+  en: {
+    tabs: {
+      overview: "Overview",
+      findings: "Findings",
+      alerts: "Alerts",
+      policies: "Policies",
+      anomalies: "Anomalies",
+    },
+    pageTitle: "Security workspace",
+    loadingPosture: "Loading security posture...",
+    buildPostureError: "Failed to build security posture",
+    overviewNotice: {
+      title: "Frontend posture synthesis",
+      description:
+        "A dedicated backend security-posture contract was not found in the current frontend runtime API. This page safely composes posture findings from existing frontend-visible endpoints and keeps operator UX usable in demo mode.",
+    },
+    riskCards: {
+      title: "Risk cards",
+      description:
+        "The loudest posture signals stay above the fold so operators can triage without jumping across separate pages.",
+      emptyTitle: "Security posture looks stable",
+      emptyDescription:
+        "The current runtime data did not produce active posture findings.",
+    },
+    overviewWorkbench: {
+      title: "Posture overview",
+      description:
+        "Summary cards, grouped findings, and the current operator detail panel live together here.",
+    },
+    findings: {
+      loading: "Loading findings...",
+      error: "Failed to load findings",
+      notice: {
+        title: "Grouped operator findings",
+        description:
+          "Severity and status remain grouped inside one focused view so operators can review, hand off, and jump to related sections without leaving Security.",
+      },
+      workbenchTitle: "Findings",
+      workbenchDescription:
+        "Open and watching posture findings, grouped into one operator workbench.",
+      emptyTitle: "No findings",
+      emptyDescription:
+        "The current runtime data did not produce active posture findings.",
+      emptySelectionTitle: "No finding selected",
+      emptySelectionDescription:
+        "Choose a finding from the list to inspect impact, evidence, and the recommended next action.",
+      detailTitle: "Detail view",
+      detailDescription:
+        "This panel is designed for operator handoff: what happened, why it matters, and what to do next.",
+      impact: "Operator impact",
+      action: "Recommended action",
+      evidence: "Evidence",
+    },
+  },
+  ru: {
+    tabs: {
+      overview: "Обзор",
+      findings: "Находки",
+      alerts: "Алерты",
+      policies: "Политики",
+      anomalies: "Аномалии",
+    },
+    pageTitle: "безопасность",
+    loadingPosture: "Загрузка состояния безопасности...",
+    buildPostureError: "Не удалось собрать security posture",
+    overviewNotice: {
+      title: "Синтез posture на фронтенде",
+      description:
+        "Отдельный backend-контракт security posture не найден в текущем frontend runtime API. Эта страница безопасно собирает posture-находки из уже доступных frontend endpoint'ов и сохраняет операторский UX рабочим в demo-режиме.",
+    },
+    riskCards: {
+      title: "Карточки риска",
+      description:
+        "Самые громкие сигналы posture остаются наверху, чтобы оператор мог сделать triage без прыжков по разным страницам.",
+      emptyTitle: "Состояние безопасности выглядит стабильным",
+      emptyDescription:
+        "Текущие runtime-данные не сформировали активных posture-находок.",
+    },
+    overviewWorkbench: {
+      title: "Обзор posture",
+      description:
+        "Сводные карточки, сгруппированные находки и текущая панель деталей оператора собраны в одном месте.",
+    },
+    findings: {
+      loading: "Загрузка находок...",
+      error: "Не удалось загрузить находки",
+      notice: {
+        title: "Сгруппированные операторские находки",
+        description:
+          "Severity и статусы собраны в одном фокусном представлении, чтобы оператор мог разбирать, передавать и переходить в связанные разделы, не покидая Security.",
+      },
+      workbenchTitle: "Находки",
+      workbenchDescription:
+        "Открытые и наблюдаемые posture-находки, собранные в одном операторском workbench.",
+      emptyTitle: "Находок нет",
+      emptyDescription:
+        "Текущие runtime-данные не сформировали активных posture-находок.",
+      emptySelectionTitle: "Находка не выбрана",
+      emptySelectionDescription:
+        "Выберите находку в списке, чтобы посмотреть влияние, доказательства и рекомендованное действие.",
+      detailTitle: "Детальный просмотр",
+      detailDescription:
+        "Эта панель предназначена для передачи между операторами: что случилось, почему это важно и что делать дальше.",
+      impact: "Влияние на оператора",
+      action: "Рекомендуемое действие",
+      evidence: "Доказательства",
+    },
+  },
+} as const;
 
 type SecurityTab = "overview" | "findings" | "alerts" | "policies" | "anomalies";
 
@@ -62,6 +176,7 @@ function toBadgeVariant(severity?: string) {
 
 export function SecurityPage() {
   const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const searchParams = useSearchParams();
   const activeTab = getActiveTab(searchParams.get("tab"));
 
@@ -69,31 +184,31 @@ export function SecurityPage() {
     () => [
       {
         id: "overview" as const,
-        label: "Overview",
+        label: copy.tabs.overview,
         href: withLocalePath(locale, "/security?tab=overview"),
       },
       {
         id: "findings" as const,
-        label: "Findings",
+        label: copy.tabs.findings,
         href: withLocalePath(locale, "/security?tab=findings"),
       },
       {
         id: "alerts" as const,
-        label: "Alerts",
+        label: copy.tabs.alerts,
         href: withLocalePath(locale, "/security?tab=alerts"),
       },
       {
         id: "policies" as const,
-        label: "Policies",
+        label: copy.tabs.policies,
         href: withLocalePath(locale, "/security?tab=policies"),
       },
       {
         id: "anomalies" as const,
-        label: "Anomalies",
+        label: copy.tabs.anomalies,
         href: withLocalePath(locale, "/security?tab=anomalies"),
       },
     ],
-    [locale]
+    [copy.tabs.alerts, copy.tabs.anomalies, copy.tabs.findings, copy.tabs.overview, copy.tabs.policies, locale]
   );
 
   return (
@@ -103,7 +218,7 @@ export function SecurityPage() {
           <div className="flex flex-col gap-4 border-b border-[color:var(--border)] pb-6 xl:flex-row xl:items-center xl:justify-between">
             <div className="space-y-2">
               <h2 className="text-5xl font-semibold text-[color:var(--foreground)]">
-                security workspace
+                {copy.pageTitle}
               </h2>
             </div>
 
@@ -142,14 +257,16 @@ export function SecurityPage() {
 }
 
 function SecurityOverviewSection() {
+  const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const posture = useSecurityPosture();
 
   if (posture.loading) {
-    return <LoadingCard label="Loading security posture..." />;
+    return <LoadingCard label={copy.loadingPosture} />;
   }
 
   if (posture.error || !posture.data) {
-    return <ErrorCard message={posture.error ?? "Failed to build security posture"} />;
+    return <ErrorCard message={posture.error ?? copy.buildPostureError} />;
   }
 
   const topFindings = posture.data.findings.slice(0, 3);
@@ -157,8 +274,8 @@ function SecurityOverviewSection() {
   return (
     <div className="space-y-6">
       <NoticeBanner
-        title="Frontend posture synthesis"
-        description="A dedicated backend security-posture contract was not found in the current frontend runtime API. This page safely composes posture findings from existing frontend-visible endpoints and keeps operator UX usable in demo mode."
+        title={copy.overviewNotice.title}
+        description={copy.overviewNotice.description}
       />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -168,14 +285,14 @@ function SecurityOverviewSection() {
       </section>
 
       <SectionCard
-        title="Risk cards"
-        description="The loudest posture signals stay above the fold so operators can triage without jumping across separate pages."
+        title={copy.riskCards.title}
+        description={copy.riskCards.description}
       >
         {topFindings.length === 0 ? (
           <EmptyState
             variant="flush"
-            title="Security posture looks stable"
-            description="The current runtime data did not produce active posture findings."
+            title={copy.riskCards.emptyTitle}
+            description={copy.riskCards.emptyDescription}
           />
         ) : (
           <div className="grid gap-4 lg:grid-cols-3">
@@ -183,9 +300,9 @@ function SecurityOverviewSection() {
               <Card key={finding.id} className="space-y-3 p-4">
                 <div className="flex flex-wrap gap-2">
                   <Badge variant={toBadgeVariant(finding.severity)}>
-                    {finding.severity}
+                    {translateValueLabel(finding.severity, locale)}
                   </Badge>
-                  <Badge>{finding.status}</Badge>
+                  <Badge>{translateValueLabel(finding.status, locale)}</Badge>
                 </div>
                 <p className="text-base font-semibold text-[color:var(--foreground)]">
                   {finding.title}
@@ -204,29 +321,31 @@ function SecurityOverviewSection() {
         selectedFindingId={posture.selectedFindingId}
         setSelectedFindingId={posture.setSelectedFindingId}
         locale={posture.locale}
-        title="Posture overview"
-        description="Summary cards, grouped findings, and the current operator detail panel live together here."
+        title={copy.overviewWorkbench.title}
+        description={copy.overviewWorkbench.description}
       />
     </div>
   );
 }
 
 function SecurityFindingsSection() {
+  const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const posture = useSecurityPosture();
 
   if (posture.loading) {
-    return <LoadingCard label="Loading findings..." />;
+    return <LoadingCard label={copy.findings.loading} />;
   }
 
   if (posture.error || !posture.data) {
-    return <ErrorCard message={posture.error ?? "Failed to load findings"} />;
+    return <ErrorCard message={posture.error ?? copy.findings.error} />;
   }
 
   return (
     <div className="space-y-6">
       <NoticeBanner
-        title="Grouped operator findings"
-        description="Severity and status remain grouped inside one focused view so operators can review, hand off, and jump to related sections without leaving Security."
+        title={copy.findings.notice.title}
+        description={copy.findings.notice.description}
       />
 
       <SecurityFindingsWorkbench
@@ -234,8 +353,8 @@ function SecurityFindingsSection() {
         selectedFindingId={posture.selectedFindingId}
         setSelectedFindingId={posture.setSelectedFindingId}
         locale={posture.locale}
-        title="Findings"
-        description="Open and watching posture findings, grouped into one operator workbench."
+        title={copy.findings.workbenchTitle}
+        description={copy.findings.workbenchDescription}
       />
     </div>
   );
@@ -256,6 +375,7 @@ function SecurityFindingsWorkbench({
   title: string;
   description: string;
 }) {
+  const copy = copyByLocale[locale];
   const selectedFinding =
     data.findings.find((item) => item.id === selectedFindingId) ?? null;
 
@@ -264,8 +384,8 @@ function SecurityFindingsWorkbench({
       <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
         <EmptyState
           variant="flush"
-          title="No findings"
-          description="The current runtime data did not produce active posture findings."
+          title={copy.findings.emptyTitle}
+          description={copy.findings.emptyDescription}
         />
       </section>
     );
@@ -291,9 +411,9 @@ function SecurityFindingsWorkbench({
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={toBadgeVariant(finding.severity)}>
-                    {finding.severity}
+                    {translateValueLabel(finding.severity, locale)}
                   </Badge>
-                  <Badge>{finding.status}</Badge>
+                  <Badge>{translateValueLabel(finding.status, locale)}</Badge>
                 </div>
                 <p className="mt-3 text-base font-semibold text-[color:var(--foreground)]">
                   {finding.title}
@@ -319,13 +439,14 @@ function SecurityFindingDetail({
   finding: SecurityFinding | null;
   locale: Locale;
 }) {
+  const copy = copyByLocale[locale];
   if (!finding) {
     return (
       <section className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
         <EmptyState
           variant="flush"
-          title="No finding selected"
-          description="Choose a finding from the list to inspect impact, evidence, and the recommended next action."
+          title={copy.findings.emptySelectionTitle}
+          description={copy.findings.emptySelectionDescription}
         />
       </section>
     );
@@ -333,8 +454,8 @@ function SecurityFindingDetail({
 
   return (
     <SectionCard
-      title="Detail view"
-      description="This panel is designed for operator handoff: what happened, why it matters, and what to do next."
+      title={copy.findings.detailTitle}
+      description={copy.findings.detailDescription}
       action={
         finding.relatedRoute ? (
           <Link href={withLocalePath(locale, finding.relatedRoute.href)}>
@@ -349,9 +470,9 @@ function SecurityFindingDetail({
         <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={toBadgeVariant(finding.severity)}>
-              {finding.severity}
+              {translateValueLabel(finding.severity, locale)}
             </Badge>
-            <Badge>{finding.status}</Badge>
+            <Badge>{translateValueLabel(finding.status, locale)}</Badge>
           </div>
           <p className="mt-3 text-xl font-semibold text-[color:var(--foreground)]">
             {finding.title}
@@ -364,7 +485,7 @@ function SecurityFindingDetail({
         <div className="grid gap-4 md:grid-cols-2">
           <Card className="space-y-3 p-4">
             <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-              Operator impact
+              {copy.findings.impact}
             </h3>
             <p className="text-sm leading-6 text-[color:var(--foreground)]">
               {finding.impact}
@@ -373,7 +494,7 @@ function SecurityFindingDetail({
 
           <Card className="space-y-3 p-4">
             <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-              Recommended action
+              {copy.findings.action}
             </h3>
             <p className="text-sm leading-6 text-[color:var(--foreground)]">
               {finding.recommendedAction}
@@ -383,7 +504,7 @@ function SecurityFindingDetail({
 
         <Card className="space-y-3 p-4">
           <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-            Evidence
+            {copy.findings.evidence}
           </h3>
           <div className="space-y-2">
             {finding.evidence.map((item) => (
@@ -416,7 +537,7 @@ function useSecurityPosture() {
       setError(null);
 
       try {
-        const response = await getSecurityPostureData();
+        const response = await getSecurityPostureData(locale);
 
         if (cancelled) {
           return;
@@ -448,7 +569,7 @@ function useSecurityPosture() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [locale]);
 
   return {
     data,

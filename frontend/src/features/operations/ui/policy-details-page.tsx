@@ -18,8 +18,80 @@ import {
   formatMaybeValue,
 } from "./operations-ui";
 
+const copyByLocale = {
+  en: {
+    page: {
+      title: "Policy Details",
+      description:
+        "Inspect the policy payload exposed by the public HTTP API before starting a deployment.",
+      breadcrumbs: "Policies",
+      action: "Create Deployment",
+    },
+    loading: "Loading policy details...",
+    summary: {
+      title: "Summary",
+      description: "`GET /api/v1/policies/{id}`",
+      fields: {
+        id: "ID",
+        name: "Name",
+        revision: "Revision",
+        description: "Description",
+        targets: "Targets",
+      },
+      noTargets: "No targets",
+    },
+    params: {
+      title: "Params",
+      description: "Structured params exposed by the public response.",
+      empty:
+        "The current public response does not expose policy params.",
+    },
+    raw: {
+      title: "Raw Policy Body",
+      description:
+        "Useful when the policy body is delivered as JSON text.",
+      empty: "No raw policy body was returned.",
+    },
+  },
+  ru: {
+    page: {
+      title: "Детали политики",
+      description:
+        "Посмотрите payload политики, который отдает публичный HTTP API, перед запуском раскатки.",
+      breadcrumbs: "Политики",
+      action: "Создать раскатку",
+    },
+    loading: "Загрузка деталей политики...",
+    summary: {
+      title: "Сводка",
+      description: "`GET /api/v1/policies/{id}`",
+      fields: {
+        id: "ID",
+        name: "Имя",
+        revision: "Ревизия",
+        description: "Описание",
+        targets: "Таргеты",
+      },
+      noTargets: "Нет таргетов",
+    },
+    params: {
+      title: "Параметры",
+      description: "Структурированные параметры из публичного ответа.",
+      empty:
+        "Текущий публичный ответ не содержит policy params.",
+    },
+    raw: {
+      title: "Сырое тело политики",
+      description:
+        "Полезно, когда тело политики приходит как JSON-текст.",
+      empty: "Сырое тело политики не было возвращено.",
+    },
+  },
+} as const;
+
 export function PolicyDetailsPage({ id }: { id: string }) {
   const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const policyQuery = useApiQuery({
     queryFn: (signal) => getPolicy(id, signal),
     deps: [id],
@@ -28,10 +100,13 @@ export function PolicyDetailsPage({ id }: { id: string }) {
   return (
     <PageStack>
       <PageHeader
-        title="Policy Details"
-        description="Inspect the policy payload exposed by the public HTTP API before starting a deployment."
+        title={copy.page.title}
+        description={copy.page.description}
         breadcrumbs={[
-          { label: "Policies", href: withLocalePath(locale, "/policies") },
+          {
+            label: copy.page.breadcrumbs,
+            href: withLocalePath(locale, "/policies"),
+          },
           { label: id },
         ]}
         action={
@@ -42,38 +117,47 @@ export function PolicyDetailsPage({ id }: { id: string }) {
             )}
           >
             <Button size="sm" className="h-10 px-4">
-              Create Deployment
+              {copy.page.action}
             </Button>
           </Link>
         }
       />
 
       {policyQuery.isLoading && !policyQuery.data ? (
-        <LoadingState label="Loading policy details..." />
+        <LoadingState label={copy.loading} />
       ) : policyQuery.error && !policyQuery.data ? (
         <ErrorState error={policyQuery.error} retry={() => void policyQuery.refetch()} />
       ) : (
         <PageStack>
-          <SectionCard title="Summary" description="`GET /api/v1/policies/{id}`">
+          <SectionCard
+            title={copy.summary.title}
+            description={copy.summary.description}
+          >
             <div className="space-y-4">
               <DetailGrid
                 items={[
-                  { label: "ID", value: formatMaybeValue(policyQuery.data?.id) },
-                  { label: "Name", value: formatMaybeValue(policyQuery.data?.name) },
                   {
-                    label: "Revision",
-                    value: formatMaybeValue(policyQuery.data?.revision),
+                    label: copy.summary.fields.id,
+                    value: formatMaybeValue(policyQuery.data?.id, locale),
                   },
                   {
-                    label: "Description",
-                    value: formatMaybeValue(policyQuery.data?.description),
+                    label: copy.summary.fields.name,
+                    value: formatMaybeValue(policyQuery.data?.name, locale),
                   },
                   {
-                    label: "Targets",
+                    label: copy.summary.fields.revision,
+                    value: formatMaybeValue(policyQuery.data?.revision, locale),
+                  },
+                  {
+                    label: copy.summary.fields.description,
+                    value: formatMaybeValue(policyQuery.data?.description, locale),
+                  },
+                  {
+                    label: copy.summary.fields.targets,
                     value: (
                       <TokenList
                         items={policyQuery.data?.targets ?? []}
-                        emptyLabel="No targets"
+                        emptyLabel={copy.summary.noTargets}
                       />
                     ),
                   },
@@ -83,17 +167,23 @@ export function PolicyDetailsPage({ id }: { id: string }) {
             </div>
           </SectionCard>
 
-          <SectionCard title="Params" description="Structured params exposed by the public response.">
+          <SectionCard
+            title={copy.params.title}
+            description={copy.params.description}
+          >
             <JsonPreview
               value={policyQuery.data?.params}
-              emptyLabel="The current public response does not expose policy params."
+              emptyLabel={copy.params.empty}
             />
           </SectionCard>
 
-          <SectionCard title="Raw Policy Body" description="Useful when the policy body is delivered as JSON text.">
+          <SectionCard
+            title={copy.raw.title}
+            description={copy.raw.description}
+          >
             <JsonPreview
               value={policyQuery.data?.body ?? policyQuery.data?.raw}
-              emptyLabel="No raw policy body was returned."
+              emptyLabel={copy.raw.empty}
             />
           </SectionCard>
         </PageStack>
