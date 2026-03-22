@@ -18,14 +18,11 @@ import { ConsolePage } from "@/src/shared/ui";
 import { DashboardSidebarLanguageSwitch } from "@/src/shared/ui/lang-switch";
 import {
   ActivityIcon,
-  BellIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   GridIcon,
   HomeIcon,
-  LogsIcon,
   MenuIcon,
-  PulseIcon,
   RocketIcon,
   ServerIcon,
   SettingsIcon,
@@ -180,8 +177,17 @@ export function DashboardSidebar({
             <nav className="space-y-2">
               {items.map((item) => {
                 const href = withLocalePath(locale, item.href);
-                const isActive =
-                  pathname === href || pathname.startsWith(`${href}/`);
+                const matchPaths =
+                  item.matchPaths && item.matchPaths.length > 0
+                    ? item.matchPaths
+                    : [item.href];
+                const isActive = matchPaths.some((path) => {
+                  const localizedPath = withLocalePath(locale, path);
+                  return (
+                    pathname === localizedPath ||
+                    pathname.startsWith(`${localizedPath}/`)
+                  );
+                });
                 const Icon = item.icon;
                 const navItem =
                   (
@@ -426,30 +432,14 @@ function getSidebarIcon(item: Pick<NavItem, "key">) {
   switch (item.key) {
     case "overview":
       return HomeIcon;
-    case "system":
+    case "infrastructure":
       return ServerIcon;
-    case "inventory":
-      return GridIcon;
-    case "policies":
-      return ShieldIcon;
     case "security":
       return ShieldIcon;
-    case "credentials":
-      return GridIcon;
-    case "deployments":
+    case "operations":
       return RocketIcon;
-    case "anomalies":
-      return ActivityIcon;
     case "integrations":
       return GridIcon;
-    case "agents":
-      return PulseIcon;
-    case "logs":
-      return LogsIcon;
-    case "live-logs":
-      return ActivityIcon;
-    case "alerts":
-      return BellIcon;
     case "audit":
       return ActivityIcon;
     case "profile":

@@ -1,5 +1,11 @@
-import { AgentsPage as AgentsPageView } from "@/src/page-modules/agents";
+import { redirect } from "next/navigation";
+import { getLocaleFromParams, withLocalePath } from "@/src/shared/lib/i18n";
 
-export default function AgentsPage() {
-  return <AgentsPageView />;
+export default async function AgentsPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const locale = getLocaleFromParams(await params);
+  redirect(withLocalePath(locale, "/infrastructure?tab=agents"));
 }

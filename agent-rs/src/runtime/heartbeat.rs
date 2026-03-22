@@ -22,14 +22,21 @@ pub fn spawn_heartbeat_worker(
 ) -> JoinHandle<AppResult<()>> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(interval_sec));
+        status.mark_heartbeat_scheduler_running(true);
         loop {
             tokio::select! {
-                _ = shutdown.cancelled() => return Ok(()),
+                _ = shutdown.cancelled() => {
+                    status.mark_heartbeat_scheduler_running(false);
+                    return Ok(());
+                },
                 _ = ticker.tick() => {
+                    let attempt_at = chrono::Utc::now().timestamp_millis();
+                    status.record_heartbeat_attempt(attempt_at);
                     let snapshot = status.snapshot();
                     let heartbeat = build_heartbeat_payload(&snapshot, &edge_url);
                     if let Err(error) = transport.send_heartbeat(heartbeat).await {
                         let detail = format!("heartbeat send failed: {error}");
+                        status.record_heartbeat_failure(detail.clone());
                         status.record_error(detail);
                         status.record_connectivity_error(&error);
                         let _ = state_writer
@@ -39,9 +46,12 @@ pub fn spawn_heartbeat_worker(
                     } else {
                         let now = chrono::Utc::now().timestamp_millis();
                         status.record_connectivity_success(now);
+                        status.record_heartbeat_success(now);
                         let _ = state_writer
                             .update_runtime_state(RuntimeStatePatch {
                                 last_handshake_success_at_unix_ms: Some(Some(now)),
+                                last_connect_error: Some(None),
+                                last_tls_error: Some(None),
                                 ..RuntimeStatePatch::default()
                             })
                             .await;
@@ -180,6 +190,8 @@ mod tests {
             "edge".to_string(),
             test_static_context(),
             true,
+            30,
+            30,
             &[SourceConfig {
                 kind: "file".to_string(),
                 source_id: Some("file:/tmp/demo.log".to_string()),

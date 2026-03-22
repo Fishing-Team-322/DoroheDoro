@@ -1,11 +1,13 @@
-import { AgentDetailsPage } from "@/src/features/operations";
+import { redirect } from "next/navigation";
+import { getLocaleFromParams, withLocalePath } from "@/src/shared/lib/i18n";
 
 export default async function DashboardAgentDetailsRoute({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ locale: string; id: string }>;
 }) {
-  const { id } = await params;
+  const resolvedParams = await params;
+  const locale = getLocaleFromParams(resolvedParams);
 
-  return <AgentDetailsPage id={id} />;
+  redirect(withLocalePath(locale, "/infrastructure?tab=agents"));
 }

@@ -45,7 +45,7 @@ function isOpenStatus(value?: string) {
   return !["resolved", "closed", "delivered"].includes(normalized);
 }
 
-export function AlertsPage() {
+export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { dictionary, locale } = useI18n();
   const searchParams = useSearchParams();
   const alertParam = searchParams.get("alert");
@@ -113,15 +113,17 @@ export function AlertsPage() {
   const openAlertsCount = data?.alerts.filter((item) => isOpenStatus(item.status)).length ?? 0;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Alerts"
-        description="Live alert instances plus a correlated operator detail view for anomaly, posture, binding, and delivery context."
-        breadcrumbs={[
-          { label: dictionary.common.dashboard, href: "#" },
-          { label: "Alerts" },
-        ]}
-      />
+    <div className={embedded ? "space-y-4" : "space-y-6"}>
+      {!embedded ? (
+        <PageHeader
+          title="Alerts"
+          description="Live alert instances plus a correlated operator detail view for anomaly, posture, binding, and delivery context."
+          breadcrumbs={[
+            { label: dictionary.common.dashboard, href: "#" },
+            { label: "Alerts" },
+          ]}
+        />
+      ) : null}
 
       {loading ? <LoadingCard label="Loading alerts..." /> : null}
       {!loading && error ? <ErrorCard message={error} /> : null}

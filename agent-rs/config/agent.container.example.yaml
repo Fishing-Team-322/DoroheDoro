@@ -1,0 +1,70 @@
+edge_url: "https://edge.example.local"
+edge_grpc_addr: "edge.example.local:7443"
+bootstrap_token: "replace-with-bootstrap-token"
+state_dir: "/var/lib/doro-agent"
+log_level: "info"
+
+transport:
+  mode: "edge"
+
+install:
+  mode: "tarball"
+
+platform:
+  allow_machine_id: false
+
+scope:
+  configured_cluster_id: "cluster-prod"
+  cluster_name: "prod"
+  service_name: "linux-host"
+  environment: "production"
+
+heartbeat:
+  interval_sec: 30
+
+diagnostics:
+  interval_sec: 30
+
+security_scan:
+  enabled: true
+  interval_sec: 3600
+  jitter_sec: 300
+  timeout_sec: 60
+  max_parallel_checks: 4
+  profile: "balanced"
+  allowed_ports: [22, 443]
+  blocked_ports: [23, 2375]
+  package_watchlist: ["openssl", "openssh", "nginx", "docker"]
+  version_rules_path: "/etc/doro-agent/security-rules.yaml"
+  publish_as_diagnostics: true
+  persist_last_report: true
+
+policy:
+  refresh_interval_sec: 30
+
+batch:
+  max_events: 500
+  max_bytes: 524288
+  flush_interval_ms: 2000
+  compress_threshold_bytes: 16384
+
+queues:
+  event_capacity: 4096
+  send_capacity: 32
+  event_bytes_soft_limit: 8388608
+  send_bytes_soft_limit: 16777216
+
+degraded:
+  failure_threshold: 3
+  server_unavailable_sec: 30
+  queue_pressure_pct: 80
+  queue_recover_pct: 40
+  unacked_lag_bytes: 16777216
+  shutdown_spool_grace_sec: 5
+
+spool:
+  enabled: true
+  dir: "/var/lib/doro-agent/spool"
+  max_disk_bytes: 268435456
+
+sources: []

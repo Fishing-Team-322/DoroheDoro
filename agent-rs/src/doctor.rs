@@ -1,10 +1,15 @@
-use std::path::{Path, PathBuf};
+use std::{
+    net::{TcpStream, ToSocketAddrs},
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
+use chrono::{SecondsFormat, Utc};
 use rusqlite::{Connection, OpenFlags};
+use serde::Serialize;
 
 use crate::{
     config::AgentConfig,
-    error::AppResult,
     metadata::{
         can_read_file, detect_source_paths, directory_write_access, path_exists,
         RuntimeMetadataContext, SourcePathStatus, CANONICAL_LOG_DIR,
@@ -16,20 +21,46 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone)]
+const CATEGORY_CONFIG: &str = "config";
+const CATEGORY_INSTALL: &str = "install";
+const CATEGORY_RUNTIME: &str = "runtime";
+const CATEGORY_ENVIRONMENT: &str = "environment";
+const CATEGORY_STORAGE: &str = "storage";
+const CATEGORY_SECURITY: &str = "security";
+const CATEGORY_TRANSPORT: &str = "transport";
+const CATEGORY_TLS: &str = "tls";
+const CATEGORY_SOURCES: &str = "sources";
+const CATEGORY_COMPATIBILITY: &str = "compatibility";
+const CATEGORY_SCOPE: &str = "scope";
+
+#[derive(Debug, Clone, Serialize)]
 pub struct DoctorReport {
-    pub config_path: PathBuf,
+    pub config_path: String,
+    pub generated_at: String,
+    pub summary: DoctorSummary,
     pub checks: Vec<DoctorCheck>,
 }
 
-#[derive(Debug, Clone)]
-pub struct DoctorCheck {
-    pub status: DoctorStatus,
-    pub name: String,
-    pub detail: String,
+#[derive(Debug, Clone, Serialize)]
+pub struct DoctorSummary {
+    pub check_count: usize,
+    pub warning_count: usize,
+    pub failure_count: usize,
+    pub overall_status: DoctorStatus,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize)]
+pub struct DoctorCheck {
+    pub name: String,
+    pub status: DoctorStatus,
+    pub detail: String,
+    pub category: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DoctorStatus {
     Pass,
     Warn,
@@ -38,37 +69,49 @@ pub enum DoctorStatus {
 
 impl DoctorReport {
     pub fn has_failures(&self) -> bool {
-        self.checks
-            .iter()
-            .any(|check| check.status == DoctorStatus::Fail)
+        self.summary.failure_count > 0
     }
 
     pub fn warning_count(&self) -> usize {
-        self.checks
-            .iter()
-            .filter(|check| check.status == DoctorStatus::Warn)
-            .count()
+        self.summary.warning_count
     }
 
-    pub fn print(&self) {
+    pub fn print_text(&self) {
         println!("doro-agent doctor");
-        println!("config: {}", self.config_path.display());
+        println!("config: {}", self.config_path);
+        println!("generated_at: {}", self.generated_at);
         for check in &self.checks {
-            println!(
-                "[{}] {}: {}",
-                check.status.label(),
-                check.name,
-                check.detail
-            );
+            match &check.hint {
+                Some(hint) => println!(
+                    "[{}] {} ({}) : {} | hint: {}",
+                    check.status.label(),
+                    check.name,
+                    check.category,
+                    check.detail,
+                    hint
+                ),
+                None => println!(
+                    "[{}] {} ({}) : {}",
+                    check.status.label(),
+                    check.name,
+                    check.category,
+                    check.detail
+                ),
+            }
         }
         println!(
-            "summary: {} checks, {} warning(s), {} failure(s)",
-            self.checks.len(),
-            self.warning_count(),
-            self.checks
-                .iter()
-                .filter(|check| check.status == DoctorStatus::Fail)
-                .count()
+            "summary: {} checks, {} warning(s), {} failure(s), overall={}",
+            self.summary.check_count,
+            self.summary.warning_count,
+            self.summary.failure_count,
+            self.summary.overall_status.label()
+        );
+    }
+
+    pub fn print_json(&self) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(self).expect("doctor report json serialization")
         );
     }
 }
@@ -83,150 +126,264 @@ impl DoctorStatus {
     }
 }
 
-pub fn run(config_path: &Path) -> AppResult<DoctorReport> {
-    let config = AgentConfig::load(config_path)?;
-    let hostname = crate::app::resolve_hostname();
-    let context = RuntimeMetadataContext::detect(&config, config_path, &hostname)?;
-    let mut checks = Vec::new();
+impl DoctorCheck {
+    fn new(
+        name: impl Into<String>,
+        status: DoctorStatus,
+        category: impl Into<String>,
+        detail: impl Into<String>,
+        hint: Option<&str>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            status,
+            detail: detail.into(),
+            category: category.into(),
+            hint: hint.map(ToOwned::to_owned),
+        }
+    }
+}
 
-    checks.push(DoctorCheck {
-        status: DoctorStatus::Pass,
-        name: "config".to_string(),
-        detail: "configuration parsed successfully".to_string(),
-    });
-    checks.push(DoctorCheck {
-        status: if context.install.resolved_mode == "unknown"
-            || !context.install.warnings.is_empty()
-        {
+pub fn run(config_path: &Path) -> DoctorReport {
+    let config_path_text = config_path.display().to_string();
+    let generated_at = iso_timestamp();
+
+    let config = match AgentConfig::load(config_path) {
+        Ok(config) => config,
+        Err(error) => {
+            return build_report(
+                config_path_text,
+                generated_at,
+                vec![DoctorCheck::new(
+                    "config",
+                    DoctorStatus::Fail,
+                    CATEGORY_CONFIG,
+                    format!("failed to load configuration: {error}"),
+                    Some("fix the config file or the AGENT_CONFIG path and rerun preflight"),
+                )],
+            );
+        }
+    };
+
+    let hostname = crate::app::resolve_hostname();
+    let context = match RuntimeMetadataContext::detect(&config, config_path, &hostname) {
+        Ok(context) => context,
+        Err(error) => {
+            return build_report(
+                config_path_text,
+                generated_at,
+                vec![
+                    DoctorCheck::new(
+                        "config",
+                        DoctorStatus::Pass,
+                        CATEGORY_CONFIG,
+                        "configuration parsed successfully",
+                        None,
+                    ),
+                    DoctorCheck::new(
+                        "runtime-metadata",
+                        DoctorStatus::Fail,
+                        CATEGORY_RUNTIME,
+                        format!("failed to detect runtime metadata: {error}"),
+                        Some(
+                            "verify the runtime user can inspect local platform and path metadata",
+                        ),
+                    ),
+                ],
+            );
+        }
+    };
+
+    let mut checks = Vec::new();
+    checks.push(DoctorCheck::new(
+        "config",
+        DoctorStatus::Pass,
+        CATEGORY_CONFIG,
+        "configuration parsed successfully",
+        None,
+    ));
+    checks.push(DoctorCheck::new(
+        "install-mode",
+        if context.install.resolved_mode == "unknown" || !context.install.warnings.is_empty() {
             DoctorStatus::Warn
         } else {
             DoctorStatus::Pass
         },
-        name: "install-mode".to_string(),
-        detail: format!(
+        CATEGORY_INSTALL,
+        format!(
             "configured={}, resolved={}, source={}",
             context.install.configured_mode,
             context.install.resolved_mode,
             context.install.resolution_source
         ),
-    });
-    checks.push(DoctorCheck {
-        status: DoctorStatus::Pass,
-        name: "build".to_string(),
-        detail: format!(
+        Some("pin install.mode if the layout is intentional and auto-detection stays ambiguous"),
+    ));
+    checks.push(DoctorCheck::new(
+        "build-runtime-metadata",
+        DoctorStatus::Pass,
+        CATEGORY_RUNTIME,
+        format!(
             "version={}, build_id={}, target={}, profile={}",
             context.build.agent_version,
             context.build.build_id,
             context.build.target_triple,
             context.build.build_profile
         ),
-    });
-    checks.push(DoctorCheck {
-        status: if context.platform.systemd_detected || !context.install.systemd_expected {
-            DoctorStatus::Pass
-        } else {
-            DoctorStatus::Warn
-        },
-        name: "systemd".to_string(),
-        detail: format!(
-            "detected={}, expected={}, service_manager={}",
-            context.platform.systemd_detected,
-            context.install.systemd_expected,
-            context.platform.service_manager
-        ),
-    });
-
+        None,
+    ));
+    checks.push(check_runtime_environment(&context));
     checks.push(check_directory(
         "state-dir",
         &config.state_dir,
         "runtime state",
+        CATEGORY_STORAGE,
         true,
+        Some("ensure the runtime user can create and write inside state_dir"),
     ));
     if config.spool.enabled {
         checks.push(check_directory(
             "spool-dir",
             &config.spool.dir,
             "fallback spool",
+            CATEGORY_STORAGE,
             true,
+            Some("ensure spool dir is on persistent writable storage"),
         ));
     } else {
-        checks.push(DoctorCheck {
-            status: DoctorStatus::Pass,
-            name: "spool-dir".to_string(),
-            detail: "spool is disabled".to_string(),
-        });
+        checks.push(DoctorCheck::new(
+            "spool-dir",
+            DoctorStatus::Pass,
+            CATEGORY_STORAGE,
+            "spool is disabled",
+            Some("enable spool for safer recovery during edge outages"),
+        ));
     }
-
+    checks.push(check_directory(
+        "diagnostics-dir",
+        &config.state_dir.join("diagnostics"),
+        "local diagnostics snapshot",
+        CATEGORY_STORAGE,
+        true,
+        Some("the agent writes troubleshooting snapshots here during runtime"),
+    ));
     checks.push(check_state_db(&config.state_dir.join("state.db")));
     checks.extend(check_security_scan(&config));
     checks.push(check_transport(&config));
+    checks.push(check_transport_reachability(&config));
     checks.push(check_logs_directory(&context));
     checks.extend(check_tls(&config));
 
     for source in detect_source_paths(&config) {
         checks.push(match source.status {
-            SourcePathStatus::Readable => DoctorCheck {
-                status: DoctorStatus::Pass,
-                name: "source".to_string(),
-                detail: format!("{} is readable", source.path.display()),
-            },
-            SourcePathStatus::Missing => DoctorCheck {
-                status: DoctorStatus::Warn,
-                name: "source".to_string(),
-                detail: format!(
+            SourcePathStatus::Readable => DoctorCheck::new(
+                "source-path",
+                DoctorStatus::Pass,
+                CATEGORY_SOURCES,
+                format!("{} is readable", source.path.display()),
+                None,
+            ),
+            SourcePathStatus::Missing => DoctorCheck::new(
+                "source-path",
+                DoctorStatus::Warn,
+                CATEGORY_SOURCES,
+                format!(
                     "{} is missing; file source will start in waiting mode",
                     source.path.display()
                 ),
-            },
-            SourcePathStatus::Unreadable => DoctorCheck {
-                status: DoctorStatus::Fail,
-                name: "source".to_string(),
-                detail: format!(
+                Some("create the file or verify policy/source path correctness"),
+            ),
+            SourcePathStatus::Unreadable => DoctorCheck::new(
+                "source-path",
+                DoctorStatus::Fail,
+                CATEGORY_SOURCES,
+                format!(
                     "{} is unreadable: {}",
                     source.path.display(),
                     source
                         .message
                         .unwrap_or_else(|| "permission denied".to_string())
                 ),
-            },
-        });
-    }
-
-    for issue in &context.compatibility.permission_issues {
-        checks.push(DoctorCheck {
-            status: DoctorStatus::Fail,
-            name: "permissions".to_string(),
-            detail: issue.clone(),
-        });
-    }
-    for issue in &context.compatibility.warnings {
-        checks.push(DoctorCheck {
-            status: DoctorStatus::Warn,
-            name: "compatibility".to_string(),
-            detail: issue.clone(),
-        });
-    }
-
-    if context.cluster.configured_cluster_id.is_some()
-        || !context.cluster.effective_cluster_tags.is_empty()
-        || !context.cluster.host_labels.is_empty()
-    {
-        checks.push(DoctorCheck {
-            status: DoctorStatus::Pass,
-            name: "cluster-scope".to_string(),
-            detail: format!(
-                "cluster_id={:?}, effective_cluster_tags={}, host_labels={}",
-                context.cluster.configured_cluster_id,
-                context.cluster.effective_cluster_tags.len(),
-                context.cluster.host_labels.len()
+                Some("fix file ownership, ACLs, or container volume mounts"),
             ),
         });
     }
 
-    Ok(DoctorReport {
-        config_path: config_path.to_path_buf(),
+    for issue in &context.compatibility.permission_issues {
+        checks.push(DoctorCheck::new(
+            "permissions",
+            DoctorStatus::Fail,
+            CATEGORY_COMPATIBILITY,
+            issue,
+            Some("run the agent with a user that can access state/spool/source paths"),
+        ));
+    }
+    for issue in &context.compatibility.errors {
+        checks.push(DoctorCheck::new(
+            "compatibility",
+            DoctorStatus::Fail,
+            CATEGORY_COMPATIBILITY,
+            issue,
+            Some("resolve the runtime compatibility error before starting the agent"),
+        ));
+    }
+    for issue in &context.compatibility.warnings {
+        checks.push(DoctorCheck::new(
+            "compatibility",
+            DoctorStatus::Warn,
+            CATEGORY_COMPATIBILITY,
+            issue,
+            Some("review the warning if this is not an intentional local/dev setup"),
+        ));
+    }
+
+    checks.push(DoctorCheck::new(
+        "cluster-scope",
+        DoctorStatus::Pass,
+        CATEGORY_SCOPE,
+        format!(
+            "cluster_id={:?}, effective_cluster_tags={}, host_labels={}",
+            context.cluster.configured_cluster_id,
+            context.cluster.effective_cluster_tags.len(),
+            context.cluster.host_labels.len()
+        ),
+        Some("set scope fields if the agent should report into a named cluster or service"),
+    ));
+
+    build_report(config_path_text, generated_at, checks)
+}
+
+fn build_report(config_path: String, generated_at: String, checks: Vec<DoctorCheck>) -> DoctorReport {
+    let warning_count = checks
+        .iter()
+        .filter(|check| check.status == DoctorStatus::Warn)
+        .count();
+    let failure_count = checks
+        .iter()
+        .filter(|check| check.status == DoctorStatus::Fail)
+        .count();
+
+    DoctorReport {
+        config_path,
+        generated_at,
+        summary: DoctorSummary {
+            check_count: checks.len(),
+            warning_count,
+            failure_count,
+            overall_status: if failure_count > 0 {
+                DoctorStatus::Fail
+            } else if warning_count > 0 {
+                DoctorStatus::Warn
+            } else {
+                DoctorStatus::Pass
+            },
+        },
         checks,
-    })
+    }
+}
+
+fn iso_timestamp() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
 }
 
 fn check_directory(name: &str, path: &Path, label: &str, require_write: bool) -> DoctorCheck {

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -11,18 +12,29 @@ import (
 	"github.com/example/dorohedoro/internal/auth"
 	"github.com/example/dorohedoro/internal/config"
 	"github.com/example/dorohedoro/internal/middleware"
+	"github.com/example/dorohedoro/internal/model"
 	"github.com/example/dorohedoro/internal/natsbridge"
 	"github.com/example/dorohedoro/internal/natsbridge/envelope"
 	"github.com/example/dorohedoro/internal/stream"
 )
 
+type AgentStatusReader interface {
+	GetHostAgentStatus(ctx context.Context, hostID string) (model.HostAgentStatusView, error)
+	GetHostDiagnostics(ctx context.Context, hostID string) (model.HostAgentDiagnosticsView, error)
+	GetClusterAgentsOverview(ctx context.Context, clusterID string) (model.ClusterAgentsOverviewView, error)
+	GetDeploymentTimeline(ctx context.Context, jobID string) (model.DeploymentTimelineView, error)
+	MapAgentStreamEventJSON(data []byte) ([]byte, error)
+	MapDeploymentStepEventJSON(data []byte) ([]byte, error)
+}
+
 type RouterDeps struct {
-	Config  config.Config
-	Bridge  *natsbridge.Bridge
-	Stream  *stream.Gateway
-	Logger  *zap.Logger
-	Auth    auth.Hooks
-	ReadyFn func() bool
+	Config      config.Config
+	Bridge      *natsbridge.Bridge
+	Stream      *stream.Gateway
+	Logger      *zap.Logger
+	Auth        auth.Hooks
+	ReadyFn     func() bool
+	AgentStatus AgentStatusReader
 }
 
 func NewRouter(deps RouterDeps) http.Handler {
@@ -94,6 +106,8 @@ func NewRouter(deps RouterDeps) http.Handler {
 		api.Post("/hosts", hostCreateHandler(deps))
 		api.Get("/hosts/{id}", hostDetailHandler(deps))
 		api.Patch("/hosts/{id}", hostUpdateHandler(deps))
+		api.Get("/hosts/{id}/agent-status", hostAgentStatusHandler(deps))
+		api.Get("/hosts/{id}/agent-diagnostics", hostAgentDiagnosticsHandler(deps))
 
 		api.Get("/host-groups", hostGroupsListHandler(deps))
 		api.Post("/host-groups", hostGroupCreateHandler(deps))
@@ -111,6 +125,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 		api.Get("/deployments/{id}", deploymentDetailHandler(deps))
 		api.Get("/deployments/{id}/steps", deploymentStepsHandler(deps))
 		api.Get("/deployments/{id}/targets", deploymentTargetsHandler(deps))
+		api.Get("/deployments/jobs/{id}/timeline", deploymentTimelineHandler(deps))
 		api.Post("/deployments/{id}/retry", deploymentRetryHandler(deps))
 		api.Post("/deployments/{id}/cancel", deploymentCancelHandler(deps))
 		api.Post("/deployments/plan", deploymentPlanHandler(deps))
@@ -138,6 +153,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 		api.Get("/clusters", clustersListHandler(deps))
 		api.Get("/clusters/{id}", clusterDetailHandler(deps))
+		api.Get("/clusters/{id}/agents/overview", clusterAgentsOverviewHandler(deps))
 		api.Post("/clusters", clusterCreateHandler(deps))
 		api.Patch("/clusters/{id}", clusterUpdateHandler(deps))
 		api.Post("/clusters/{id}/hosts", clusterAddHostHandler(deps))
@@ -190,6 +206,16 @@ func NewRouter(deps RouterDeps) http.Handler {
 		})
 		api.Get("/stream/agents", func(w http.ResponseWriter, r *http.Request) {
 			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamAgents, Event: "agent"})
+		})
+		api.Get("/stream/agent-events", func(w http.ResponseWriter, r *http.Request) {
+			if deps.AgentStatus == nil {
+				middleware.WriteError(w, r, http.StatusServiceUnavailable, "unavailable", "agent status service is not ready")
+				return
+			}
+			deps.Stream.ServeMany(w, r, []stream.StreamRequest{
+				{Subject: deps.Config.NATS.Subjects.StreamAgents, Event: "agent-event", Mapper: deps.AgentStatus.MapAgentStreamEventJSON},
+				{Subject: deps.Config.NATS.Subjects.DeploymentsJobsStep, Event: "agent-event", Mapper: deps.AgentStatus.MapDeploymentStepEventJSON},
+			})
 		})
 	})
 

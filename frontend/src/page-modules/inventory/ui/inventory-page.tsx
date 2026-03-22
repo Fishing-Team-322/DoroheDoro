@@ -22,7 +22,7 @@ import {
 import { PageHeader } from "@/src/widgets/dashboard-layout";
 import { ErrorCard, JsonValue, LoadingCard } from "@/src/page-modules/common/ui/runtime-state";
 
-export function InventoryPage() {
+export function InventoryPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { dictionary, locale } = useI18n();
   const [hosts, setHosts] = useState<HostItem[]>([]);
   const [hostGroups, setHostGroups] = useState<HostGroupItem[]>([]);
@@ -69,15 +69,17 @@ export function InventoryPage() {
   const selectedHost = hosts.find((item) => item.host_id === selectedHostId) ?? null;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Inventory"
-        description="Live host inventory and host groups from control-plane."
-        breadcrumbs={[
-          { label: dictionary.common.dashboard, href: "#" },
-          { label: "Inventory" },
-        ]}
-      />
+    <div className={embedded ? "space-y-4" : "space-y-6"}>
+      {!embedded ? (
+        <PageHeader
+          title="Inventory"
+          description="Live host inventory and host groups from control-plane."
+          breadcrumbs={[
+            { label: dictionary.common.dashboard, href: "#" },
+            { label: "Inventory" },
+          ]}
+        />
+      ) : null}
 
       {loading ? <LoadingCard label="Loading inventory..." /> : null}
       {!loading && error ? <ErrorCard message={error} /> : null}

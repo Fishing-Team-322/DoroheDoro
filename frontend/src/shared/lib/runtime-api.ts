@@ -1,6 +1,6 @@
 "use client";
 
-import { createApiClient } from "@/src/shared/lib/api";
+import { createApiClient, type ApiResult } from "@/src/shared/lib/api";
 import { clearCsrfToken, fetchCsrfToken, getCsrfToken } from "@/src/shared/lib/auth/csrf";
 import { emitUnauthorized } from "@/src/shared/lib/auth/events";
 
@@ -15,6 +15,8 @@ const runtimeApiClient = createApiClient({
 });
 
 type QueryValue = string | number | boolean | null | undefined;
+
+export type RuntimeRequestResult<T> = ApiResult<T>;
 
 export type DashboardMetricItem = {
   key: string;
@@ -110,6 +112,24 @@ export type PolicyRevisionItem = {
   created_at: string;
 };
 
+export type PolicySummary = {
+  id: string;
+  name: string;
+  description?: string;
+  isActive?: boolean;
+  revision?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  body?: Record<string, unknown>;
+  raw?: unknown;
+};
+
+export type PoliciesList = {
+  items: PolicySummary[];
+  nextCursor?: string;
+  raw?: unknown;
+};
+
 export type DeploymentJobItem = {
   job_id: string;
   job_type: string;
@@ -186,6 +206,126 @@ export type DeploymentDetailResponse = {
   targets: DeploymentTargetItem[];
   steps: DeploymentStepItem[];
   request_id: string;
+};
+
+export type DeploymentMutationPayload = {
+  policyId: string;
+  agentIds?: string[];
+  params?: Record<string, string>;
+};
+
+export type DeploymentSummary = {
+  id: string;
+  jobType?: string;
+  status: string;
+  policyId?: string;
+  policyRevisionId?: string;
+  createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt?: string;
+  currentPhase?: string;
+  requestedBy?: string;
+  credentialProfileId?: string;
+  executorKind?: string;
+  totalTargets?: number;
+  pendingTargets?: number;
+  runningTargets?: number;
+  succeededTargets?: number;
+  failedTargets?: number;
+  cancelledTargets?: number;
+  attemptCount?: number;
+  params?: Record<string, unknown>;
+  raw?: unknown;
+};
+
+export type DeploymentsList = {
+  items: DeploymentSummary[];
+  nextCursor?: string;
+  total?: number;
+  raw?: unknown;
+};
+
+export type DeploymentAttempt = {
+  id: string;
+  attemptNo?: number;
+  status?: string;
+  triggeredBy?: string;
+  reason?: string;
+  createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  raw?: unknown;
+};
+
+export type DeploymentPlanTarget = {
+  hostId?: string;
+  hostname?: string;
+  ip?: string;
+  sshPort?: number;
+  remoteUser?: string;
+};
+
+export type BootstrapPreview = {
+  hostId?: string;
+  hostname?: string;
+  bootstrapYaml?: string;
+};
+
+export type DeploymentPlan = {
+  jobType?: string;
+  policyId?: string;
+  policyRevisionId?: string;
+  policyRevision?: string;
+  credentialProfileId?: string;
+  credentialSummary?: string;
+  executorKind?: string;
+  actionSummary?: string;
+  targets: DeploymentPlanTarget[];
+  bootstrapPreviews: BootstrapPreview[];
+  warnings: string[];
+  raw?: unknown;
+};
+
+export type DeploymentTarget = {
+  id: string;
+  attemptId?: string;
+  hostId?: string;
+  hostname?: string;
+  status?: string;
+  errorMessage?: string;
+  createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt?: string;
+  raw?: unknown;
+};
+
+export type DeploymentStep = {
+  id: string;
+  attemptId?: string;
+  targetId?: string;
+  name?: string;
+  status?: string;
+  message?: string;
+  payload?: unknown;
+  createdAt?: string;
+  updatedAt?: string;
+  raw?: unknown;
+};
+
+export type DeploymentDetails = {
+  summary: DeploymentSummary;
+  attempts: DeploymentAttempt[];
+  targets: DeploymentTarget[];
+  steps: DeploymentStep[];
+  raw?: unknown;
+};
+
+export type BootstrapTokenIssuePayload = {
+  hostId?: string;
+  hostGroupId?: string;
+  note?: string;
 };
 
 export type AgentItem = {
@@ -317,6 +457,302 @@ export type AuditEventsResponse = {
   request_id: string;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> => {
+  return isRecord(value) ? value : {};
+};
+
+const asArray = (value: unknown): unknown[] => {
+  return Array.isArray(value) ? value : [];
+};
+
+const asString = (value: unknown): string | undefined => {
+  return typeof value === "string" && value.trim() ? value : undefined;
+};
+
+const asBoolean = (value: unknown): boolean | undefined => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    if (value === "true") {
+      return true;
+    }
+
+    if (value === "false") {
+      return false;
+    }
+  }
+
+  return undefined;
+};
+
+const asNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+};
+
+const asStringArray = (value: unknown): string[] => {
+  return asArray(value)
+    .map((item) => asString(item))
+    .filter((item): item is string => Boolean(item));
+};
+
+const parseJsonString = (value: unknown): unknown => {
+  if (typeof value !== "string" || !value.trim()) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+};
+
+const pickObject = (value: unknown): Record<string, unknown> | undefined => {
+  if (isRecord(value)) {
+    return value;
+  }
+
+  const parsed = parseJsonString(value);
+  return isRecord(parsed) ? parsed : undefined;
+};
+
+const encodePathSegment = (value: string): string => encodeURIComponent(value);
+
+const serializeDeploymentPayload = (
+  payload: DeploymentMutationPayload
+): Record<string, unknown> => {
+  return {
+    policy_id: payload.policyId,
+    ...(payload.agentIds && payload.agentIds.length > 0
+      ? { agent_ids: payload.agentIds }
+      : {}),
+    ...(payload.params && Object.keys(payload.params).length > 0
+      ? { params: payload.params }
+      : {}),
+  };
+};
+
+const normalizePolicy = (value: unknown): PolicySummary => {
+  const record = asRecord(value);
+
+  return {
+    id: asString(record.id ?? record.policy_id) ?? "unknown-policy",
+    name:
+      asString(record.name) ??
+      asString(record.policy_id) ??
+      "Unnamed policy",
+    description: asString(record.description),
+    isActive: asBoolean(record.is_active),
+    revision: asString(record.revision ?? record.latest_revision),
+    createdAt: asString(record.created_at),
+    updatedAt: asString(record.updated_at),
+    body:
+      pickObject(record.latest_body_json) ??
+      pickObject(record.body_json) ??
+      pickObject(record.policy_body_json),
+    raw: value,
+  };
+};
+
+const normalizeDeploymentSummary = (value: unknown): DeploymentSummary => {
+  const record = asRecord(value);
+  const summary = pickObject(record.summary_json);
+  const payload = pickObject(record.payload_json);
+
+  return {
+    id: asString(record.id ?? record.job_id) ?? "unknown-deployment",
+    jobType:
+      asString(record.job_type) ??
+      asString(summary?.job_type) ??
+      undefined,
+    status:
+      asString(record.status) ??
+      asString(summary?.status) ??
+      "unknown",
+    policyId:
+      asString(record.policy_id) ??
+      asString(summary?.policy_id) ??
+      undefined,
+    policyRevisionId:
+      asString(record.policy_revision_id) ??
+      asString(summary?.policy_revision_id) ??
+      undefined,
+    createdAt: asString(record.created_at),
+    startedAt: asString(record.started_at),
+    finishedAt: asString(record.finished_at),
+    updatedAt: asString(record.updated_at),
+    currentPhase:
+      asString(record.current_phase) ??
+      asString(summary?.current_phase) ??
+      undefined,
+    requestedBy:
+      asString(record.requested_by) ??
+      asString(summary?.requested_by) ??
+      undefined,
+    credentialProfileId:
+      asString(record.credential_profile_id) ??
+      asString(summary?.credential_profile_id) ??
+      undefined,
+    executorKind:
+      asString(record.executor_kind) ??
+      asString(summary?.executor_kind) ??
+      undefined,
+    totalTargets:
+      asNumber(record.total_targets) ??
+      asNumber(summary?.total_targets),
+    pendingTargets:
+      asNumber(record.pending_targets) ??
+      asNumber(summary?.pending_targets),
+    runningTargets:
+      asNumber(record.running_targets) ??
+      asNumber(summary?.running_targets),
+    succeededTargets:
+      asNumber(record.succeeded_targets) ??
+      asNumber(summary?.succeeded_targets),
+    failedTargets:
+      asNumber(record.failed_targets) ??
+      asNumber(summary?.failed_targets),
+    cancelledTargets:
+      asNumber(record.cancelled_targets) ??
+      asNumber(summary?.cancelled_targets),
+    attemptCount:
+      asNumber(record.attempt_count) ??
+      asNumber(summary?.attempt_count),
+    params:
+      pickObject(record.params) ??
+      pickObject(payload?.params) ??
+      undefined,
+    raw: value,
+  };
+};
+
+const normalizeDeploymentAttempt = (value: unknown): DeploymentAttempt => {
+  const record = asRecord(value);
+
+  return {
+    id:
+      asString(record.deployment_attempt_id ?? record.id) ?? "unknown-attempt",
+    attemptNo: asNumber(record.attempt_no),
+    status: asString(record.status),
+    triggeredBy: asString(record.triggered_by),
+    reason: asString(record.reason),
+    createdAt: asString(record.created_at),
+    startedAt: asString(record.started_at),
+    finishedAt: asString(record.finished_at),
+    raw: value,
+  };
+};
+
+const normalizeDeploymentTarget = (value: unknown): DeploymentTarget => {
+  const record = asRecord(value);
+
+  return {
+    id: asString(record.deployment_target_id ?? record.id) ?? "unknown-target",
+    attemptId: asString(record.deployment_attempt_id ?? record.attempt_id),
+    hostId: asString(record.host_id),
+    hostname:
+      asString(record.hostname_snapshot ?? record.hostname ?? record.host) ??
+      undefined,
+    status: asString(record.status),
+    errorMessage: asString(record.error_message),
+    createdAt: asString(record.created_at),
+    startedAt: asString(record.started_at),
+    finishedAt: asString(record.finished_at),
+    updatedAt: asString(record.updated_at),
+    raw: value,
+  };
+};
+
+const normalizeDeploymentStep = (value: unknown): DeploymentStep => {
+  const record = asRecord(value);
+
+  return {
+    id: asString(record.deployment_step_id ?? record.id) ?? "unknown-step",
+    attemptId: asString(record.deployment_attempt_id ?? record.attempt_id),
+    targetId: asString(record.deployment_target_id ?? record.target_id),
+    name: asString(record.step_name ?? record.name),
+    status: asString(record.status),
+    message: asString(record.message),
+    payload: parseJsonString(record.payload_json) ?? pickObject(record.payload),
+    createdAt: asString(record.created_at),
+    updatedAt: asString(record.updated_at),
+    raw: value,
+  };
+};
+
+const normalizeDeploymentDetails = (value: unknown): DeploymentDetails => {
+  const record = asRecord(value);
+  const summarySource = record.item ?? record.job ?? value;
+
+  return {
+    summary: normalizeDeploymentSummary(summarySource),
+    attempts: asArray(record.attempts).map(normalizeDeploymentAttempt),
+    targets: asArray(record.targets).map(normalizeDeploymentTarget),
+    steps: asArray(record.steps).map(normalizeDeploymentStep),
+    raw: value,
+  };
+};
+
+const normalizePlanTarget = (value: unknown): DeploymentPlanTarget => {
+  const record = asRecord(value);
+
+  return {
+    hostId: asString(record.host_id),
+    hostname: asString(record.hostname ?? record.host),
+    ip: asString(record.ip),
+    sshPort: asNumber(record.ssh_port),
+    remoteUser: asString(record.remote_user),
+  };
+};
+
+const normalizeBootstrapPreview = (value: unknown): BootstrapPreview => {
+  const record = asRecord(value);
+
+  return {
+    hostId: asString(record.host_id),
+    hostname: asString(record.hostname),
+    bootstrapYaml: asString(record.bootstrap_yaml),
+  };
+};
+
+const normalizeDeploymentPlan = (value: unknown): DeploymentPlan => {
+  const record = asRecord(value);
+
+  return {
+    jobType: asString(record.job_type),
+    policyId: asString(record.policy_id),
+    policyRevisionId: asString(record.policy_revision_id),
+    policyRevision: asString(record.policy_revision),
+    credentialProfileId: asString(record.credential_profile_id),
+    credentialSummary: asString(record.credential_summary),
+    executorKind: asString(record.executor_kind),
+    actionSummary: asString(record.action_summary),
+    targets: asArray(record.targets).map(normalizePlanTarget),
+    bootstrapPreviews: asArray(record.bootstrap_previews).map(
+      normalizeBootstrapPreview
+    ),
+    warnings: asStringArray(record.warnings),
+    raw: value,
+  };
+};
+
 function buildQuery(params: Record<string, QueryValue>): string {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -352,6 +788,44 @@ export function listCredentials() {
   return runtimeApiClient.get<{ items: CredentialItem[]; request_id: string }>("/api/v1/credentials");
 }
 
+export async function getPolicies(
+  options: {
+    signal?: AbortSignal;
+    cursor?: string;
+  } = {}
+): Promise<RuntimeRequestResult<PoliciesList>> {
+  const response = await runtimeApiClient.getWithMeta<unknown>("/api/v1/policies", {
+    signal: options.signal,
+    query: { cursor: options.cursor },
+  });
+  const record = asRecord(response.data);
+
+  return {
+    meta: response.meta,
+    data: {
+      items: asArray(record.items).map(normalizePolicy),
+      nextCursor: asString(record.next_cursor),
+      raw: response.data,
+    },
+  };
+}
+
+export async function getPolicyById(
+  id: string,
+  signal?: AbortSignal
+): Promise<RuntimeRequestResult<PolicySummary>> {
+  const response = await runtimeApiClient.getWithMeta<unknown>(
+    `/api/v1/policies/${encodePathSegment(id)}`,
+    { signal }
+  );
+  const record = asRecord(response.data);
+
+  return {
+    meta: response.meta,
+    data: normalizePolicy(record.item ?? response.data),
+  };
+}
+
 export function listPolicies() {
   return runtimeApiClient.get<{ items: PolicyItem[]; request_id: string }>("/api/v1/policies");
 }
@@ -362,14 +836,138 @@ export function getPolicyRevisions(policyId: string) {
   );
 }
 
+export async function getDeployments(
+  options: {
+    signal?: AbortSignal;
+    cursor?: string;
+  } = {}
+): Promise<RuntimeRequestResult<DeploymentsList>> {
+  const response = await runtimeApiClient.getWithMeta<unknown>(
+    "/api/v1/deployments",
+    {
+      signal: options.signal,
+      query: { cursor: options.cursor },
+    }
+  );
+  const record = asRecord(response.data);
+
+  return {
+    meta: response.meta,
+    data: {
+      items: asArray(record.items ?? record.jobs).map(normalizeDeploymentSummary),
+      nextCursor: asString(record.next_cursor),
+      total: asNumber(record.total),
+      raw: response.data,
+    },
+  };
+}
+
 export function listDeployments() {
   return runtimeApiClient.get<{ items: DeploymentJobItem[]; total: number; limit: number; offset: number; request_id: string }>(
     "/api/v1/deployments"
   );
 }
 
+export async function getDeploymentById(
+  id: string,
+  signal?: AbortSignal
+): Promise<RuntimeRequestResult<DeploymentDetails>> {
+  const response = await runtimeApiClient.getWithMeta<unknown>(
+    `/api/v1/deployments/${encodePathSegment(id)}`,
+    { signal }
+  );
+
+  return {
+    meta: response.meta,
+    data: normalizeDeploymentDetails(response.data),
+  };
+}
+
 export function getDeployment(jobId: string) {
   return runtimeApiClient.get<DeploymentDetailResponse>(`/api/v1/deployments/${jobId}`);
+}
+
+export async function createDeploymentPlan(
+  payload: DeploymentMutationPayload,
+  signal?: AbortSignal
+): Promise<RuntimeRequestResult<DeploymentPlan>> {
+  await ensureCsrfToken();
+  const response = await runtimeApiClient.postWithMeta<unknown>(
+    "/api/v1/deployments/plan",
+    serializeDeploymentPayload(payload),
+    { signal }
+  );
+
+  return {
+    meta: response.meta,
+    data: normalizeDeploymentPlan(response.data),
+  };
+}
+
+export async function createDeployment(
+  payload: DeploymentMutationPayload,
+  signal?: AbortSignal
+): Promise<RuntimeRequestResult<DeploymentSummary>> {
+  await ensureCsrfToken();
+  const response = await runtimeApiClient.postWithMeta<unknown>(
+    "/api/v1/deployments",
+    serializeDeploymentPayload(payload),
+    { signal }
+  );
+  const record = asRecord(response.data);
+
+  return {
+    meta: response.meta,
+    data: normalizeDeploymentSummary(record.item ?? record.job ?? response.data),
+  };
+}
+
+export async function retryDeployment(
+  id: string,
+  payload?: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<RuntimeRequestResult<DeploymentSummary>> {
+  await ensureCsrfToken();
+  const response = await runtimeApiClient.postWithMeta<unknown>(
+    `/api/v1/deployments/${encodePathSegment(id)}/retry`,
+    payload,
+    { signal }
+  );
+  const record = asRecord(response.data);
+
+  return {
+    meta: response.meta,
+    data: normalizeDeploymentSummary(record.item ?? record.job ?? response.data),
+  };
+}
+
+export async function cancelDeployment(
+  id: string,
+  payload?: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<RuntimeRequestResult<DeploymentSummary>> {
+  await ensureCsrfToken();
+  const response = await runtimeApiClient.postWithMeta<unknown>(
+    `/api/v1/deployments/${encodePathSegment(id)}/cancel`,
+    payload,
+    { signal }
+  );
+  const record = asRecord(response.data);
+
+  return {
+    meta: response.meta,
+    data: normalizeDeploymentSummary(record.item ?? record.job ?? response.data),
+  };
+}
+
+export async function issueBootstrapToken(
+  payload: BootstrapTokenIssuePayload
+): Promise<never> {
+  // TODO: Missing public Edge API bridge for agents.bootstrap-token.issue.
+  void payload;
+  throw new Error(
+    "Bootstrap token issuance is unavailable until the public Edge API bridge is exposed."
+  );
 }
 
 export function listAgents() {
@@ -382,6 +980,43 @@ export function getAgentDiagnostics(agentId: string) {
   );
 }
 
+export function getDeploymentStatusCategory(status?: string) {
+  switch ((status ?? "").toLowerCase()) {
+    case "accepted":
+    case "queued":
+      return "default";
+    case "running":
+      return "warning";
+    case "succeeded":
+    case "healthy":
+    case "ready":
+    case "online":
+    case "ok":
+      return "success";
+    case "partial_success":
+    case "warn":
+      return "warning";
+    case "failed":
+    case "cancelled":
+    case "offline":
+    case "unavailable":
+    case "error":
+      return "danger";
+    default:
+      return "default";
+  }
+}
+
+export function canRetryDeployment(status?: string): boolean {
+  const normalized = (status ?? "").toLowerCase();
+  return ["failed", "partial_success", "cancelled"].includes(normalized);
+}
+
+export function canCancelDeployment(status?: string): boolean {
+  const normalized = (status ?? "").toLowerCase();
+  return ["accepted", "queued", "running"].includes(normalized);
+}
+
 export async function searchLogs(input: {
   query?: string;
   from?: string;
@@ -389,6 +1024,7 @@ export async function searchLogs(input: {
   host?: string;
   service?: string;
   severity?: string;
+  agentId?: string;
   limit?: number;
   offset?: number;
 }) {
@@ -400,6 +1036,7 @@ export async function searchLogs(input: {
     host: input.host ?? "",
     service: input.service ?? "",
     severity: input.severity ?? "",
+    agent_id: input.agentId ?? "",
     limit: input.limit ?? 20,
     offset: input.offset ?? 0,
   });

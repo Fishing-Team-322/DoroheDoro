@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::Utc;
+use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -69,9 +69,12 @@ impl RuntimePhase {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiagnosticsSnapshot {
+    pub generated_at: String,
     pub agent_id: String,
     pub hostname: String,
     pub version: String,
+    pub install_mode: String,
+    pub transport_mode: String,
     pub uptime_sec: u64,
     pub current_policy_revision: Option<String>,
     pub runtime_status: String,
@@ -91,8 +94,13 @@ pub struct DiagnosticsSnapshot {
     pub spooled_bytes: u64,
     pub last_error: Option<String>,
     pub last_error_kind: Option<String>,
+    pub last_transport_error: Option<String>,
     pub last_successful_send_at: Option<i64>,
     pub consecutive_send_failures: u32,
+    pub enrollment_state: EnrollmentStateSnapshot,
+    pub heartbeat_state: HeartbeatStateSnapshot,
+    pub diagnostics_state: DiagnosticsDeliveryStateSnapshot,
+    pub source_summary: SourceSummarySnapshot,
     pub transport_state: TransportStateSnapshot,
     pub policy_state: PolicyStateSnapshot,
     pub connectivity_state: ConnectivityStateSnapshot,
@@ -106,6 +114,9 @@ pub struct DiagnosticsSnapshot {
     pub cluster: ClusterMetadata,
     pub identity_status: IdentityStatusSnapshot,
     pub security_posture: SecurityPostureStatusSnapshot,
+    pub permission_issues: Vec<String>,
+    pub warning_list: Vec<String>,
+    pub failure_list: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +152,47 @@ pub struct ConnectivityStateSnapshot {
     pub last_connect_error: Option<String>,
     pub last_tls_error: Option<String>,
     pub last_handshake_success_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrollmentStateSnapshot {
+    pub status: String,
+    pub reason: Option<String>,
+    pub agent_id_present: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatStateSnapshot {
+    pub interval_sec: u64,
+    pub scheduler_running: bool,
+    pub last_attempt_at: Option<i64>,
+    pub last_success_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub consecutive_failures: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticsDeliveryStateSnapshot {
+    pub interval_sec: u64,
+    pub scheduler_running: bool,
+    pub last_attempt_at: Option<i64>,
+    pub last_success_at: Option<i64>,
+    pub last_error: Option<String>,
+    pub consecutive_failures: u32,
+    pub last_local_snapshot_at: Option<i64>,
+    pub local_snapshot_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SourceSummarySnapshot {
+    pub total: usize,
+    pub readable: usize,
+    pub missing: usize,
+    pub unreadable: usize,
+    pub running: usize,
+    pub waiting: usize,
+    pub error: usize,
+    pub idle: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,6 +295,20 @@ struct RuntimeStatus {
     last_connect_error: Option<String>,
     last_tls_error: Option<String>,
     last_handshake_success_at: Option<i64>,
+    heartbeat_interval_sec: u64,
+    last_heartbeat_attempt_at: Option<i64>,
+    last_heartbeat_success_at: Option<i64>,
+    last_heartbeat_error: Option<String>,
+    heartbeat_consecutive_failures: u32,
+    heartbeat_scheduler_running: bool,
+    diagnostics_interval_sec: u64,
+    last_diagnostics_attempt_at: Option<i64>,
+    last_diagnostics_success_at: Option<i64>,
+    last_diagnostics_error: Option<String>,
+    diagnostics_consecutive_failures: u32,
+    diagnostics_scheduler_running: bool,
+    last_local_snapshot_at: Option<i64>,
+    local_snapshot_path: Option<String>,
     degraded_mode: bool,
     degraded_reason: Option<String>,
     blocked_delivery: bool,
@@ -287,6 +353,8 @@ impl RuntimeStatusHandle {
         transport_mode: String,
         static_context: RuntimeStaticContext,
         spool_enabled: bool,
+        heartbeat_interval_sec: u64,
+        diagnostics_interval_sec: u64,
         sources: &[SourceConfig],
         persisted_offsets: &[FileOffsetRecord],
         last_successful_send_at: Option<i64>,
@@ -320,6 +388,20 @@ impl RuntimeStatusHandle {
                 last_connect_error: None,
                 last_tls_error: None,
                 last_handshake_success_at: None,
+                heartbeat_interval_sec,
+                last_heartbeat_attempt_at: None,
+                last_heartbeat_success_at: None,
+                last_heartbeat_error: None,
+                heartbeat_consecutive_failures: 0,
+                heartbeat_scheduler_running: false,
+                diagnostics_interval_sec,
+                last_diagnostics_attempt_at: None,
+                last_diagnostics_success_at: None,
+                last_diagnostics_error: None,
+                diagnostics_consecutive_failures: 0,
+                diagnostics_scheduler_running: false,
+                last_local_snapshot_at: None,
+                local_snapshot_path: None,
                 degraded_mode: false,
                 degraded_reason: None,
                 blocked_delivery: false,
@@ -457,6 +539,8 @@ impl RuntimeStatusHandle {
     pub fn record_connectivity_success(&self, timestamp_unix_ms: i64) {
         if let Ok(mut inner) = self.inner.lock() {
             inner.last_handshake_success_at = Some(timestamp_unix_ms);
+            inner.last_connect_error = None;
+            inner.last_tls_error = None;
         }
     }
 
@@ -468,6 +552,69 @@ impl RuntimeStatusHandle {
             } else if is_connect_error(error) {
                 inner.last_connect_error = Some(message);
             }
+        }
+    }
+
+    pub fn mark_heartbeat_scheduler_running(&self, running: bool) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.heartbeat_scheduler_running = running;
+        }
+    }
+
+    pub fn record_heartbeat_attempt(&self, timestamp_unix_ms: i64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_heartbeat_attempt_at = Some(timestamp_unix_ms);
+        }
+    }
+
+    pub fn record_heartbeat_success(&self, timestamp_unix_ms: i64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_heartbeat_success_at = Some(timestamp_unix_ms);
+            inner.last_heartbeat_error = None;
+            inner.heartbeat_consecutive_failures = 0;
+        }
+    }
+
+    pub fn record_heartbeat_failure(&self, error: impl Into<String>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_heartbeat_error = Some(error.into());
+            inner.heartbeat_consecutive_failures =
+                inner.heartbeat_consecutive_failures.saturating_add(1);
+        }
+    }
+
+    pub fn mark_diagnostics_scheduler_running(&self, running: bool) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.diagnostics_scheduler_running = running;
+        }
+    }
+
+    pub fn record_diagnostics_attempt(&self, timestamp_unix_ms: i64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_diagnostics_attempt_at = Some(timestamp_unix_ms);
+        }
+    }
+
+    pub fn record_diagnostics_success(&self, timestamp_unix_ms: i64) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_diagnostics_success_at = Some(timestamp_unix_ms);
+            inner.last_diagnostics_error = None;
+            inner.diagnostics_consecutive_failures = 0;
+        }
+    }
+
+    pub fn record_diagnostics_failure(&self, error: impl Into<String>) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_diagnostics_error = Some(error.into());
+            inner.diagnostics_consecutive_failures =
+                inner.diagnostics_consecutive_failures.saturating_add(1);
+        }
+    }
+
+    pub fn record_local_snapshot_write(&self, timestamp_unix_ms: i64, path: String) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.last_local_snapshot_at = Some(timestamp_unix_ms);
+            inner.local_snapshot_path = Some(path);
         }
     }
 
@@ -497,6 +644,8 @@ impl RuntimeStatusHandle {
         if let Ok(mut inner) = self.inner.lock() {
             inner.last_successful_send_at = Some(timestamp_unix_ms);
             inner.last_handshake_success_at = Some(timestamp_unix_ms);
+            inner.last_connect_error = None;
+            inner.last_tls_error = None;
             inner.consecutive_send_failures = 0;
             inner.server_unavailable_since = None;
             inner.blocked_delivery = false;
@@ -805,12 +954,28 @@ impl RuntimeStatusHandle {
                 last_error: source.last_error.clone(),
             })
             .collect::<Vec<_>>();
+        let source_summary = build_source_summary(&source_statuses);
         let compatibility = build_dynamic_compatibility(&inner.compatibility, &source_statuses);
+        let warning_list = build_warning_list(
+            &compatibility,
+            inner.degraded_reason.as_deref(),
+            &source_statuses,
+        );
+        let failure_list = build_failure_list(
+            &compatibility,
+            inner.blocked_reason.as_deref(),
+            current_transport_error(&inner).as_deref(),
+            &source_statuses,
+        );
+        let last_transport_error = current_transport_error(&inner);
 
         DiagnosticsSnapshot {
+            generated_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
             agent_id: inner.agent_id.clone(),
             hostname: inner.hostname.clone(),
             version: inner.version.clone(),
+            install_mode: inner.install.resolved_mode.clone(),
+            transport_mode: inner.transport_mode.clone(),
             uptime_sec: inner.started_at.elapsed().as_secs(),
             current_policy_revision: inner.current_policy_revision.clone(),
             runtime_status: inner.runtime_phase.as_str().to_string(),
@@ -836,8 +1001,33 @@ impl RuntimeStatusHandle {
             spooled_bytes: inner.spool_stats.total_bytes,
             last_error: inner.last_error.clone(),
             last_error_kind: inner.last_error_kind.map(|kind| kind.to_string()),
+            last_transport_error,
             last_successful_send_at: inner.last_successful_send_at,
             consecutive_send_failures: inner.consecutive_send_failures,
+            enrollment_state: EnrollmentStateSnapshot {
+                status: inner.identity_status.status.clone(),
+                reason: inner.identity_status.reason.clone(),
+                agent_id_present: !inner.agent_id.is_empty() || inner.persisted_identity_present,
+            },
+            heartbeat_state: HeartbeatStateSnapshot {
+                interval_sec: inner.heartbeat_interval_sec,
+                scheduler_running: inner.heartbeat_scheduler_running,
+                last_attempt_at: inner.last_heartbeat_attempt_at,
+                last_success_at: inner.last_heartbeat_success_at,
+                last_error: inner.last_heartbeat_error.clone(),
+                consecutive_failures: inner.heartbeat_consecutive_failures,
+            },
+            diagnostics_state: DiagnosticsDeliveryStateSnapshot {
+                interval_sec: inner.diagnostics_interval_sec,
+                scheduler_running: inner.diagnostics_scheduler_running,
+                last_attempt_at: inner.last_diagnostics_attempt_at,
+                last_success_at: inner.last_diagnostics_success_at,
+                last_error: inner.last_diagnostics_error.clone(),
+                consecutive_failures: inner.diagnostics_consecutive_failures,
+                last_local_snapshot_at: inner.last_local_snapshot_at,
+                local_snapshot_path: inner.local_snapshot_path.clone(),
+            },
+            source_summary,
             transport_state: TransportStateSnapshot {
                 mode: inner.transport_mode.clone(),
                 server_unavailable_for_sec: inner
@@ -889,10 +1079,13 @@ impl RuntimeStatusHandle {
                 spooled_bytes: inner.spool_stats.total_bytes,
                 last_successful_send_at: inner.last_successful_send_at,
             },
-            compatibility,
+            compatibility: compatibility.clone(),
             cluster: inner.cluster.clone(),
             identity_status: inner.identity_status.clone(),
             security_posture: inner.security_posture.clone(),
+            permission_issues: compatibility.permission_issues.clone(),
+            warning_list,
+            failure_list,
         }
     }
 
@@ -1008,6 +1201,116 @@ fn parse_inode(file_key: Option<&str>) -> Option<u64> {
         .and_then(|value| value.parse::<u64>().ok())
 }
 
+fn build_source_summary(source_statuses: &[SourceStatusSnapshot]) -> SourceSummarySnapshot {
+    let mut summary = SourceSummarySnapshot {
+        total: source_statuses.len(),
+        ..SourceSummarySnapshot::default()
+    };
+
+    for source in source_statuses {
+        match source.status.as_str() {
+            "running" | "rotating" => {
+                summary.running = summary.running.saturating_add(1);
+                summary.readable = summary.readable.saturating_add(1);
+            }
+            "waiting" => {
+                summary.waiting = summary.waiting.saturating_add(1);
+                summary.missing = summary.missing.saturating_add(1);
+            }
+            "error" => {
+                summary.error = summary.error.saturating_add(1);
+                summary.unreadable = summary.unreadable.saturating_add(1);
+            }
+            _ => {
+                summary.idle = summary.idle.saturating_add(1);
+                if source.last_error.is_some() {
+                    summary.unreadable = summary.unreadable.saturating_add(1);
+                } else {
+                    summary.readable = summary.readable.saturating_add(1);
+                }
+            }
+        }
+    }
+
+    summary
+}
+
+fn current_transport_error(inner: &RuntimeStatus) -> Option<String> {
+    inner
+        .last_tls_error
+        .clone()
+        .or_else(|| inner.last_connect_error.clone())
+        .or_else(|| {
+            inner
+                .last_error_kind
+                .map(|_| inner.last_error.clone())
+                .unwrap_or(None)
+        })
+}
+
+fn build_warning_list(
+    compatibility: &CompatibilitySnapshot,
+    degraded_reason: Option<&str>,
+    source_statuses: &[SourceStatusSnapshot],
+) -> Vec<String> {
+    let mut warnings = compatibility.warnings.clone();
+    if let Some(reason) = degraded_reason {
+        push_unique(&mut warnings, format!("degraded mode: {reason}"));
+    }
+    for source in source_statuses {
+        if source.status == "waiting" {
+            if let Some(error) = &source.last_error {
+                push_unique(
+                    &mut warnings,
+                    format!(
+                        "source `{}` is waiting on `{}`: {error}",
+                        source.source_id, source.path
+                    ),
+                );
+            }
+        }
+    }
+    warnings
+}
+
+fn build_failure_list(
+    compatibility: &CompatibilitySnapshot,
+    blocked_reason: Option<&str>,
+    last_transport_error: Option<&str>,
+    source_statuses: &[SourceStatusSnapshot],
+) -> Vec<String> {
+    let mut failures = compatibility.errors.clone();
+    for issue in &compatibility.permission_issues {
+        push_unique(&mut failures, issue.clone());
+    }
+    if let Some(reason) = blocked_reason {
+        push_unique(&mut failures, format!("blocked delivery: {reason}"));
+    }
+    if let Some(error) = last_transport_error {
+        push_unique(&mut failures, format!("transport: {error}"));
+    }
+    for source in source_statuses {
+        if source.status == "error" {
+            if let Some(error) = &source.last_error {
+                push_unique(
+                    &mut failures,
+                    format!(
+                        "source `{}` failed on `{}`: {error}",
+                        source.source_id, source.path
+                    ),
+                );
+            }
+        }
+    }
+    failures
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.iter().any(|current| current == &value) {
+        values.push(value);
+    }
+}
+
 fn build_dynamic_compatibility(
     base: &CompatibilitySnapshot,
     source_statuses: &[SourceStatusSnapshot],
@@ -1116,6 +1419,8 @@ mod tests {
             "mock".to_string(),
             test_static_context(),
             true,
+            30,
+            30,
             &[SourceConfig {
                 kind: "file".to_string(),
                 source_id: Some("file:/tmp/demo.log".to_string()),

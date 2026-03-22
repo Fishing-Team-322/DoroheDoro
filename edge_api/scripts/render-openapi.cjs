@@ -157,6 +157,158 @@ const spec = {
       CredentialItem: { type: 'object', properties: { credentials_profile_id: str, name: str, kind: str, description: str, vault_ref: str, created_at: dt, updated_at: dt }, required: ['credentials_profile_id', 'name', 'kind', 'vault_ref', 'created_at', 'updated_at'] },
       AgentItem: { type: 'object', properties: { agent_id: str, hostname: str, status: str, version: str, metadata_json: freeObject, first_seen_at: dt, last_seen_at: dt }, required: ['agent_id', 'hostname', 'status', 'first_seen_at', 'last_seen_at'] },
       AgentDiagnosticsItem: { type: 'object', properties: { agent_id: str, payload_json: freeObject, created_at: dt }, required: ['agent_id', 'created_at'] },
+      AgentIssue: { type: 'object', properties: { code: str, severity: str, domain: str, source: str, message: str }, required: ['code', 'severity', 'domain', 'message'] },
+      AgentDiagnosticsCheck: { type: 'object', properties: { check_id: str, name: str, status: str, severity: str, domain: str, message: str, hint: str }, required: ['check_id', 'name', 'status', 'severity', 'domain', 'message'] },
+      AgentDataFreshnessSection: { type: 'object', properties: { status: str, observed_at: dt, age_sec: u64, note: str }, required: ['status'] },
+      AgentDataFreshness: { type: 'object', properties: { generated_at: dt, sections: { type: 'object', additionalProperties: ref('AgentDataFreshnessSection') } }, required: ['generated_at'] },
+      HostAgentDiagnosticsSummary: { type: 'object', properties: { doctor_status: str, warning_count: { type: 'integer' }, failure_count: { type: 'integer' }, spool_status: str, transport_status: str, tls_status: str, source_status: str, top_issues: { type: 'array', items: ref('AgentIssue') } }, required: ['doctor_status', 'warning_count', 'failure_count', 'spool_status', 'transport_status', 'tls_status', 'source_status', 'top_issues'] },
+      AgentDegradedMode: { type: 'object', properties: { active: bool, reason: str }, required: ['active'] },
+      HostAgentStatusView: {
+        type: 'object',
+        properties: {
+          host_id: str,
+          hostname: str,
+          cluster_id: str,
+          cluster_name: str,
+          service_name: str,
+          environment: str,
+          deployment_job_id: str,
+          deployment_status: str,
+          deployment_current_phase: str,
+          last_successful_deploy_at: dt,
+          last_failed_deploy_at: dt,
+          executor_kind: str,
+          install_mode: str,
+          artifact_ref: str,
+          agent_id: str,
+          enrollment_status: str,
+          enrolled_at: dt,
+          edge_connected: bool,
+          last_heartbeat_at: dt,
+          heartbeat_status: str,
+          last_diagnostics_at: dt,
+          doctor_status: str,
+          warning_count: { type: 'integer' },
+          failure_count: { type: 'integer' },
+          top_issues: { type: 'array', items: ref('AgentIssue') },
+          spool_status: str,
+          transport_status: str,
+          tls_status: str,
+          source_status: str,
+          last_log_seen_at: dt,
+          last_batch_sent_at: dt,
+          recent_logs_per_minute: u64,
+          recent_errors_per_minute: u64,
+          last_known_errors: { type: 'array', items: ref('AgentIssue') },
+          last_known_warnings: { type: 'array', items: ref('AgentIssue') },
+          primary_failure_domain: str,
+          human_hint: str,
+          suggested_next_step: str,
+          missing_sections: { type: 'array', items: str },
+          data_freshness: ref('AgentDataFreshness'),
+        },
+        required: ['host_id', 'hostname', 'deployment_status', 'enrollment_status', 'edge_connected', 'heartbeat_status', 'doctor_status', 'warning_count', 'failure_count', 'top_issues', 'spool_status', 'transport_status', 'tls_status', 'source_status', 'recent_logs_per_minute', 'recent_errors_per_minute', 'primary_failure_domain', 'human_hint', 'suggested_next_step', 'data_freshness'],
+      },
+      HostAgentDiagnosticsView: {
+        type: 'object',
+        properties: {
+          host_id: str,
+          hostname: str,
+          agent_id: str,
+          collected_at: dt,
+          snapshot_json: freeObject,
+          summary: ref('HostAgentDiagnosticsSummary'),
+          checks: { type: 'array', items: ref('AgentDiagnosticsCheck') },
+          degraded_mode: ref('AgentDegradedMode'),
+          runtime_errors: { type: 'array', items: ref('AgentIssue') },
+          transport_errors: { type: 'array', items: ref('AgentIssue') },
+          spool_warnings: { type: 'array', items: ref('AgentIssue') },
+          missing_sections: { type: 'array', items: str },
+          data_freshness: ref('AgentDataFreshness'),
+        },
+        required: ['host_id', 'hostname', 'summary', 'checks', 'degraded_mode', 'runtime_errors', 'transport_errors', 'spool_warnings', 'data_freshness'],
+      },
+      ClusterAgentHostSummary: {
+        type: 'object',
+        properties: {
+          host_id: str,
+          hostname: str,
+          cluster_id: str,
+          agent_id: str,
+          deployment_status: str,
+          enrollment_status: str,
+          heartbeat_status: str,
+          doctor_status: str,
+          last_heartbeat_at: dt,
+          last_diagnostics_at: dt,
+          last_log_seen_at: dt,
+          primary_failure_domain: str,
+          human_hint: str,
+        },
+        required: ['host_id', 'hostname', 'deployment_status', 'enrollment_status', 'heartbeat_status', 'doctor_status', 'primary_failure_domain', 'human_hint'],
+      },
+      ClusterAgentsOverviewView: {
+        type: 'object',
+        properties: {
+          cluster_id: str,
+          cluster_name: str,
+          no_logs_window_min: { type: 'integer' },
+          total_hosts: { type: 'integer' },
+          deployed_agents: { type: 'integer' },
+          healthy_agents: { type: 'integer' },
+          stale_heartbeat: { type: 'integer' },
+          never_enrolled: { type: 'integer' },
+          deployment_failed: { type: 'integer' },
+          diagnostics_warn: { type: 'integer' },
+          diagnostics_fail: { type: 'integer' },
+          no_logs_in_last_n_min: { type: 'integer' },
+          hosts: { type: 'array', items: ref('ClusterAgentHostSummary') },
+          missing_sections: { type: 'array', items: str },
+          data_freshness: ref('AgentDataFreshness'),
+        },
+        required: ['cluster_id', 'no_logs_window_min', 'total_hosts', 'deployed_agents', 'healthy_agents', 'stale_heartbeat', 'never_enrolled', 'deployment_failed', 'diagnostics_warn', 'diagnostics_fail', 'no_logs_in_last_n_min', 'hosts', 'data_freshness'],
+      },
+      DeploymentTimelineItem: {
+        type: 'object',
+        properties: {
+          phase_type: str,
+          status: str,
+          occurred_at: dt,
+          deployment_attempt_id: str,
+          deployment_target_id: str,
+          attempt_no: u32,
+          host_id: str,
+          hostname: str,
+          raw_step_name: str,
+          message: str,
+          payload_json: freeObject,
+        },
+        required: ['phase_type', 'status', 'occurred_at'],
+      },
+      DeploymentTimelineView: {
+        type: 'object',
+        properties: {
+          job_id: str,
+          status: str,
+          current_phase: str,
+          items: { type: 'array', items: ref('DeploymentTimelineItem') },
+          missing_sections: { type: 'array', items: str },
+          data_freshness: ref('AgentDataFreshness'),
+        },
+        required: ['job_id', 'status', 'items', 'data_freshness'],
+      },
+      AgentRuntimeEvent: {
+        type: 'object',
+        properties: {
+          event_type: str,
+          host_id: str,
+          cluster_id: str,
+          severity: str,
+          occurred_at: dt,
+          payload: freeObject,
+        },
+        required: ['event_type', 'severity', 'occurred_at', 'payload'],
+      },
       DeploymentJobItem: { type: 'object', properties: { job_id: str, job_type: str, status: str, requested_by: str, policy_id: str, policy_revision_id: str, credential_profile_id: str, executor_kind: str, current_phase: str, total_targets: u32, pending_targets: u32, running_targets: u32, succeeded_targets: u32, failed_targets: u32, cancelled_targets: u32, attempt_count: u32, created_at: dt, started_at: dt, finished_at: dt, updated_at: dt }, required: ['job_id', 'job_type', 'status', 'created_at', 'updated_at'] },
       DeploymentAttemptItem: { type: 'object', properties: { deployment_attempt_id: str, attempt_no: u32, status: str, triggered_by: str, reason: str, created_at: dt, started_at: dt, finished_at: dt }, required: ['deployment_attempt_id', 'attempt_no', 'status', 'created_at'] },
       DeploymentTargetItem: { type: 'object', properties: { deployment_target_id: str, deployment_attempt_id: str, host_id: str, hostname_snapshot: str, status: str, error_message: str, created_at: dt, started_at: dt, finished_at: dt, updated_at: dt }, required: ['deployment_target_id', 'deployment_attempt_id', 'host_id', 'hostname_snapshot', 'status', 'created_at', 'updated_at'] },
@@ -356,6 +508,8 @@ paths['/api/v1/policies/{id}/revisions'] = { get: secure({ tags: ['policies'], s
 
 paths['/api/v1/hosts'] = { get: listOp('inventory', 'List hosts', 'HostItem'), post: writeOp('inventory', 'Create host', 'HostUpsertRequest', 'HostItem', 201) };
 paths['/api/v1/hosts/{id}'] = { get: itemOp('inventory', 'Get host', 'HostItem', { params: [p('id', 'Host ID.')] }), patch: writeOp('inventory', 'Update host', 'HostUpsertRequest', 'HostItem', 200, { params: [p('id', 'Host ID.')] }) };
+paths['/api/v1/hosts/{id}/agent-status'] = { get: secure({ tags: ['agents'], summary: 'Get aggregated agent lifecycle status for a host', parameters: [p('id', 'Host ID.')], responses: { 200: response('Aggregated host agent status.', 'HostAgentStatusView', { 'X-Request-ID': headerRef('RequestId') }), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
+paths['/api/v1/hosts/{id}/agent-diagnostics'] = { get: secure({ tags: ['agents'], summary: 'Get normalized diagnostics detail for a host agent', parameters: [p('id', 'Host ID.')], responses: { 200: response('Normalized diagnostics detail.', 'HostAgentDiagnosticsView', { 'X-Request-ID': headerRef('RequestId') }), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
 
 paths['/api/v1/host-groups'] = { get: listOp('inventory', 'List host groups', 'HostGroupItem'), post: writeOp('inventory', 'Create host group', 'HostGroupUpsertRequest', 'HostGroupItem', 201) };
 paths['/api/v1/host-groups/{id}'] = { get: itemOp('inventory', 'Get host group', 'HostGroupItem', { params: [p('id', 'Host group ID.')] }), patch: writeOp('inventory', 'Update host group', 'HostGroupUpsertRequest', 'HostGroupItem', 200, { params: [p('id', 'Host group ID.')] }) };
@@ -378,11 +532,13 @@ paths['/api/v1/deployments/plan'] = { post: secure({ tags: ['deployments'], summ
 paths['/api/v1/deployments/{id}'] = { get: secure({ tags: ['deployments'], summary: 'Get deployment job with attempts, targets and steps', parameters: [p('id', 'Deployment job ID.')], responses: { 200: response('OK.', itemEnvelope('DeploymentJobItem', { attempts: { type: 'array', items: ref('DeploymentAttemptItem') }, targets: { type: 'array', items: ref('DeploymentTargetItem') }, steps: { type: 'array', items: ref('DeploymentStepItem') } }), natsHeaders), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
 paths['/api/v1/deployments/{id}/steps'] = { get: secure({ tags: ['deployments'], summary: 'List deployment steps', parameters: [p('id', 'Deployment job ID.')], responses: { 200: response('OK.', listEnvelope('DeploymentStepItem'), natsHeaders), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
 paths['/api/v1/deployments/{id}/targets'] = { get: secure({ tags: ['deployments'], summary: 'List deployment targets', parameters: [p('id', 'Deployment job ID.')], responses: { 200: response('OK.', listEnvelope('DeploymentTargetItem'), natsHeaders), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
+paths['/api/v1/deployments/jobs/{id}/timeline'] = { get: secure({ tags: ['deployments'], summary: 'Get normalized deployment timeline for one job', parameters: [p('id', 'Deployment job ID.')], responses: { 200: response('Normalized deployment timeline.', 'DeploymentTimelineView', { 'X-Request-ID': headerRef('RequestId') }), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
 paths['/api/v1/deployments/{id}/retry'] = { post: writeOp('deployments', 'Retry deployment job', 'DeploymentRetryRequest', 'DeploymentJobItem', 200, { params: [p('id', 'Deployment job ID.')] }) };
 paths['/api/v1/deployments/{id}/cancel'] = { post: writeOp('deployments', 'Cancel deployment job', 'DeploymentCancelRequest', 'DeploymentJobItem', 200, { params: [p('id', 'Deployment job ID.')] }) };
 
 paths['/api/v1/clusters'] = { get: listOp('clusters', 'List clusters', 'ClusterItem', { paged: true, params: [q('limit', u32, 'Maximum number of clusters to return.'), q('offset', u64, 'Pagination offset.'), q('query', str, 'Free text search term.'), q('host_id', str, 'Filter clusters bound to a host.'), q('include_members', bool, 'Include host membership in list response.')] }), post: writeOp('clusters', 'Create cluster', 'ClusterUpsertRequest', 'ClusterItem', 201) };
 paths['/api/v1/clusters/{id}'] = { get: itemOp('clusters', 'Get cluster', 'ClusterItem', { params: [p('id', 'Cluster ID.'), q('include_members', bool, 'Include host and agent bindings in the response.')] }), patch: writeOp('clusters', 'Update cluster', 'ClusterUpsertRequest', 'ClusterItem', 200, { params: [p('id', 'Cluster ID.')] }) };
+paths['/api/v1/clusters/{id}/agents/overview'] = { get: secure({ tags: ['clusters'], summary: 'Get aggregated agent connectivity overview for a cluster', parameters: [p('id', 'Cluster ID.')], responses: { 200: response('Aggregated cluster agents overview.', 'ClusterAgentsOverviewView', { 'X-Request-ID': headerRef('RequestId') }), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
 paths['/api/v1/clusters/{id}/hosts'] = { post: writeOp('clusters', 'Bind host to cluster', 'ClusterHostMutationRequest', 'ClusterItem', 200, { params: [p('id', 'Cluster ID.')] }) };
 paths['/api/v1/clusters/{id}/hosts/{hostId}'] = { delete: secure({ tags: ['clusters'], summary: 'Remove host from cluster', parameters: [p('id', 'Cluster ID.'), p('hostId', 'Host ID.')], responses: { 200: response('OK.', itemEnvelope('ClusterItem'), natsHeaders), ...publicErrors(400, 401, 403, 404, 502, 503, 504) } }) };
 
@@ -431,6 +587,7 @@ paths['/api/v1/stream/logs'] = { get: sse('stream', 'Logs SSE stream', 'Fan-out 
 paths['/api/v1/stream/deployments'] = { get: sse('stream', 'Deployments SSE stream', 'Fan-out stream for deployments.jobs.status and deployments.jobs.step subjects.') };
 paths['/api/v1/stream/alerts'] = { get: sse('stream', 'Alerts SSE stream', 'Fan-out stream for ui.stream.alerts subject.') };
 paths['/api/v1/stream/agents'] = { get: sse('stream', 'Agents SSE stream', 'Fan-out stream for ui.stream.agents subject.') };
+paths['/api/v1/stream/agent-events'] = { get: sse('stream', 'Agent lifecycle SSE stream', 'Fan-out stream that normalizes ui.stream.agents and deployments.jobs.step into agent lifecycle events for WEB.') };
 
 function isScalar(value) {
   return value === null || ['string', 'number', 'boolean'].includes(typeof value);
