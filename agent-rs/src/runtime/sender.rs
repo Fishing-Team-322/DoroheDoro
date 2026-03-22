@@ -286,6 +286,8 @@ async fn process_batch(
             state_writer
                 .update_runtime_state(RuntimeStatePatch {
                     last_handshake_success_at_unix_ms: Some(Some(now)),
+                    last_connect_error: Some(None),
+                    last_tls_error: Some(None),
                     ..RuntimeStatePatch::default()
                 })
                 .await?;
@@ -645,6 +647,8 @@ mod tests {
             "mock".to_string(),
             test_static_context(),
             true,
+            30,
+            30,
             &[SourceConfig {
                 kind: "file".to_string(),
                 source_id: Some("file:/tmp/demo.log".to_string()),

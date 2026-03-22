@@ -5,6 +5,7 @@ use std::{
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
+use tracing::warn;
 
 use crate::{
     error::{AppError, AppResult},
@@ -724,11 +725,19 @@ impl SqliteStateStore {
                  PRAGMA foreign_keys = ON;",
             )?;
         } else {
-            conn.execute_batch(
-                "PRAGMA journal_mode = DELETE;
-                 PRAGMA synchronous = NORMAL;
+            if let Err(error) = conn.execute_batch(
+                "PRAGMA journal_mode = MEMORY;
+                 PRAGMA synchronous = OFF;
+                 PRAGMA temp_store = MEMORY;
                  PRAGMA foreign_keys = ON;",
-            )?;
+            ) {
+                warn!(
+                    error = %error,
+                    db_path = %self.db_path.display(),
+                    "sqlite pragma tuning failed on non-linux host, falling back to minimal settings"
+                );
+                conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            }
         }
         Ok(conn)
     }

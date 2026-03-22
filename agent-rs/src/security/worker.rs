@@ -171,12 +171,6 @@ pub fn spawn_security_scan_worker(
                     reason = event.reason_code,
                     "security posture scan skipped"
                 );
-                if matches!(
-                    event.reason_code.as_str(),
-                    "disabled_by_config" | "unsupported_platform"
-                ) {
-                    return Ok(());
-                }
             } else if let Some(report) = artifacts.report.as_ref() {
                 info!(
                     report_id = report.report_id,
