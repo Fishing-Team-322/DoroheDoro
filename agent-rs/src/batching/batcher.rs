@@ -236,6 +236,8 @@ mod tests {
             "mock".to_string(),
             test_static_context(),
             true,
+            30,
+            30,
             &[SourceConfig {
                 kind: "file".to_string(),
                 source_id: Some("file:/tmp/demo.log".to_string()),

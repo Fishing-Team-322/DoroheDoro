@@ -152,18 +152,92 @@ impl SourceSupervisor {
             let _ = worker.handle.await;
         }
     }
+
+    async fn poll_workers(&mut self) {
+        let finished_paths = self
+            .workers
+            .iter()
+            .filter_map(|(path, worker)| worker.handle.is_finished().then_some(path.clone()))
+            .collect::<Vec<_>>();
+
+        for path in finished_paths {
+            let Some(worker) = self.workers.remove(&path) else {
+                continue;
+            };
+
+            match worker.handle.await {
+                Ok(()) => warn!(
+                    path = %path,
+                    source_id = worker.config.source_id(),
+                    "source worker exited unexpectedly, restarting"
+                ),
+                Err(error) => warn!(
+                    path = %path,
+                    source_id = worker.config.source_id(),
+                    error = %error,
+                    "source worker panicked, restarting"
+                ),
+            }
+
+            if self.shutdown.is_cancelled() {
+                continue;
+            }
+
+            self.status.record_source_error(
+                &path,
+                "source worker exited unexpectedly; restarting".to_string(),
+            );
+            let source_shutdown = self.shutdown.child_token();
+            let handle = spawn_file_source(
+                worker.config.clone(),
+                self.queue_config.clone(),
+                self.enrichment.clone(),
+                self.store.clone(),
+                self.status.clone(),
+                self.event_tx.clone(),
+                source_shutdown.clone(),
+            );
+            self.workers.insert(
+                path,
+                SourceWorker {
+                    config: worker.config,
+                    shutdown: source_shutdown,
+                    handle,
+                },
+            );
+        }
+    }
 }
 
 impl App {
     pub async fn load(config_path: PathBuf) -> AppResult<Self> {
         let config = AgentConfig::load(&config_path)?;
         logging::init(&config.log_level)?;
+        info!(
+            phase = "config_load",
+            config_path = %config_path.display(),
+            log_level = %config.log_level,
+            "startup phase completed"
+        );
 
         let hostname = resolve_hostname();
         let metadata = RuntimeMetadataContext::detect(&config, &config_path, &hostname)?;
         log_metadata_warnings(&metadata);
+        info!(
+            phase = "runtime_metadata_detect",
+            resolved_install_mode = %metadata.install.resolved_mode,
+            systemd_expected = metadata.install.systemd_expected,
+            transport_mode = %config.transport.mode.as_str(),
+            "startup phase completed"
+        );
 
         let store = SqliteStateStore::new(&config.state_dir)?;
+        info!(
+            phase = "state_db_open",
+            state_dir = %config.state_dir.display(),
+            state_db = %store.db_path().display(),
+            "startup phase completed"
+        );
         let runtime_state = store.load_runtime_state()?;
         let security_state = store.load_security_scan_state()?;
         let persisted_offsets = store.list_file_offsets()?;
@@ -202,6 +276,8 @@ impl App {
                 connectivity: build_connectivity_static_context(&config)?,
             },
             config.spool.enabled,
+            config.heartbeat.interval_sec,
+            config.diagnostics.interval_sec,
             &initial_sources,
             &persisted_offsets,
             runtime_state.last_successful_send_at_unix_ms,
@@ -231,6 +307,13 @@ impl App {
         status.set_runtime_phase(RuntimePhase::Starting, None);
 
         let transport = build_transport(&config)?;
+        info!(
+            phase = "transport_init",
+            edge_url = %config.edge_url,
+            edge_grpc_addr = %config.edge_grpc_addr,
+            transport_mode = %config.transport.mode.as_str(),
+            "startup phase completed"
+        );
         let mut app = Self {
             config,
             store,
@@ -243,12 +326,21 @@ impl App {
             active_sources: initial_sources,
         };
 
+        info!(
+            phase = "enrollment_connect",
+            "starting bootstrap runtime flow"
+        );
         let (agent_id, sources) = app.bootstrap_runtime().await?;
         app.agent_id = agent_id.clone();
         app.active_sources = sources.clone();
         app.status.set_agent_id(agent_id);
         app.status
             .set_configured_sources(&sources, &app.store.list_file_offsets()?);
+        info!(
+            phase = "source_validation",
+            active_sources = sources.len(),
+            "startup phase completed"
+        );
         Ok(app)
     }
 
@@ -310,6 +402,7 @@ impl App {
             self.status.clone(),
             state_writer.clone(),
             shutdown.clone(),
+            self.config.state_dir.clone(),
             self.config.diagnostics.interval_sec,
         );
 
@@ -352,15 +445,36 @@ impl App {
             },
             None,
         );
+        info!(
+            phase = "background_loops_start",
+            heartbeat_interval_sec = self.config.heartbeat.interval_sec,
+            diagnostics_interval_sec = self.config.diagnostics.interval_sec,
+            policy_refresh_interval_sec = self.config.policy.refresh_interval_sec,
+            "startup phase completed"
+        );
 
         let mut policy_refresh = tokio::time::interval(std::time::Duration::from_secs(
             self.config.policy.refresh_interval_sec,
         ));
         policy_refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut source_supervision = tokio::time::interval(std::time::Duration::from_secs(5));
+        source_supervision.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut worker_supervision = tokio::time::interval(std::time::Duration::from_secs(1));
+        worker_supervision.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let shutdown_signal = shutdown_signal();
+        tokio::pin!(shutdown_signal);
+        let mut batcher = Some(batcher);
+        let mut sender = Some(sender);
+        let mut degraded = Some(degraded);
+        let mut heartbeat = Some(heartbeat);
+        let mut diagnostics = Some(diagnostics);
+        let mut security_scan = Some(security_scan);
+        let mut state_writer_handle = Some(state_writer_handle);
+        let mut runtime_error = None;
 
         loop {
             tokio::select! {
-                _ = tokio::signal::ctrl_c() => {
+                _ = &mut shutdown_signal => {
                     info!("shutdown signal received");
                     break;
                 }
@@ -369,35 +483,84 @@ impl App {
                         warn!(error = %error, "policy refresh failed without a recoverable runtime source set");
                     }
                 }
+                _ = source_supervision.tick() => {
+                    source_supervisor.poll_workers().await;
+                }
+                _ = worker_supervision.tick() => {
+                    if let Some(error) = poll_runtime_workers(
+                        &mut batcher,
+                        &mut sender,
+                        &mut degraded,
+                        &mut heartbeat,
+                        &mut diagnostics,
+                        &mut security_scan,
+                        &mut state_writer_handle,
+                    ).await {
+                        runtime_error = Some(error);
+                        break;
+                    }
+                }
             }
         }
 
-        self.status.set_runtime_phase(
-            RuntimePhase::Stopping,
-            Some("shutdown requested".to_string()),
-        );
-        let _ = state_writer
-            .update_runtime_state(RuntimeStatePatch {
-                runtime_status: Some(Some(RuntimePhase::Stopping.as_str().to_string())),
-                runtime_status_reason: Some(Some("shutdown requested".to_string())),
-                ..RuntimeStatePatch::default()
-            })
-            .await;
+        if let Some(error) = runtime_error.as_ref() {
+            let detail = format!("runtime worker exited unexpectedly: {error}");
+            self.status
+                .set_runtime_phase(RuntimePhase::Error, Some(detail.clone()));
+            let _ = state_writer
+                .update_runtime_state(RuntimeStatePatch {
+                    runtime_status: Some(Some(RuntimePhase::Error.as_str().to_string())),
+                    runtime_status_reason: Some(Some(detail)),
+                    ..RuntimeStatePatch::default()
+                })
+                .await;
+        }
+
+        if runtime_error.is_none() {
+            self.status.set_runtime_phase(
+                RuntimePhase::Stopping,
+                Some("shutdown requested".to_string()),
+            );
+            let _ = state_writer
+                .update_runtime_state(RuntimeStatePatch {
+                    runtime_status: Some(Some(RuntimePhase::Stopping.as_str().to_string())),
+                    runtime_status_reason: Some(Some("shutdown requested".to_string())),
+                    ..RuntimeStatePatch::default()
+                })
+                .await;
+        }
 
         shutdown.cancel();
         source_supervisor.shutdown().await;
         drop(source_supervisor);
         drop(send_tx);
 
-        let _ = batcher.await;
-        let _ = sender.await??;
-        let _ = degraded.await??;
-        let _ = heartbeat.await??;
-        let _ = diagnostics.await??;
-        let _ = security_scan.await??;
-        let _ = state_writer_handle.await??;
+        if let Some(handle) = batcher {
+            let _ = handle.await;
+        }
+        if let Some(handle) = sender {
+            let _ = handle.await??;
+        }
+        if let Some(handle) = degraded {
+            let _ = handle.await??;
+        }
+        if let Some(handle) = heartbeat {
+            let _ = handle.await??;
+        }
+        if let Some(handle) = diagnostics {
+            let _ = handle.await??;
+        }
+        if let Some(handle) = security_scan {
+            let _ = handle.await??;
+        }
+        if let Some(handle) = state_writer_handle {
+            let _ = handle.await??;
+        }
 
         info!("doro-agent stopped");
+        if let Some(error) = runtime_error {
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -842,4 +1005,78 @@ fn log_metadata_warnings(metadata: &RuntimeMetadataContext) {
     for issue in &metadata.compatibility.source_path_issues {
         warn!(issue = %issue, "source path note");
     }
+}
+
+async fn poll_runtime_workers(
+    batcher: &mut Option<JoinHandle<()>>,
+    sender: &mut Option<JoinHandle<AppResult<()>>>,
+    degraded: &mut Option<JoinHandle<AppResult<()>>>,
+    heartbeat: &mut Option<JoinHandle<AppResult<()>>>,
+    diagnostics: &mut Option<JoinHandle<AppResult<()>>>,
+    security_scan: &mut Option<JoinHandle<AppResult<()>>>,
+    state_writer_handle: &mut Option<JoinHandle<AppResult<()>>>,
+) -> Option<AppError> {
+    if batcher.as_ref().is_some_and(JoinHandle::is_finished) {
+        let handle = batcher.take().expect("batcher handle must exist");
+        return Some(match handle.await {
+            Ok(()) => AppError::protocol("batcher worker exited unexpectedly"),
+            Err(error) => error.into(),
+        });
+    }
+    if sender.as_ref().is_some_and(JoinHandle::is_finished) {
+        let handle = sender.take().expect("sender handle must exist");
+        return Some(unexpected_async_worker_exit("sender", handle).await);
+    }
+    if degraded.as_ref().is_some_and(JoinHandle::is_finished) {
+        let handle = degraded.take().expect("degraded handle must exist");
+        return Some(unexpected_async_worker_exit("degraded", handle).await);
+    }
+    if heartbeat.as_ref().is_some_and(JoinHandle::is_finished) {
+        let handle = heartbeat.take().expect("heartbeat handle must exist");
+        return Some(unexpected_async_worker_exit("heartbeat", handle).await);
+    }
+    if diagnostics.as_ref().is_some_and(JoinHandle::is_finished) {
+        let handle = diagnostics.take().expect("diagnostics handle must exist");
+        return Some(unexpected_async_worker_exit("diagnostics", handle).await);
+    }
+    if security_scan.as_ref().is_some_and(JoinHandle::is_finished) {
+        let handle = security_scan
+            .take()
+            .expect("security scan handle must exist");
+        return Some(unexpected_async_worker_exit("security_scan", handle).await);
+    }
+    if state_writer_handle
+        .as_ref()
+        .is_some_and(JoinHandle::is_finished)
+    {
+        let handle = state_writer_handle
+            .take()
+            .expect("state writer handle must exist");
+        return Some(unexpected_async_worker_exit("state_writer", handle).await);
+    }
+    None
+}
+
+async fn unexpected_async_worker_exit(name: &str, handle: JoinHandle<AppResult<()>>) -> AppError {
+    match handle.await {
+        Ok(Ok(())) => AppError::protocol(format!("{name} worker exited unexpectedly")),
+        Ok(Err(error)) => error,
+        Err(error) => error.into(),
+    }
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut terminate = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }

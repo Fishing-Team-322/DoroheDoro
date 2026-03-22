@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Args, Parser};
 
 #[derive(Debug, Clone, Parser)]
 #[command(name = "doro-agent", about = "DoroheDoro Rust log agent")]
@@ -20,11 +20,13 @@ pub struct Cli {
 pub enum CliCommand {
     Run,
     #[command(visible_alias = "check-config")]
-    Doctor,
+    Doctor(OutputFormatArgs),
+    Preflight(OutputFormatArgs),
+    Health(OutputFormatArgs),
 }
 
-impl Cli {
-    pub fn command_or_run(&self) -> CliCommand {
-        self.command.clone().unwrap_or(CliCommand::Run)
-    }
+#[derive(Debug, Clone, Args, Default)]
+pub struct OutputFormatArgs {
+    #[arg(long)]
+    pub json: bool,
 }

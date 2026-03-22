@@ -21,16 +21,17 @@ RUN groupadd --system doro-agent && \
     chown -R doro-agent:doro-agent /var/lib/doro-agent /var/log/doro-agent
 
 COPY --from=build /src/agent-rs/target/release/doro-agent /usr/bin/doro-agent
-COPY deployments/examples/agent-config.example.yaml /etc/doro-agent/config.yaml
-COPY deployments/examples/agent.env.example /etc/doro-agent/agent.env
+COPY agent-rs/config/agent.container.example.yaml /etc/doro-agent/config.yaml
+COPY agent-rs/config/agent.env.example /etc/doro-agent/agent.env
+COPY agent-rs/config/security-rules.example.yaml /etc/doro-agent/security-rules.yaml
 
 RUN chmod 0755 /usr/bin/doro-agent && \
-    chmod 0644 /etc/doro-agent/config.yaml /etc/doro-agent/agent.env
+    chmod 0644 /etc/doro-agent/config.yaml /etc/doro-agent/agent.env /etc/doro-agent/security-rules.yaml
 
 VOLUME ["/etc/doro-agent", "/var/lib/doro-agent"]
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-  CMD ["/usr/bin/doro-agent", "doctor", "--config", "/etc/doro-agent/config.yaml"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
+  CMD ["/usr/bin/doro-agent", "health", "--config", "/etc/doro-agent/config.yaml"]
 
 ENTRYPOINT ["/usr/bin/doro-agent"]
 CMD ["run", "--config", "/etc/doro-agent/config.yaml"]
