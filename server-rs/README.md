@@ -129,6 +129,8 @@ Shared:
 - `AGENT_RELEASE_BASE_URL`
 - `AGENT_ARTIFACT_VERSION`
 - `AGENT_PREFERRED_PACKAGE_TYPE=container|deb|tar.gz`
+
+For package or tarball installs, set `AGENT_RELEASE_BASE_URL` to a public URL reachable from target hosts, for example `https://edge.example.com/artifacts/agent`.
 - `VAULT_ADDR`
 - `VAULT_ROLE_ID`
 - `VAULT_SECRET_ID`

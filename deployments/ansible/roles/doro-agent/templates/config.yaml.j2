@@ -21,6 +21,34 @@ tls:
 {% endif %}
 {% endif %}
 
+{% if doro_agent_scope_configured_cluster_id | trim != '' or doro_agent_scope_cluster_name | trim != '' or doro_agent_scope_service_name | trim != '' or doro_agent_scope_environment | trim != '' or (doro_agent_scope_cluster_tags | default({}) | length) > 0 or (doro_agent_scope_host_labels | default({}) | length) > 0 %}
+scope:
+{% if doro_agent_scope_configured_cluster_id | trim != '' %}
+  configured_cluster_id: "{{ doro_agent_scope_configured_cluster_id }}"
+{% endif %}
+{% if (doro_agent_scope_cluster_tags | default({}) | length) > 0 %}
+  configured_cluster_tags:
+{% for key, value in (doro_agent_scope_cluster_tags | dictsort) %}
+    "{{ key }}": "{{ value }}"
+{% endfor %}
+{% endif %}
+{% if doro_agent_scope_cluster_name | trim != '' %}
+  cluster_name: "{{ doro_agent_scope_cluster_name }}"
+{% endif %}
+{% if doro_agent_scope_service_name | trim != '' %}
+  service_name: "{{ doro_agent_scope_service_name }}"
+{% endif %}
+{% if doro_agent_scope_environment | trim != '' %}
+  environment: "{{ doro_agent_scope_environment }}"
+{% endif %}
+{% if (doro_agent_scope_host_labels | default({}) | length) > 0 %}
+  host_labels:
+{% for key, value in (doro_agent_scope_host_labels | dictsort) %}
+    "{{ key }}": "{{ value }}"
+{% endfor %}
+{% endif %}
+{% endif %}
+
 heartbeat:
   interval_sec: {{ doro_agent_heartbeat_interval_sec }}
 

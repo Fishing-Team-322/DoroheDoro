@@ -10,9 +10,9 @@ COPY server-rs/migrations ./migrations
 COPY contracts /src/contracts
 COPY deployments /src/deployments
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/src/server-rs/target \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,target=/src/server-rs/target,sharing=locked \
     cargo build --locked -p ${RUST_BIN} --release && \
     cp /src/server-rs/target/release/${RUST_BIN} /tmp/server-runtime
 

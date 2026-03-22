@@ -295,7 +295,12 @@ fn resolve_source_uri(
         return Ok(artifact.artifact_path.clone());
     }
     if let Some(base_url) = settings.release_base_url.as_deref() {
-        let base = Url::parse(base_url).map_err(|error| {
+        let normalized_base = if base_url.ends_with('/') {
+            base_url.to_string()
+        } else {
+            format!("{base_url}/")
+        };
+        let base = Url::parse(&normalized_base).map_err(|error| {
             AppError::internal(format!(
                 "invalid AGENT_RELEASE_BASE_URL `{base_url}`: {error}"
             ))
@@ -389,6 +394,40 @@ mod tests {
             "https://downloads.example.local/agent/releases/0.2.0/doro-agent_0.2.0_linux_amd64.deb"
         );
         assert!(resolution.warnings.is_empty());
+    }
+
+    #[test]
+    fn resolves_release_base_url_without_trailing_slash() {
+        let manifest: super::ReleaseManifest = serde_json::from_str(include_str!(
+            "../../../../deployments/artifacts/example.manifest.json"
+        ))
+        .unwrap();
+        let resolution = resolve_for_host(
+            &manifest,
+            &ArtifactResolverConfig {
+                manifest_url: "deployments/artifacts/example.manifest.json".to_string(),
+                release_base_url: Some("https://downloads.example.local/agent".to_string()),
+                artifact_version: Some("0.2.0".to_string()),
+                preferred_package_type: Some("deb".to_string()),
+            },
+            &ResolvedHost {
+                host_id: Uuid::new_v4(),
+                hostname: "debian-2".to_string(),
+                ip: "10.0.0.11".to_string(),
+                ssh_port: 22,
+                remote_user: "root".to_string(),
+                labels: BTreeMap::from([
+                    ("arch".to_string(), "amd64".to_string()),
+                    ("distro_family".to_string(), "debian".to_string()),
+                ]),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolution.artifact.source_uri,
+            "https://downloads.example.local/agent/releases/0.2.0/doro-agent_0.2.0_linux_amd64.deb"
+        );
     }
 
     #[test]

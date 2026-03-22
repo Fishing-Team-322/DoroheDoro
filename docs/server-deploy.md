@@ -52,6 +52,7 @@ Routing:
 - `/` -> `frontend:3000`
 - `/api/edge/` -> `edge-api:8080`
 - `/api/v1/` -> `edge-api:8080`
+- `/artifacts/agent/` -> `agent-artifacts:8080`
 - `/auth/*` and `/profile` -> `edge-api:8080`
 - `/docs`, `/openapi.json`, `/openapi.yaml`, `/healthz`, `/readyz`, `/version` -> `edge-api:8080`
 - `/dorohedoro.edge.v1.AgentIngressService/*` -> `grpc://edge-api:9090`
@@ -84,6 +85,10 @@ The current `deployment-plane` still consumes an artifact-shaped manifest. The b
 6. The target host auto-detects `docker`, otherwise `podman`
 
 No `server-rs` change is required for the basic flow.
+
+For package or tarball delivery on remote Linux hosts, `AGENT_RELEASE_BASE_URL` must be public and reachable from the target host. In the default single-host profile it should point to:
+
+- `https://<your-domain>/artifacts/agent`
 
 ## 6. Checks after deploy
 

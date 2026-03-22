@@ -5,7 +5,8 @@ use common::{
     json::NormalizedLogEvent,
     nats_subjects::*,
     proto::{
-        alerts, decode_message, encode_message, ok_envelope, ok_json_envelope, query, runtime,
+        agent, alerts, decode_message, encode_message, ok_envelope, ok_json_envelope, query,
+        runtime,
     },
     AppError, AppResult,
 };
@@ -353,31 +354,77 @@ async fn run_normalized_log_consumer(
 }
 
 async fn run_agent_heartbeat_consumer(
-    subscription: Subscriber,
+    mut subscription: Subscriber,
     service: Arc<QueryAlertService>,
     shutdown: CancellationToken,
 ) {
-    consume_json_stream(
-        subscription,
-        service,
-        shutdown,
-        |service, payload| async move { service.handle_heartbeat_signal(payload).await },
-    )
-    .await;
+    loop {
+        let message = select! {
+            _ = shutdown.cancelled() => break,
+            next = subscription.next() => {
+                let Some(message) = next else { break; };
+                message
+            }
+        };
+
+        match decode_message::<agent::HeartbeatPayload>(message.payload.as_ref()) {
+            Ok(payload) => {
+                if let Err(error) = service.handle_heartbeat_payload(payload).await {
+                    error!(error_code = error.code().as_str(), error = %error, "failed to process heartbeat signal");
+                }
+            }
+            Err(proto_error) => {
+                let payload = match serde_json::from_slice::<Value>(message.payload.as_ref()) {
+                    Ok(payload) => payload,
+                    Err(_) => {
+                        warn!(error = %proto_error, "failed to decode heartbeat payload");
+                        continue;
+                    }
+                };
+
+                if let Err(error) = service.handle_heartbeat_signal(payload).await {
+                    error!(error_code = error.code().as_str(), error = %error, "failed to process heartbeat signal");
+                }
+            }
+        }
+    }
 }
 
 async fn run_agent_diagnostics_consumer(
-    subscription: Subscriber,
+    mut subscription: Subscriber,
     service: Arc<QueryAlertService>,
     shutdown: CancellationToken,
 ) {
-    consume_json_stream(
-        subscription,
-        service,
-        shutdown,
-        |service, payload| async move { service.handle_diagnostics_signal(payload).await },
-    )
-    .await;
+    loop {
+        let message = select! {
+            _ = shutdown.cancelled() => break,
+            next = subscription.next() => {
+                let Some(message) = next else { break; };
+                message
+            }
+        };
+
+        match decode_message::<agent::DiagnosticsPayload>(message.payload.as_ref()) {
+            Ok(payload) => {
+                if let Err(error) = service.handle_diagnostics_payload(payload).await {
+                    error!(error_code = error.code().as_str(), error = %error, "failed to process diagnostics signal");
+                }
+            }
+            Err(proto_error) => {
+                let payload = match serde_json::from_slice::<Value>(message.payload.as_ref()) {
+                    Ok(payload) => payload,
+                    Err(_) => {
+                        warn!(error = %proto_error, "failed to decode diagnostics payload");
+                        continue;
+                    }
+                };
+
+                if let Err(error) = service.handle_diagnostics_signal(payload).await {
+                    error!(error_code = error.code().as_str(), error = %error, "failed to process diagnostics signal");
+                }
+            }
+        }
+    }
 }
 
 async fn run_security_posture_consumer(

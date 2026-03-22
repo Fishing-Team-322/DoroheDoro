@@ -43,7 +43,7 @@ type PolicyPayload struct {
 
 type FetchPolicyResponse struct {
 	Policy    *PolicyPayload `json:"policy,omitempty"`
-	Changed   bool           `json:"changed,omitempty"`
+	Changed   bool           `json:"changed"`
 	RequestId string         `json:"request_id,omitempty"`
 }
 
@@ -71,14 +71,14 @@ type IngestLogsRequest struct {
 }
 
 type Ack struct {
-	Accepted  bool   `json:"accepted,omitempty"`
+	Accepted  bool   `json:"accepted"`
 	RequestId string `json:"request_id,omitempty"`
 	Message   string `json:"message,omitempty"`
 }
 
 type IngestLogsResponse struct {
-	Accepted      bool   `json:"accepted,omitempty"`
-	AcceptedCount int32  `json:"accepted_count,omitempty"`
+	Accepted      bool   `json:"accepted"`
+	AcceptedCount int32  `json:"accepted_count"`
 	RequestId     string `json:"request_id,omitempty"`
 }
 

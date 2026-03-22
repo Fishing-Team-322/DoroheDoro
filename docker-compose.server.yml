@@ -57,6 +57,8 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ${EDGE_API_SERVER_ENV_FILE:-./edge_api/.env.server}
+    ports:
+      - "7443:9090"
     depends_on:
       nats:
         condition: service_healthy
@@ -264,14 +266,14 @@ services:
       DEPLOYMENT_HTTP_ADDR: 0.0.0.0:8083
       DEPLOYMENT_EXECUTOR_KIND: ansible
       EDGE_PUBLIC_URL: ${EDGE_PUBLIC_URL:-https://edge.example.com}
-      EDGE_GRPC_ADDR: edge-api:9090
+      EDGE_GRPC_ADDR: ${AGENT_PUBLIC_GRPC_ADDR:-edge.example.com:7443}
       AGENT_STATE_DIR_DEFAULT: /var/lib/doro-agent
       ANSIBLE_RUNNER_BIN: /usr/local/bin/ansible-runner
       ANSIBLE_PLAYBOOK_PATH: /app/deployments/ansible/playbooks/install-agent.yml
       DEPLOYMENT_TEMP_DIR: /tmp/doro-deployment-plane
       ANSIBLE_SUCCESSFUL_WORKSPACE_RETENTION: 10
       AGENT_ARTIFACT_MANIFEST_URL: http://agent-artifacts:8080/manifest.json
-      AGENT_RELEASE_BASE_URL: http://agent-artifacts:8080
+      AGENT_RELEASE_BASE_URL: ${EDGE_PUBLIC_URL:-https://edge.example.com}/artifacts/agent
       AGENT_ARTIFACT_VERSION: 0.2.0
       AGENT_PREFERRED_PACKAGE_TYPE: deb
       VAULT_ADDR: http://vault:8200

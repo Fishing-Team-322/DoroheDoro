@@ -22,6 +22,7 @@ pub fn render_target_vars(
     let install_mode = resolved_install_mode(job_type, artifact);
     let (image_repository, image_tag, image_digest, image_reference, image_digest_reference) =
         derive_container_metadata(artifact);
+    let (cluster_tags, host_labels) = extract_scope_maps(&host.labels);
 
     json!({
         "host_id": host.host_id,
@@ -68,6 +69,12 @@ pub fn render_target_vars(
         "doro_agent_tls_cert_path": bootstrap.tls.as_ref().and_then(|tls| tls.cert_path.clone()),
         "doro_agent_tls_key_path": bootstrap.tls.as_ref().and_then(|tls| tls.key_path.clone()),
         "doro_agent_tls_server_name": bootstrap.tls.as_ref().and_then(|tls| tls.server_name.clone()),
+        "doro_agent_scope_configured_cluster_id": first_label(host, &["configured_cluster_id", "cluster_id"]),
+        "doro_agent_scope_cluster_name": first_label(host, &["cluster_name"]),
+        "doro_agent_scope_service_name": first_label(host, &["service_name"]),
+        "doro_agent_scope_environment": first_label(host, &["environment"]),
+        "doro_agent_scope_cluster_tags": cluster_tags,
+        "doro_agent_scope_host_labels": host_labels,
     })
 }
 
@@ -201,6 +208,54 @@ fn split_repository(reference: &str) -> (String, Option<String>) {
     (without_digest.to_string(), None)
 }
 
+fn first_label(host: &ResolvedHost, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| host.labels.get(*key).cloned())
+}
+
+fn extract_scope_maps(
+    labels: &std::collections::BTreeMap<String, String>,
+) -> (
+    std::collections::BTreeMap<String, String>,
+    std::collections::BTreeMap<String, String>,
+) {
+    let mut cluster_tags = std::collections::BTreeMap::new();
+    let mut host_labels = std::collections::BTreeMap::new();
+
+    for (key, value) in labels {
+        if value.trim().is_empty() {
+            continue;
+        }
+        if let Some(tag_key) = key.strip_prefix("cluster_tag.") {
+            if !tag_key.trim().is_empty() {
+                cluster_tags.insert(tag_key.to_string(), value.clone());
+            }
+            continue;
+        }
+        if let Some(tag_key) = key.strip_prefix("cluster_tags.") {
+            if !tag_key.trim().is_empty() {
+                cluster_tags.insert(tag_key.to_string(), value.clone());
+            }
+            continue;
+        }
+        if matches!(
+            key.as_str(),
+            "configured_cluster_id"
+                | "cluster_id"
+                | "cluster_name"
+                | "service_name"
+                | "environment"
+                | "agent_tls_ca_vault_ref"
+                | "agent_tls_cert_vault_ref"
+                | "agent_tls_key_vault_ref"
+        ) {
+            continue;
+        }
+        host_labels.insert(key.clone(), value.clone());
+    }
+
+    (cluster_tags, host_labels)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +355,61 @@ mod tests {
             aggregate_job_status(0, 0, 0, 1),
             DeploymentTargetStatus::Running
         );
+    }
+
+    #[test]
+    fn render_sets_scope_from_host_labels() {
+        let mut host = sample_host();
+        host.labels = [
+            ("cluster_id".to_string(), "prod-main".to_string()),
+            ("cluster_name".to_string(), "production".to_string()),
+            ("service_name".to_string(), "system-logs".to_string()),
+            ("environment".to_string(), "prod".to_string()),
+            ("cluster_tag.tenant".to_string(), "demo".to_string()),
+            ("role".to_string(), "agent".to_string()),
+            (
+                "agent_tls_cert_vault_ref".to_string(),
+                "secret/data/agent/host-1/cert".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let vars = render_target_vars(
+            &host,
+            DeploymentJobType::Install,
+            "/var/lib/doro-agent",
+            &sample_bootstrap(),
+            &ResolvedArtifact {
+                version: "0.2.0".to_string(),
+                platform: "linux".to_string(),
+                arch: "amd64".to_string(),
+                package_type: "deb".to_string(),
+                distro_family: "debian".to_string(),
+                install_mode: "package".to_string(),
+                artifact_name: "doro-agent_0.2.0_linux_amd64.deb".to_string(),
+                artifact_path: "0.2.0/doro-agent_0.2.0_linux_amd64.deb".to_string(),
+                source_uri: "https://downloads.example/doro-agent_0.2.0_linux_amd64.deb"
+                    .to_string(),
+                checksum_file: "sha256".to_string(),
+                sha256: "aaaa".to_string(),
+                bundle_root: None,
+                image_repository: None,
+                image_tag: None,
+                image_digest: None,
+                image_reference: None,
+                image_digest_reference: None,
+            },
+        );
+
+        assert_eq!(vars["doro_agent_scope_configured_cluster_id"], "prod-main");
+        assert_eq!(vars["doro_agent_scope_cluster_name"], "production");
+        assert_eq!(vars["doro_agent_scope_service_name"], "system-logs");
+        assert_eq!(vars["doro_agent_scope_environment"], "prod");
+        assert_eq!(vars["doro_agent_scope_cluster_tags"]["tenant"], "demo");
+        assert_eq!(vars["doro_agent_scope_host_labels"]["role"], "agent");
+        assert!(vars["doro_agent_scope_host_labels"]
+            .get("agent_tls_cert_vault_ref")
+            .is_none());
     }
 }

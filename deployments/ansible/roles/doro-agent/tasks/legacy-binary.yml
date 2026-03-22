@@ -39,11 +39,25 @@
     suffix: doro-agent
   register: doro_agent_tmp_dir
 
+- name: Check agent TLS CA bundle for artifact downloads
+  ansible.builtin.stat:
+    path: "{{ doro_agent_tls_ca_path }}"
+  register: doro_agent_tls_ca_bundle
+
 - name: Download artifact from release URL
   ansible.builtin.get_url:
     url: "{{ doro_agent_selected_artifact_url }}"
     dest: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
     mode: "0644"
+  environment: >-
+    {{
+      {
+        'SSL_CERT_FILE': doro_agent_tls_ca_path,
+        'REQUESTS_CA_BUNDLE': doro_agent_tls_ca_path,
+      }
+      if doro_agent_tls_ca_bundle.stat.exists
+      else {}
+    }}
   when: doro_agent_selected_artifact_url | trim != ''
 
 - name: Copy artifact from local controller path
@@ -57,6 +71,26 @@
   ansible.builtin.apt:
     deb: "{{ doro_agent_tmp_dir.path }}/{{ doro_agent_selected_artifact.artifact_name }}"
     state: present
+  when: doro_agent_selected_artifact.package_type == 'deb'
+
+- name: Re-render agent config after deb install
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ doro_agent_config_path }}"
+    owner: root
+    group: "{{ doro_agent_group }}"
+    mode: "0640"
+  notify: Restart doro-agent
+  when: doro_agent_selected_artifact.package_type == 'deb'
+
+- name: Re-render agent env after deb install
+  ansible.builtin.template:
+    src: agent.env.j2
+    dest: "{{ doro_agent_env_path }}"
+    owner: root
+    group: "{{ doro_agent_group }}"
+    mode: "0640"
+  notify: Restart doro-agent
   when: doro_agent_selected_artifact.package_type == 'deb'
 
 - name: Create unpack directory for tarball install

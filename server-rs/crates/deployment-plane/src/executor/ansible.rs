@@ -1,5 +1,6 @@
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    ffi::OsString,
     fs,
     fs::OpenOptions,
     io::Write,
@@ -47,6 +48,12 @@ struct PreparedTargetWorkspace {
     bootstrap_path: PathBuf,
     stdout_path: PathBuf,
     stderr_path: PathBuf,
+    tls_ca_vault_ref: Option<String>,
+    tls_cert_vault_ref: Option<String>,
+    tls_key_vault_ref: Option<String>,
+    has_tls_ca: bool,
+    has_tls_cert: bool,
+    has_tls_key: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -63,13 +70,23 @@ struct RuntimeSecrets {
     ssh_private_key: Option<String>,
     ssh_password: Option<String>,
     ssh_private_key_passphrase: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TargetTlsSecrets {
     tls_ca_pem: Option<String>,
     tls_cert_pem: Option<String>,
     tls_key_pem: Option<String>,
+    tls_ca_vault_ref: Option<String>,
+    tls_cert_vault_ref: Option<String>,
+    tls_key_vault_ref: Option<String>,
 }
 
 const WORKSPACE_METADATA_FILE: &str = ".doro-workspace.json";
 const STEP_MARKER_PREFIX: &str = "DORO_STEP|";
+const HOST_LABEL_AGENT_TLS_CA_VAULT_REF: &str = "agent_tls_ca_vault_ref";
+const HOST_LABEL_AGENT_TLS_CERT_VAULT_REF: &str = "agent_tls_cert_vault_ref";
+const HOST_LABEL_AGENT_TLS_KEY_VAULT_REF: &str = "agent_tls_key_vault_ref";
 const RUNTIME_STEP_ORDER: &[&str] = &[
     "precheck_runtime",
     "connect_host",
@@ -252,7 +269,21 @@ impl AnsibleRunnerExecutor {
             )));
         }
 
-        let tls_ca_pem = if let Some(vault_ref) = self.agent_tls_material.ca_vault_ref.as_deref() {
+        Ok(RuntimeSecrets {
+            ssh_user,
+            ssh_private_key,
+            ssh_password,
+            ssh_private_key_passphrase,
+        })
+    }
+
+    async fn resolve_target_tls_secrets(
+        &self,
+        target: &ExecutionTarget,
+    ) -> AppResult<TargetTlsSecrets> {
+        let material =
+            resolve_target_agent_tls_material(&target.host.labels, &self.agent_tls_material)?;
+        let tls_ca_pem = if let Some(vault_ref) = material.ca_vault_ref.as_deref() {
             let secret = vault::read_secret(&self.vault_config, vault_ref).await?;
             Some(required_secret_string(
                 &secret,
@@ -262,19 +293,17 @@ impl AnsibleRunnerExecutor {
         } else {
             None
         };
-        let tls_cert_pem =
-            if let Some(vault_ref) = self.agent_tls_material.cert_vault_ref.as_deref() {
-                let secret = vault::read_secret(&self.vault_config, vault_ref).await?;
-                Some(required_secret_string(
-                    &secret,
-                    vault_ref,
-                    &["cert_pem", "pem", "value", "certificate"],
-                )?)
-            } else {
-                None
-            };
-        let tls_key_pem = if let Some(vault_ref) = self.agent_tls_material.key_vault_ref.as_deref()
-        {
+        let tls_cert_pem = if let Some(vault_ref) = material.cert_vault_ref.as_deref() {
+            let secret = vault::read_secret(&self.vault_config, vault_ref).await?;
+            Some(required_secret_string(
+                &secret,
+                vault_ref,
+                &["cert_pem", "pem", "value", "certificate"],
+            )?)
+        } else {
+            None
+        };
+        let tls_key_pem = if let Some(vault_ref) = material.key_vault_ref.as_deref() {
             let secret = vault::read_secret(&self.vault_config, vault_ref).await?;
             Some(required_secret_string(
                 &secret,
@@ -285,18 +314,17 @@ impl AnsibleRunnerExecutor {
             None
         };
 
-        Ok(RuntimeSecrets {
-            ssh_user,
-            ssh_private_key,
-            ssh_password,
-            ssh_private_key_passphrase,
+        Ok(TargetTlsSecrets {
             tls_ca_pem,
             tls_cert_pem,
             tls_key_pem,
+            tls_ca_vault_ref: material.ca_vault_ref,
+            tls_cert_vault_ref: material.cert_vault_ref,
+            tls_key_vault_ref: material.key_vault_ref,
         })
     }
 
-    fn prepare_workspace(
+    async fn prepare_workspace(
         &self,
         snapshot: &ExecutionSnapshot,
         secrets: &RuntimeSecrets,
@@ -370,7 +398,8 @@ impl AnsibleRunnerExecutor {
                 .map_err(internal_path_error("write inventory"))?;
             fs::write(&bootstrap_path, &target.bootstrap.bootstrap_yaml)
                 .map_err(internal_path_error("write bootstrap"))?;
-            let merged_vars = merge_target_vars(target, secrets, &secrets_dir)?;
+            let target_tls = self.resolve_target_tls_secrets(target).await?;
+            let merged_vars = merge_target_vars(target, secrets, &target_tls, &secrets_dir)?;
             fs::write(
                 &extravars_path,
                 serde_json::to_vec_pretty(&merged_vars).map_err(|error| {
@@ -393,6 +422,12 @@ impl AnsibleRunnerExecutor {
                 bootstrap_path,
                 stdout_path: target_stdout_path,
                 stderr_path: target_stderr_path,
+                tls_ca_vault_ref: target_tls.tls_ca_vault_ref,
+                tls_cert_vault_ref: target_tls.tls_cert_vault_ref,
+                tls_key_vault_ref: target_tls.tls_key_vault_ref,
+                has_tls_ca: target_tls.tls_ca_pem.is_some(),
+                has_tls_cert: target_tls.tls_cert_pem.is_some(),
+                has_tls_key: target_tls.tls_key_pem.is_some(),
             });
         }
 
@@ -416,15 +451,14 @@ impl AnsibleRunnerExecutor {
             .and_then(|value| value.to_str())
             .ok_or_else(|| AppError::internal("ansible playbook file name is missing"))?;
         let mut command = Command::new(&self.runner_bin);
+        for arg in runner_base_args(
+            &workspace.private_data_dir,
+            playbook_name,
+            &workspace.inventory_path,
+        ) {
+            command.arg(arg);
+        }
         command
-            .arg("run")
-            .arg(&workspace.private_data_dir)
-            .arg("-p")
-            .arg(playbook_name)
-            .arg("-i")
-            .arg(&workspace.inventory_path)
-            .arg("--rotate-artifacts")
-            .arg("1")
             .env("ANSIBLE_HOST_KEY_CHECKING", "False")
             .env("PYTHONUNBUFFERED", "1")
             .stdout(Stdio::piped())
@@ -502,7 +536,7 @@ impl DeploymentExecutor for AnsibleRunnerExecutor {
             ));
         }
         let secrets = self.resolve_runtime_secrets(snapshot).await?;
-        let workspace = self.prepare_workspace(snapshot, &secrets)?;
+        let workspace = self.prepare_workspace(snapshot, &secrets).await?;
 
         let mut current_phase = "ansible.completed".to_string();
         let mut overall_exit_code = 0;
@@ -573,9 +607,12 @@ impl DeploymentExecutor for AnsibleRunnerExecutor {
                     "vault_ref": snapshot.credentials.vault_ref,
                     "has_ssh_private_key": secrets.ssh_private_key.is_some(),
                     "has_ssh_password": secrets.ssh_password.is_some(),
-                    "has_tls_ca": secrets.tls_ca_pem.is_some(),
-                    "has_tls_cert": secrets.tls_cert_pem.is_some(),
-                    "has_tls_key": secrets.tls_key_pem.is_some(),
+                    "host_tls_ca_vault_ref": prepared.tls_ca_vault_ref,
+                    "host_tls_cert_vault_ref": prepared.tls_cert_vault_ref,
+                    "host_tls_key_vault_ref": prepared.tls_key_vault_ref,
+                    "has_tls_ca": prepared.has_tls_ca,
+                    "has_tls_cert": prepared.has_tls_cert,
+                    "has_tls_key": prepared.has_tls_key,
                 }),
             });
             step_log.extend(runtime_steps);
@@ -708,6 +745,7 @@ fn render_inventory(target: &ExecutionTarget, secrets: &RuntimeSecrets) -> Strin
 fn merge_target_vars(
     target: &ExecutionTarget,
     secrets: &RuntimeSecrets,
+    target_tls: &TargetTlsSecrets,
     secrets_dir: &Path,
 ) -> AppResult<Value> {
     let mut vars = target
@@ -743,23 +781,56 @@ fn merge_target_vars(
         secrets_dir,
         "doro_agent_tls_ca_src_path",
         "ca.pem",
-        secrets.tls_ca_pem.as_deref(),
+        target_tls.tls_ca_pem.as_deref(),
     )?;
     write_tls_src_path(
         &mut vars,
         secrets_dir,
         "doro_agent_tls_cert_src_path",
         "agent.pem",
-        secrets.tls_cert_pem.as_deref(),
+        target_tls.tls_cert_pem.as_deref(),
     )?;
     write_tls_src_path(
         &mut vars,
         secrets_dir,
         "doro_agent_tls_key_src_path",
         "agent.key",
-        secrets.tls_key_pem.as_deref(),
+        target_tls.tls_key_pem.as_deref(),
     )?;
     Ok(Value::Object(vars))
+}
+
+fn resolve_target_agent_tls_material(
+    labels: &BTreeMap<String, String>,
+    defaults: &AgentTlsMaterialConfig,
+) -> AppResult<AgentTlsMaterialConfig> {
+    let ca_vault_ref = override_label(labels, HOST_LABEL_AGENT_TLS_CA_VAULT_REF)
+        .or_else(|| defaults.ca_vault_ref.clone());
+    let cert_vault_ref = override_label(labels, HOST_LABEL_AGENT_TLS_CERT_VAULT_REF)
+        .or_else(|| defaults.cert_vault_ref.clone());
+    let key_vault_ref = override_label(labels, HOST_LABEL_AGENT_TLS_KEY_VAULT_REF)
+        .or_else(|| defaults.key_vault_ref.clone());
+
+    if cert_vault_ref.is_some() ^ key_vault_ref.is_some() {
+        return Err(AppError::invalid_argument(format!(
+            "host labels must define both `{HOST_LABEL_AGENT_TLS_CERT_VAULT_REF}` and `{HOST_LABEL_AGENT_TLS_KEY_VAULT_REF}` together"
+        )));
+    }
+
+    Ok(AgentTlsMaterialConfig {
+        ca_vault_ref,
+        cert_vault_ref,
+        key_vault_ref,
+    })
+}
+
+fn override_label(labels: &BTreeMap<String, String>, key: &str) -> Option<String> {
+    labels
+        .iter()
+        .find(|(label, _)| label.eq_ignore_ascii_case(key))
+        .map(|(_, value)| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn write_tls_src_path(
@@ -999,6 +1070,23 @@ fn excerpt(bytes: &[u8]) -> String {
     }
 }
 
+fn runner_base_args(
+    private_data_dir: &Path,
+    playbook_name: &str,
+    inventory_path: &Path,
+) -> Vec<OsString> {
+    vec![
+        OsString::from("run"),
+        private_data_dir.as_os_str().to_owned(),
+        OsString::from("-p"),
+        OsString::from(playbook_name),
+        OsString::from("--inventory"),
+        inventory_path.as_os_str().to_owned(),
+        OsString::from("--rotate-artifacts"),
+        OsString::from("1"),
+    ]
+}
+
 fn sanitize_hostname(hostname: &str) -> String {
     hostname
         .chars()
@@ -1035,4 +1123,83 @@ async fn join_pipe(
 
 fn internal_path_error(context: &'static str) -> impl FnOnce(std::io::Error) -> AppError {
     move |error| AppError::internal(format!("{context}: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use crate::config::AgentTlsMaterialConfig;
+
+    #[test]
+    fn host_labels_override_global_agent_tls_vault_refs() {
+        let defaults = AgentTlsMaterialConfig {
+            ca_vault_ref: Some("secret/data/agent/default-ca".to_string()),
+            cert_vault_ref: Some("secret/data/agent/default-cert".to_string()),
+            key_vault_ref: Some("secret/data/agent/default-key".to_string()),
+        };
+        let labels = BTreeMap::from([
+            (
+                "agent_tls_cert_vault_ref".to_string(),
+                "secret/data/agent/host-1/cert".to_string(),
+            ),
+            (
+                "agent_tls_key_vault_ref".to_string(),
+                "secret/data/agent/host-1/key".to_string(),
+            ),
+        ]);
+
+        let resolved = super::resolve_target_agent_tls_material(&labels, &defaults).unwrap();
+
+        assert_eq!(
+            resolved.ca_vault_ref.as_deref(),
+            Some("secret/data/agent/default-ca")
+        );
+        assert_eq!(
+            resolved.cert_vault_ref.as_deref(),
+            Some("secret/data/agent/host-1/cert")
+        );
+        assert_eq!(
+            resolved.key_vault_ref.as_deref(),
+            Some("secret/data/agent/host-1/key")
+        );
+    }
+
+    #[test]
+    fn rejects_partial_host_label_tls_override() {
+        let defaults = AgentTlsMaterialConfig {
+            ca_vault_ref: None,
+            cert_vault_ref: None,
+            key_vault_ref: None,
+        };
+        let labels = BTreeMap::from([(
+            "agent_tls_cert_vault_ref".to_string(),
+            "secret/data/agent/host-1/cert".to_string(),
+        )]);
+
+        let error = super::resolve_target_agent_tls_material(&labels, &defaults)
+            .expect_err("partial override must fail");
+
+        assert!(error
+            .to_string()
+            .contains("host labels must define both `agent_tls_cert_vault_ref` and `agent_tls_key_vault_ref` together"));
+    }
+
+    #[test]
+    fn runner_base_args_use_inventory_flag() {
+        let args = super::runner_base_args(
+            std::path::Path::new("/tmp/workspace"),
+            "deploy.yml",
+            std::path::Path::new("/tmp/workspace/inventory/hosts.ini"),
+        );
+        let rendered: Vec<String> = args
+            .iter()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(rendered.windows(2).any(|pair| {
+            pair[0] == "--inventory" && pair[1] == "/tmp/workspace/inventory/hosts.ini"
+        }));
+        assert!(!rendered.iter().any(|value| value == "-i"));
+    }
 }

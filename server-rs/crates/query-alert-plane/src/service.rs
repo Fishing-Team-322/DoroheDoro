@@ -13,7 +13,7 @@ use common::{
     json::{AlertStreamEvent, AuditAppendEvent, NormalizedLogEvent},
     nats_subjects::{AUDIT_EVENTS_APPEND, UI_STREAM_ALERTS},
     proto::{
-        alerts, query,
+        agent, alerts, query,
         runtime::{AuditContext, PagingRequest, PagingResponse},
     },
     AppError, AppResult,
@@ -1239,8 +1239,56 @@ impl QueryAlertService {
             .await
     }
 
+    pub async fn handle_heartbeat_payload(&self, payload: agent::HeartbeatPayload) -> AppResult<()> {
+        let host = first_non_empty(
+            &[
+                Some(payload.hostname.as_str()),
+                payload.host_metadata.get("hostname").map(String::as_str),
+            ],
+            payload.agent_id.as_str(),
+        );
+        let service = first_non_empty(
+            &[
+                payload.host_metadata.get("service_name").map(String::as_str),
+                payload.host_metadata.get("service").map(String::as_str),
+            ],
+            "agent",
+        );
+
+        self.record_signal();
+        self.record_baseline(&host, &service, SignalSource::Heartbeat.as_str(), 1.0)
+            .await
+    }
+
     pub async fn handle_diagnostics_signal(&self, payload: Value) -> AppResult<()> {
         self.handle_agent_signal(payload, SignalSource::Diagnostics, 1.0)
+            .await
+    }
+
+    pub async fn handle_diagnostics_payload(
+        &self,
+        payload: agent::DiagnosticsPayload,
+    ) -> AppResult<()> {
+        let snapshot: Value = serde_json::from_str(&payload.payload_json).map_err(|error| {
+            AppError::invalid_argument(format!("invalid diagnostics payload_json: {error}"))
+        })?;
+        let host = first_non_empty(
+            &[
+                json_path_str(&snapshot, &["platform", "hostname"]),
+                json_path_str(&snapshot, &["hostname"]),
+            ],
+            payload.agent_id.as_str(),
+        );
+        let service = first_non_empty(
+            &[
+                json_path_str(&snapshot, &["cluster", "service_name"]),
+                json_path_str(&snapshot, &["service_name"]),
+            ],
+            "agent",
+        );
+
+        self.record_signal();
+        self.record_baseline(&host, &service, SignalSource::Diagnostics.as_str(), 1.0)
             .await
     }
 
@@ -1291,6 +1339,25 @@ impl QueryAlertService {
         })?;
         Ok((host, service))
     }
+}
+
+fn json_path_str<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    current.as_str().map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn first_non_empty(candidates: &[Option<&str>], fallback: &str) -> String {
+    candidates
+        .iter()
+        .copied()
+        .flatten()
+        .find(|value| !value.trim().is_empty())
+        .unwrap_or(fallback)
+        .trim()
+        .to_string()
 }
 
 #[derive(Debug)]

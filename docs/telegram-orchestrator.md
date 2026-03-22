@@ -206,7 +206,7 @@ Common machine-readable status codes:
 
 ## Rollout
 
-1. Apply migration `0009_control_telegram_orchestrator.sql`.
+1. Apply migration `0010_control_telegram_orchestrator.sql`.
 2. Configure Vault and `TELEGRAM_*` env vars.
 3. Deploy the new `control-plane` binary with `TELEGRAM_WORKER_ENABLED=false`.
 4. Run one healthcheck request against a non-production chat.

@@ -371,6 +371,14 @@ The current reproducible bootstrap flow for a real Linux-host `agent-rs` is:
 6. append a test line to `/tmp/doro-agent-bootstrap.log`
 7. verify the line reaches the query path
 
+Important practical note for the default bootstrap source:
+
+- the default policy uses `start_at: end`
+- if `/tmp/doro-agent-bootstrap.log` does not exist at agent startup, the source stays in waiting mode
+- when the file is later created, the agent opens it at the current EOF
+- this means the first line written at file creation time is intentionally skipped
+- for smoke verification, create the file first, then append one more line and search for the appended line
+
 Current default bootstrap policy:
 
 - path: `/tmp/doro-agent-bootstrap.log`

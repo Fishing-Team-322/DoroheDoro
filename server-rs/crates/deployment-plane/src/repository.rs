@@ -195,7 +195,7 @@ impl DeploymentRepository {
     ) -> Result<RunningAttempt, sqlx::Error> {
         let now = Utc::now();
         let mut tx = self.pool.begin().await?;
-        let attempt_no: i64 = sqlx::query_scalar(
+        let attempt_no: i32 = sqlx::query_scalar(
             "SELECT COALESCE(MAX(attempt_no), 0) + 1
              FROM deployment_attempts
              WHERE deployment_job_id = $1",

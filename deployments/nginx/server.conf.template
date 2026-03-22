@@ -72,6 +72,10 @@ server {
         proxy_pass http://edge-api:8080/api/v1/;
     }
 
+    location /artifacts/agent/ {
+        proxy_pass http://agent-artifacts:8080/;
+    }
+
     location /dorohedoro.edge.v1.AgentIngressService/ {
         grpc_set_header Host $host;
         grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

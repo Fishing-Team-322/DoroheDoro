@@ -49,6 +49,12 @@ doro_agent_tls_server_name: ""
 doro_agent_tls_ca_src_path: ""
 doro_agent_tls_cert_src_path: ""
 doro_agent_tls_key_src_path: ""
+doro_agent_scope_configured_cluster_id: ""
+doro_agent_scope_cluster_name: ""
+doro_agent_scope_service_name: ""
+doro_agent_scope_environment: ""
+doro_agent_scope_cluster_tags: {}
+doro_agent_scope_host_labels: {}
 
 doro_agent_heartbeat_interval_sec: 30
 doro_agent_diagnostics_interval_sec: 30
