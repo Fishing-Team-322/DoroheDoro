@@ -63,9 +63,9 @@ const triggerSizeClasses: Record<
   NonNullable<SelectProps["selectSize"]>,
   string
 > = {
-  sm: "h-8 px-2 text-base",
-  md: "h-10 px-3 text-base",
-  lg: "h-11 px-4 text-base",
+  sm: "h-14 px-2 text-base",
+  md: "h-14 px-3 text-base",
+  lg: "h-14 px-4 text-base",
 };
 
 export function Select({

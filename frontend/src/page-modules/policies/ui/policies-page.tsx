@@ -21,7 +21,7 @@ import {
 import { PageHeader } from "@/src/widgets/dashboard-layout";
 import { ErrorCard, JsonValue, LoadingCard } from "@/src/page-modules/common/ui/runtime-state";
 
-export function PoliciesPage() {
+export function PoliciesPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { dictionary } = useI18n();
   const [policies, setPolicies] = useState<PolicyItem[]>([]);
   const [selectedPolicyId, setSelectedPolicyId] = useState<string | null>(null);
@@ -102,15 +102,17 @@ export function PoliciesPage() {
     policies.find((item) => item.policy_id === selectedPolicyId) ?? null;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Policies"
-        description="Live policies and append-only revisions from control-plane."
-        breadcrumbs={[
-          { label: dictionary.common.dashboard, href: "#" },
-          { label: "Policies" },
-        ]}
-      />
+    <div className={embedded ? "space-y-4" : "space-y-6"}>
+      {!embedded ? (
+        <PageHeader
+          title="Policies"
+          description="Live policies and append-only revisions from control-plane."
+          breadcrumbs={[
+            { label: dictionary.common.dashboard, href: "#" },
+            { label: "Policies" },
+          ]}
+        />
+      ) : null}
 
       {loading ? <LoadingCard label="Loading policies..." /> : null}
       {!loading && error ? <ErrorCard message={error} /> : null}

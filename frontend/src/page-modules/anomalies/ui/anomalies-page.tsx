@@ -37,7 +37,7 @@ function toBadgeVariant(severity?: string) {
   return "default";
 }
 
-export function AnomaliesPage() {
+export function AnomaliesPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { dictionary, locale } = useI18n();
   const [mode, setMode] = useState<AnomalyMode>("medium");
   const [data, setData] = useState<AnomalyWorkbenchData | null>(null);
@@ -89,15 +89,17 @@ export function AnomaliesPage() {
   }, [data?.anomalies, selectedAnomalyId]);
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Anomalies"
-        description="Detection workbench for recent anomaly instances, open alerts, and operator correlation timeline."
-        breadcrumbs={[
-          { label: dictionary.common.dashboard, href: "#" },
-          { label: "Anomalies" },
-        ]}
-      />
+    <div className={embedded ? "space-y-4" : "space-y-6"}>
+      {!embedded ? (
+        <PageHeader
+          title="Anomalies"
+          description="Detection workbench for recent anomaly instances, open alerts, and operator correlation timeline."
+          breadcrumbs={[
+            { label: dictionary.common.dashboard, href: "#" },
+            { label: "Anomalies" },
+          ]}
+        />
+      ) : null}
 
       <SectionCard
         title="Detection mode"
@@ -238,7 +240,9 @@ function AnomalyDetail({
       title="Operator detail"
       description="This detail view stays focused on what an operator needs next: scope, recency, and the fastest path to the linked alert."
       action={
-        <Link href={withLocalePath(locale, `/alerts?alert=${anomaly.alertId}`)}>
+        <Link
+          href={withLocalePath(locale, `/security?tab=alerts&alert=${anomaly.alertId}`)}
+        >
           <Button variant="outline" size="sm" className="h-10 px-4">
             Open alert detail
           </Button>
@@ -286,7 +290,7 @@ function AnomalyDetail({
               Matching open alerts: {anomaly.matchingAlerts}
             </p>
             <p className="text-sm text-[color:var(--foreground)]">
-              Alert detail route: /alerts?alert={anomaly.alertId}
+              Alert detail route: /security?tab=alerts&alert={anomaly.alertId}
             </p>
           </Card>
         </div>
