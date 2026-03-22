@@ -12,9 +12,8 @@ COPY deployments /src/deployments
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=/src/server-rs/target,sharing=locked \
-    cargo build --locked -p ${RUST_BIN} --release && \
-    cp /src/server-rs/target/release/${RUST_BIN} /tmp/server-runtime
+    CARGO_TARGET_DIR=/tmp/server-rs-target cargo build --locked -p ${RUST_BIN} --release && \
+    cp /tmp/server-rs-target/release/${RUST_BIN} /tmp/server-runtime
 
 FROM debian:bookworm-slim
 
