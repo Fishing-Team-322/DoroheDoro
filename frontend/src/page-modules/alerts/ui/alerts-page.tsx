@@ -2,7 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { useI18n } from "@/src/shared/lib/i18n";
+import { translateValueLabel, useI18n } from "@/src/shared/lib/i18n";
 import {
   SectionCard,
 } from "@/src/features/operations/ui/operations-ui";
@@ -26,6 +26,89 @@ import { PageHeader } from "@/src/widgets/dashboard-layout";
 import { ErrorCard, LoadingCard } from "@/src/page-modules/common/ui/runtime-state";
 import { AlertExplanationDrawer } from "./alert-explanation-drawer";
 
+const copyByLocale = {
+  en: {
+    title: "Alerts",
+    description:
+      "Live alert instances plus a correlated operator detail view for anomaly, posture, binding, and delivery context.",
+    loading: "Loading alerts...",
+    error: "Failed to load alerts",
+    metrics: {
+      openAlerts: "Open alerts",
+      rules: "Alert rules",
+      telegramInstances: "Routed Telegram instances",
+    },
+    instances: {
+      title: "Alert instances",
+      description:
+        "Pick an alert from the table to open the correlated detail panel.",
+      columns: {
+        title: "Title",
+        status: "Status",
+        severity: "Severity",
+        host: "Host",
+        service: "Service",
+      },
+      emptyTitle: "No alert instances",
+      emptyDescription: "Triggered alerts will appear here.",
+    },
+    rules: {
+      title: "Alert rules",
+      description:
+        "The list below preserves the existing rule inventory while the detail experience stays focused on live alert instances.",
+      columns: {
+        name: "Name",
+        status: "Status",
+        severity: "Severity",
+        scope: "Scope",
+      },
+      emptyTitle: "No alert rules",
+      emptyDescription:
+        "Create rules through the API to start threshold evaluation.",
+    },
+  },
+  ru: {
+    title: "Алерты",
+    description:
+      "Живые alert-инстансы и коррелированная панель деталей оператора с контекстом аномалий, posture, binding и доставки.",
+    loading: "Загрузка алертов...",
+    error: "Не удалось загрузить алерты",
+    metrics: {
+      openAlerts: "Открытые алерты",
+      rules: "Alert rules",
+      telegramInstances: "Маршрутизированные Telegram-инстансы",
+    },
+    instances: {
+      title: "Инстансы алертов",
+      description:
+        "Выберите алерт в таблице, чтобы открыть связанную панель деталей.",
+      columns: {
+        title: "Заголовок",
+        status: "Статус",
+        severity: "Severity",
+        host: "Хост",
+        service: "Сервис",
+      },
+      emptyTitle: "Нет инстансов алертов",
+      emptyDescription: "Сработавшие алерты появятся здесь.",
+    },
+    rules: {
+      title: "Правила алертов",
+      description:
+        "Список ниже сохраняет существующий инвентарь правил, пока detail-view сфокусирован на живых alert-инстансах.",
+      columns: {
+        name: "Имя",
+        status: "Статус",
+        severity: "Severity",
+        scope: "Скоуп",
+      },
+      emptyTitle: "Нет правил алертов",
+      emptyDescription:
+        "Создайте правила через API, чтобы запустить оценку порогов.",
+    },
+  },
+} as const;
+
 function toBadgeVariant(value?: string) {
   const tone = getSeverityTone(value);
   if (tone === "danger") {
@@ -47,6 +130,7 @@ function isOpenStatus(value?: string) {
 
 export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { dictionary, locale } = useI18n();
+  const copy = copyByLocale[locale];
   const searchParams = useSearchParams();
   const alertParam = searchParams.get("alert");
 
@@ -62,7 +146,7 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
       setLoading(true);
       setError(null);
       try {
-        const response = await getAlertsWorkbenchData();
+        const response = await getAlertsWorkbenchData(locale);
         if (cancelled) {
           return;
         }
@@ -79,7 +163,7 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
         });
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "Failed to load alerts");
+          setError(loadError instanceof Error ? loadError.message : copy.error);
         }
       } finally {
         if (!cancelled) {
@@ -93,7 +177,7 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
     return () => {
       cancelled = true;
     };
-  }, [alertParam]);
+  }, [alertParam, copy.error, locale]);
 
   useEffect(() => {
     if (!data || !alertParam) {
@@ -116,36 +200,40 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
     <div className={embedded ? "space-y-4" : "space-y-6"}>
       {!embedded ? (
         <PageHeader
-          title="Alerts"
-          description="Live alert instances plus a correlated operator detail view for anomaly, posture, binding, and delivery context."
+          title={copy.title}
+          description={copy.description}
           breadcrumbs={[
             { label: dictionary.common.dashboard, href: "#" },
-            { label: "Alerts" },
+            { label: copy.title },
           ]}
         />
       ) : null}
 
-      {loading ? <LoadingCard label="Loading alerts..." /> : null}
+      {loading ? <LoadingCard label={copy.loading} /> : null}
       {!loading && error ? <ErrorCard message={error} /> : null}
 
       {!loading && !error && data ? (
         <>
           <section className="grid gap-4 md:grid-cols-3">
             <Card className="space-y-2 p-4">
-              <p className="text-sm text-[color:var(--muted-foreground)]">Open alerts</p>
+              <p className="text-sm text-[color:var(--muted-foreground)]">
+                {copy.metrics.openAlerts}
+              </p>
               <p className="text-3xl font-semibold text-[color:var(--foreground)]">
                 {openAlertsCount}
               </p>
             </Card>
             <Card className="space-y-2 p-4">
-              <p className="text-sm text-[color:var(--muted-foreground)]">Alert rules</p>
+              <p className="text-sm text-[color:var(--muted-foreground)]">
+                {copy.metrics.rules}
+              </p>
               <p className="text-3xl font-semibold text-[color:var(--foreground)]">
                 {data.rules.length}
               </p>
             </Card>
             <Card className="space-y-2 p-4">
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                Routed Telegram instances
+                {copy.metrics.telegramInstances}
               </p>
               <p className="text-3xl font-semibold text-[color:var(--foreground)]">
                 {data.telegramInstances.filter((item) => item.enabled).length}
@@ -155,17 +243,17 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
           <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
             <SectionCard
-              title="Alert instances"
-              description="Pick an alert from the table to open the correlated detail panel."
+              title={copy.instances.title}
+              description={copy.instances.description}
             >
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Severity</TableHead>
-                    <TableHead>Host</TableHead>
-                    <TableHead>Service</TableHead>
+                    <TableHead>{copy.instances.columns.title}</TableHead>
+                    <TableHead>{copy.instances.columns.status}</TableHead>
+                    <TableHead>{copy.instances.columns.severity}</TableHead>
+                    <TableHead>{copy.instances.columns.host}</TableHead>
+                    <TableHead>{copy.instances.columns.service}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -174,8 +262,8 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
                       <TableCell colSpan={5}>
                         <EmptyState
                           variant="flush"
-                          title="No alert instances"
-                          description="Triggered alerts will appear here."
+                          title={copy.instances.emptyTitle}
+                          description={copy.instances.emptyDescription}
                         />
                       </TableCell>
                     </TableRow>
@@ -194,10 +282,12 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
                           {item.title}
                         </TableCell>
                         <TableCell>
-                          <Badge>{item.status}</Badge>
+                          <Badge>{translateValueLabel(item.status, locale)}</Badge>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={toBadgeVariant(item.severity)}>{item.severity}</Badge>
+                          <Badge variant={toBadgeVariant(item.severity)}>
+                            {translateValueLabel(item.severity, locale)}
+                          </Badge>
                         </TableCell>
                         <TableCell>{item.host || "n/a"}</TableCell>
                         <TableCell>{item.service || "n/a"}</TableCell>
@@ -212,16 +302,16 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
           </section>
 
           <SectionCard
-            title="Alert rules"
-            description="The list below preserves the existing rule inventory while the detail experience stays focused on live alert instances."
+            title={copy.rules.title}
+            description={copy.rules.description}
           >
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Severity</TableHead>
-                  <TableHead>Scope</TableHead>
+                  <TableHead>{copy.rules.columns.name}</TableHead>
+                  <TableHead>{copy.rules.columns.status}</TableHead>
+                  <TableHead>{copy.rules.columns.severity}</TableHead>
+                  <TableHead>{copy.rules.columns.scope}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -230,8 +320,8 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
                     <TableCell colSpan={4}>
                       <EmptyState
                         variant="flush"
-                        title="No alert rules"
-                        description="Create rules through the API to start threshold evaluation."
+                        title={copy.rules.emptyTitle}
+                        description={copy.rules.emptyDescription}
                       />
                     </TableCell>
                   </TableRow>
@@ -241,8 +331,8 @@ export function AlertsPage({ embedded = false }: { embedded?: boolean } = {}) {
                       <TableCell className="font-medium text-[color:var(--foreground)]">
                         {rule.name}
                       </TableCell>
-                      <TableCell>{rule.status}</TableCell>
-                      <TableCell>{rule.severity}</TableCell>
+                      <TableCell>{translateValueLabel(rule.status, locale)}</TableCell>
+                      <TableCell>{translateValueLabel(rule.severity, locale)}</TableCell>
                       <TableCell>
                         {rule.scope_type}
                         {rule.scope_id ? `:${rule.scope_id}` : ""}

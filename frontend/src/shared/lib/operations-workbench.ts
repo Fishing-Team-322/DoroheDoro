@@ -1,5 +1,7 @@
 "use client";
 
+import type { Locale } from "@/src/shared/config";
+import { getSiteCopy, translateValueLabel } from "@/src/shared/lib/i18n";
 import {
   listAgents,
   listAlerts,
@@ -156,29 +158,34 @@ export type DeploymentImageFlow = {
   phases: DeploymentRolloutPhase[];
 };
 
-export const anomalyModeDefinitions: AnomalyModeDefinition[] = [
-  {
-    id: "light",
-    label: "Light",
-    subtitle: "Fast operator scan",
-    description:
-      "Shows the noisiest recent anomalies with a short correlation window. Good for triage and demos.",
-  },
-  {
-    id: "medium",
-    label: "Medium",
-    subtitle: "Balanced signal density",
-    description:
-      "Balances coverage and readability by keeping the latest anomalies plus correlated open alerts.",
-  },
-  {
-    id: "heavy",
-    label: "Heavy",
-    subtitle: "Deep correlation sweep",
-    description:
-      "Keeps a longer timeline and fuller alert context. This is still a frontend operator lens until backend-side anomaly mode contracts arrive.",
-  },
-];
+function formatCount(value: number, locale: Locale) {
+  return new Intl.NumberFormat(locale).format(value);
+}
+
+export function getAnomalyModeDefinitions(locale: Locale): AnomalyModeDefinition[] {
+  const copy = getSiteCopy(locale).workbench.anomalies.modes;
+
+  return [
+    {
+      id: "light",
+      label: copy.light.label,
+      subtitle: copy.light.subtitle,
+      description: copy.light.description,
+    },
+    {
+      id: "medium",
+      label: copy.medium.label,
+      subtitle: copy.medium.subtitle,
+      description: copy.medium.description,
+    },
+    {
+      id: "heavy",
+      label: copy.heavy.label,
+      subtitle: copy.heavy.subtitle,
+      description: copy.heavy.description,
+    },
+  ];
+}
 
 function normalizeSeverity(value?: string): SecurityFindingSeverity {
   const normalized = value?.trim().toLowerCase() ?? "";
@@ -205,10 +212,6 @@ export function getSeverityTone(value?: string): SeverityTone {
   return "default";
 }
 
-function formatCount(value: number) {
-  return new Intl.NumberFormat().format(value);
-}
-
 function isOpenAlertStatus(value?: string) {
   const normalized = value?.trim().toLowerCase() ?? "";
   return !["resolved", "closed", "delivered"].includes(normalized);
@@ -225,31 +228,35 @@ function isFailingDeploymentStatus(value?: string) {
 }
 
 function buildSecurityFindings(input: {
+  locale: Locale;
   agents: AgentItem[];
   alerts: AlertInstanceItem[];
   policies: PolicyItem[];
   deploymentStates: Array<{ status?: string }>;
   recentAuditCount: number;
 }): SecurityFinding[] {
+  const { locale } = input;
+  const copy = getSiteCopy(locale).workbench.security.findings;
   const findings: SecurityFinding[] = [];
 
   const degradedAgents = input.agents.filter((item) => !isHealthyAgent(item));
   if (degradedAgents.length > 0) {
     findings.push({
       id: "agents-coverage",
-      title: "Agent coverage requires attention",
+      title: copy.agentsCoverage.title,
       severity: degradedAgents.length > 2 ? "critical" : "high",
       status: "open",
-      summary: `${formatCount(degradedAgents.length)} agent(s) are not healthy or online.`,
-      impact:
-        "Alerting and posture calculations may miss signals from affected hosts while these agents remain degraded.",
+      summary: copy.agentsCoverage.summary(formatCount(degradedAgents.length, locale)),
+      impact: copy.agentsCoverage.impact,
       evidence: degradedAgents
         .slice(0, 4)
-        .map((item) => `${item.hostname} (${item.status})`),
-      recommendedAction:
-        "Inspect affected agents, confirm last-seen timestamps, and restore telemetry before broad rollouts.",
+        .map(
+          (item) =>
+            `${item.hostname} (${translateValueLabel(item.status, locale)})`
+        ),
+      recommendedAction: copy.agentsCoverage.recommendedAction,
       relatedRoute: {
-        label: "Open agents",
+        label: copy.agentsCoverage.relatedRouteLabel,
         href: "/infrastructure?tab=agents",
       },
     });
@@ -259,19 +266,22 @@ function buildSecurityFindings(input: {
   if (openAlerts.length > 0) {
     findings.push({
       id: "open-alerts",
-      title: "Open operator alerts are accumulating",
+      title: copy.openAlerts.title,
       severity: openAlerts.length >= 5 ? "critical" : "high",
       status: "open",
-      summary: `${formatCount(openAlerts.length)} alert(s) still require operator follow-up.`,
-      impact:
-        "The console already shows active alert pressure, which increases the chance of delayed acknowledgements.",
+      summary: copy.openAlerts.summary(formatCount(openAlerts.length, locale)),
+      impact: copy.openAlerts.impact,
       evidence: openAlerts
         .slice(0, 4)
-        .map((item) => `${item.title} on ${item.host || item.service || "unscoped target"}`),
-      recommendedAction:
-        "Review correlated anomalies and delivery routing, then acknowledge or resolve stale alerts.",
+        .map(
+          (item) =>
+            `${item.title} on ${
+              item.host || item.service || copy.unscopedTarget
+            }`
+        ),
+      recommendedAction: copy.openAlerts.recommendedAction,
       relatedRoute: {
-        label: "Open alerts",
+        label: copy.openAlerts.relatedRouteLabel,
         href: "/security?tab=alerts",
       },
     });
@@ -281,17 +291,17 @@ function buildSecurityFindings(input: {
   if (inactivePolicies.length > 0) {
     findings.push({
       id: "inactive-policies",
-      title: "Inactive policies detected",
+      title: copy.inactivePolicies.title,
       severity: "medium",
       status: "watching",
-      summary: `${formatCount(inactivePolicies.length)} policy profile(s) are inactive.`,
-      impact:
-        "Inactive policy revisions reduce coverage for drift detection and deployment guardrails.",
+      summary: copy.inactivePolicies.summary(
+        formatCount(inactivePolicies.length, locale)
+      ),
+      impact: copy.inactivePolicies.impact,
       evidence: inactivePolicies.slice(0, 4).map((item) => item.name),
-      recommendedAction:
-        "Confirm whether inactive policies are intentional, and reactivate or archive the stale entries.",
+      recommendedAction: copy.inactivePolicies.recommendedAction,
       relatedRoute: {
-        label: "Open policies",
+        label: copy.inactivePolicies.relatedRouteLabel,
         href: "/security?tab=policies",
       },
     });
@@ -303,19 +313,24 @@ function buildSecurityFindings(input: {
   if (failingDeployments.length > 0) {
     findings.push({
       id: "deployment-instability",
-      title: "Recent rollout instability",
+      title: copy.deploymentInstability.title,
       severity: "high",
       status: "open",
-      summary: `${formatCount(failingDeployments.length)} deployment job(s) show failed or rollback states.`,
-      impact:
-        "Rollback-heavy deployment activity often precedes noisy alerts and degraded host trust.",
+      summary: copy.deploymentInstability.summary(
+        formatCount(failingDeployments.length, locale)
+      ),
+      impact: copy.deploymentInstability.impact,
       evidence: failingDeployments
         .slice(0, 4)
-        .map((item, index) => `Deployment ${index + 1}: ${item.status ?? "unknown"}`),
-      recommendedAction:
-        "Inspect rollout phases, confirm image health, and avoid widening the blast radius until the failing jobs stabilize.",
+        .map(
+          (item, index) =>
+            `${copy.deploymentPrefix} ${index + 1}: ${
+              translateValueLabel(item.status ?? copy.unknownStatus, locale)
+            }`
+        ),
+      recommendedAction: copy.deploymentInstability.recommendedAction,
       relatedRoute: {
-        label: "Open deployments",
+        label: copy.deploymentInstability.relatedRouteLabel,
         href: "/operations?tab=deployments",
       },
     });
@@ -324,17 +339,15 @@ function buildSecurityFindings(input: {
   if (input.recentAuditCount >= 8) {
     findings.push({
       id: "audit-burst",
-      title: "High control-plane change activity",
+      title: copy.auditBurst.title,
       severity: "medium",
       status: "watching",
-      summary: `${formatCount(input.recentAuditCount)} recent audit events were observed in the runtime log.`,
-      impact:
-        "Dense change windows make root-cause analysis harder when alerts and anomalies begin stacking.",
-      evidence: ["Recent audit volume exceeded the dashboard watch threshold."],
-      recommendedAction:
-        "Confirm whether the current change window is expected and coordinate alert ownership before additional mutations.",
+      summary: copy.auditBurst.summary(formatCount(input.recentAuditCount, locale)),
+      impact: copy.auditBurst.impact,
+      evidence: [copy.auditBurst.evidence],
+      recommendedAction: copy.auditBurst.recommendedAction,
       relatedRoute: {
-        label: "Open audit",
+        label: copy.auditBurst.relatedRouteLabel,
         href: "/audit",
       },
     });
@@ -351,7 +364,9 @@ function buildSecurityFindings(input: {
   });
 }
 
-export async function getSecurityPostureData(): Promise<SecurityPostureData> {
+export async function getSecurityPostureData(
+  locale: Locale
+): Promise<SecurityPostureData> {
   const [agentsResponse, alertsResponse, policiesResponse, deploymentsResponse, auditResponse] =
     await Promise.all([
       listAgents(),
@@ -367,44 +382,51 @@ export async function getSecurityPostureData(): Promise<SecurityPostureData> {
   const failingDeployments = deploymentsResponse.items.filter((item) =>
     isFailingDeploymentStatus(item.status)
   );
+  const summaryCopy = getSiteCopy(locale).workbench.security.summary;
 
   return {
     generatedAt: new Date().toISOString(),
     summary: [
       {
         id: "open-alerts",
-        label: "Open alerts",
-        value: formatCount(openAlerts.length),
+        label: summaryCopy.openAlerts.label,
+        value: formatCount(openAlerts.length, locale),
         tone: openAlerts.length > 0 ? "danger" : "success",
-        helperText: "Current runtime alert pressure derived from alert instances.",
+        helperText: summaryCopy.openAlerts.helperText,
       },
       {
         id: "healthy-agents",
-        label: "Healthy agents",
-        value: `${formatCount(agentsResponse.items.length - unhealthyAgents.length)}/${formatCount(
-          agentsResponse.items.length
+        label: summaryCopy.healthyAgents.label,
+        value: `${formatCount(
+          agentsResponse.items.length - unhealthyAgents.length,
+          locale
+        )}/${formatCount(
+          agentsResponse.items.length,
+          locale
         )}`,
         tone: unhealthyAgents.length > 0 ? "warning" : "success",
-        helperText: "Coverage ratio based on the agent registry health states.",
+        helperText: summaryCopy.healthyAgents.helperText,
       },
       {
         id: "active-policies",
-        label: "Active policies",
-        value: `${formatCount(activePolicies.length)}/${formatCount(
-          policiesResponse.items.length
+        label: summaryCopy.activePolicies.label,
+        value: `${formatCount(activePolicies.length, locale)}/${formatCount(
+          policiesResponse.items.length,
+          locale
         )}`,
         tone: activePolicies.length === policiesResponse.items.length ? "success" : "warning",
-        helperText: "Policy posture is inferred from active policy metadata in the runtime API.",
+        helperText: summaryCopy.activePolicies.helperText,
       },
       {
         id: "rollout-risk",
-        label: "Failing rollouts",
-        value: formatCount(failingDeployments.length),
+        label: summaryCopy.rolloutRisk.label,
+        value: formatCount(failingDeployments.length, locale),
         tone: failingDeployments.length > 0 ? "danger" : "success",
-        helperText: "Rollback and failed deployment jobs that may amplify operator load.",
+        helperText: summaryCopy.rolloutRisk.helperText,
       },
     ],
     findings: buildSecurityFindings({
+      locale,
       agents: agentsResponse.items,
       alerts: alertsResponse.items,
       policies: policiesResponse.items,
@@ -415,8 +437,10 @@ export async function getSecurityPostureData(): Promise<SecurityPostureData> {
 }
 
 export async function getAnomalyWorkbenchData(
-  mode: AnomalyMode
+  mode: AnomalyMode,
+  locale: Locale
 ): Promise<AnomalyWorkbenchData> {
+  const copy = getSiteCopy(locale).workbench.anomalies;
   const limit = mode === "light" ? 6 : mode === "medium" ? 10 : 16;
   const [anomaliesResponse, alertsResponse] = await Promise.all([
     listLogAnomalies({ limit, offset: 0 }),
@@ -446,10 +470,10 @@ export async function getAnomalyWorkbenchData(
       matchingAlerts: matchingAlerts.length,
       explanation:
         mode === "light"
-          ? "Fast triage mode keeps the immediate alert correlation only."
+          ? copy.modes.light.explanation
           : mode === "medium"
-            ? "Balanced mode keeps the anomaly plus nearby open alerts for operator review."
-            : "Heavy mode keeps a wider operator correlation window. Backend-side anomaly mode control is still pending, so this is a frontend lens.",
+            ? copy.modes.medium.explanation
+            : copy.modes.heavy.explanation,
     } satisfies AnomalyRecord;
   });
 
@@ -460,7 +484,9 @@ export async function getAnomalyWorkbenchData(
       title: item.title,
       timestamp: item.triggeredAt,
       severity: item.severity,
-      detail: `${item.host || "unknown host"} / ${item.service || "unknown service"} with ${item.matchingAlerts} correlated open alert(s).`,
+      detail: `${item.host || copy.unknownHost} / ${
+        item.service || copy.unknownService
+      } ${copy.correlatedAlertsSuffix(item.matchingAlerts)}`,
       href: `/security?tab=alerts&alert=${item.alertId}`,
     })),
     ...openAlerts.slice(0, mode === "heavy" ? 10 : 6).map((item) => ({
@@ -469,7 +495,9 @@ export async function getAnomalyWorkbenchData(
       title: item.title,
       timestamp: item.triggered_at,
       severity: item.severity,
-      detail: `${item.host || "unknown host"} / ${item.service || "unknown service"} is still open.`,
+      detail: `${item.host || copy.unknownHost} / ${
+        item.service || copy.unknownService
+      } ${copy.alertStillOpenSuffix}`,
       href: `/security?tab=alerts&alert=${item.alert_instance_id}`,
     })),
   ].sort((left, right) => {
@@ -508,26 +536,39 @@ function buildAlertExplanation(
   alert: AlertInstanceItem,
   rule: AlertRuleItem | undefined,
   anomaly: LogAnomalyItem | undefined,
-  deliveries: TelegramDeliveryProjection[]
+  deliveries: TelegramDeliveryProjection[],
+  locale: Locale
 ) {
+  const copy = getSiteCopy(locale).workbench.alerts;
   if (anomaly) {
-    return `Alert ${alert.title} is backed by a log anomaly on ${anomaly.host || "an unknown host"} and currently routes through ${deliveries.length} delivery path(s).`;
+    return copy.explanationWithAnomaly(
+      alert.title,
+      anomaly.host || getSiteCopy(locale).workbench.anomalies.unknownHost,
+      deliveries.length
+    );
   }
 
-  return `Alert ${alert.title} is active under ${rule?.name ?? "an unmapped rule"} and is using frontend delivery projections until a dedicated delivery-status backend contract is published.`;
+  return copy.explanationWithoutAnomaly(
+    alert.title,
+    rule?.name ?? (locale === "ru" ? "несопоставленное правило" : "an unmapped rule")
+  );
 }
 
-export async function getAlertsWorkbenchData(): Promise<AlertsWorkbenchData> {
+export async function getAlertsWorkbenchData(
+  locale: Locale
+): Promise<AlertsWorkbenchData> {
   const [alertsResponse, rulesResponse, anomaliesResponse, agentsResponse, securityData] =
     await Promise.all([
       listAlerts({ limit: 30, offset: 0 }),
       listAlertRules({ limit: 30, offset: 0 }),
       listLogAnomalies({ limit: 30, offset: 0 }),
       listAgents(),
-      getSecurityPostureData(),
+      getSecurityPostureData(locale),
     ]);
 
   const telegramInstances = loadTelegramInstances();
+  const copy = getSiteCopy(locale).workbench.alerts;
+  const commonCopy = getSiteCopy(locale).common;
 
   const alerts = alertsResponse.items.map((alert) => {
     const rule = rulesResponse.items.find((item) => item.alert_rule_id === alert.alert_rule_id);
@@ -558,14 +599,23 @@ export async function getAlertsWorkbenchData(): Promise<AlertsWorkbenchData> {
       host: alert.host,
       service: alert.service,
       ruleName: rule?.name,
-      explanation: buildAlertExplanation(alert, rule, anomaly, deliveryStatus),
+      explanation: buildAlertExplanation(
+        alert,
+        rule,
+        anomaly,
+        deliveryStatus,
+        locale
+      ),
       sourceSignals: [
-        { label: "Rule", value: rule?.name ?? alert.alert_rule_id },
-        { label: "Severity", value: alert.severity },
-        { label: "Status", value: alert.status },
-        { label: "Host", value: alert.host || "n/a" },
-        { label: "Service", value: alert.service || "n/a" },
-        { label: "Fingerprint", value: alert.fingerprint || "n/a" },
+        { label: copy.rule, value: rule?.name ?? alert.alert_rule_id },
+        {
+          label: copy.severity,
+          value: translateValueLabel(alert.severity, locale),
+        },
+        { label: copy.status, value: translateValueLabel(alert.status, locale) },
+        { label: copy.host, value: alert.host || commonCopy.na },
+        { label: copy.service, value: alert.service || commonCopy.na },
+        { label: copy.fingerprint, value: alert.fingerprint || commonCopy.na },
       ],
       anomaly: anomaly
         ? {
@@ -637,34 +687,37 @@ function stepStatusOrFallback(
   return "unknown";
 }
 
-function summarizeImage(targets: DeploymentTargetItem[]) {
+function summarizeImage(targets: DeploymentTargetItem[], locale: Locale) {
+  const copy = getSiteCopy(locale).workbench.deploymentImage;
   const artifact = targets.find((target) => target.artifact)?.artifact;
   if (!artifact) {
     return {
-      imageLabel: "No artifact metadata yet",
-      imageSource: "The runtime API has not returned a deployment artifact for the selected job.",
+      imageLabel: copy.noArtifactLabel,
+      imageSource: copy.noArtifactDescription,
     };
   }
 
   return {
-    imageLabel: `${artifact.artifact_name || "image"}:${artifact.version}`,
-    imageSource: artifact.source_uri || "No source URI returned",
+    imageLabel: `${artifact.artifact_name || copy.imageFallbackName}:${artifact.version}`,
+    imageSource: artifact.source_uri || copy.noSourceUri,
   };
 }
 
 export function deriveDeploymentImageFlow(
-  detail: DeploymentDetailResponse
+  detail: DeploymentDetailResponse,
+  locale: Locale
 ): DeploymentImageFlow {
+  const copy = getSiteCopy(locale).workbench.deploymentImage;
   const pullStep = findStep(detail.steps, ["pull", "fetch", "download"]);
   const startStep = findStep(detail.steps, ["start", "launch", "run"]);
   const healthStep = findStep(detail.steps, ["health", "probe", "ready"]);
   const rollbackStep = findStep(detail.steps, ["rollback"]);
-  const image = summarizeImage(detail.targets);
+  const image = summarizeImage(detail.targets, locale);
 
   return {
     installMode:
-      detail.item.total_targets > 1 ? "Rolling image install" : "Single-target image install",
-    rolloutState: detail.item.current_phase || detail.item.status || "unknown",
+      detail.item.total_targets > 1 ? copy.rollingInstall : copy.singleInstall,
+    rolloutState: detail.item.current_phase || detail.item.status || copy.unknown,
     imageLabel: image.imageLabel,
     imageSource: image.imageSource,
     affectedTargets: detail.item.total_targets,
@@ -673,35 +726,27 @@ export function deriveDeploymentImageFlow(
     phases: [
       {
         key: "pull",
-        label: "Pull",
+        label: copy.phases.pull.label,
         status: stepStatusOrFallback(pullStep, detail, "pull"),
-        detail:
-          pullStep?.message ||
-          "Pulls the deployment image or package onto the target host.",
+        detail: pullStep?.message || copy.phases.pull.detail,
       },
       {
         key: "start",
-        label: "Start",
+        label: copy.phases.start.label,
         status: stepStatusOrFallback(startStep, detail, "start"),
-        detail:
-          startStep?.message ||
-          "Starts the workload or service with the requested image revision.",
+        detail: startStep?.message || copy.phases.start.detail,
       },
       {
         key: "health",
-        label: "Health",
+        label: copy.phases.health.label,
         status: stepStatusOrFallback(healthStep, detail, "health"),
-        detail:
-          healthStep?.message ||
-          "Verifies probes and post-start runtime health before promotion.",
+        detail: healthStep?.message || copy.phases.health.detail,
       },
       {
         key: "rollback",
-        label: "Rollback",
+        label: copy.phases.rollback.label,
         status: stepStatusOrFallback(rollbackStep, detail, "rollback"),
-        detail:
-          rollbackStep?.message ||
-          "Prepared rollback state when any target fails health or startup.",
+        detail: rollbackStep?.message || copy.phases.rollback.detail,
       },
     ],
   };

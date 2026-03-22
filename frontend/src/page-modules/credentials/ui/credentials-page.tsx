@@ -16,12 +16,48 @@ import {
 import { PageHeader } from "@/src/widgets/dashboard-layout";
 import { ErrorCard, LoadingCard } from "@/src/page-modules/common/ui/runtime-state";
 
+const copyByLocale = {
+  en: {
+    loadError: "Failed to load credentials",
+    title: "Credentials",
+    description:
+      "Live credentials metadata. Secret material itself stays in Vault.",
+    loading: "Loading credentials...",
+    columns: {
+      name: "Name",
+      kind: "Kind",
+      vaultRef: "Vault ref",
+      updated: "Updated",
+    },
+    emptyTitle: "No credential profiles",
+    emptyDescription:
+      "Create credential metadata that points to Vault-backed SSH material.",
+  },
+  ru: {
+    loadError: "Не удалось загрузить credential profiles",
+    title: "Доступы",
+    description:
+      "Живые метаданные credential-профилей. Секретный материал остается в Vault.",
+    loading: "Загрузка credential-профилей...",
+    columns: {
+      name: "Имя",
+      kind: "Тип",
+      vaultRef: "Ссылка в Vault",
+      updated: "Обновлено",
+    },
+    emptyTitle: "Нет профилей доступов",
+    emptyDescription:
+      "Создайте метаданные доступов, которые указывают на SSH-материал в Vault.",
+  },
+} as const;
+
 export function CredentialsPage({
   embedded = false,
 }: {
   embedded?: boolean;
 } = {}) {
-  const { dictionary } = useI18n();
+  const { dictionary, locale } = useI18n();
+  const copy = copyByLocale[locale];
   const [items, setItems] = useState<CredentialItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +76,7 @@ export function CredentialsPage({
       } catch (loadError) {
         if (!cancelled) {
           setError(
-            loadError instanceof Error ? loadError.message : "Failed to load credentials"
+            loadError instanceof Error ? loadError.message : copy.loadError
           );
         }
       } finally {
@@ -54,22 +90,22 @@ export function CredentialsPage({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [copy.loadError]);
 
   return (
     <div className={embedded ? "space-y-4" : "space-y-6"}>
       {!embedded ? (
         <PageHeader
-          title="Credentials"
-          description="Live credentials metadata. Secret material itself stays in Vault."
+          title={copy.title}
+          description={copy.description}
           breadcrumbs={[
             { label: dictionary.common.dashboard, href: "#" },
-            { label: "Credentials" },
+            { label: copy.title },
           ]}
         />
       ) : null}
 
-      {loading ? <LoadingCard label="Loading credentials..." /> : null}
+      {loading ? <LoadingCard label={copy.loading} /> : null}
       {!loading && error ? <ErrorCard message={error} /> : null}
 
       {!loading && !error ? (
@@ -77,10 +113,10 @@ export function CredentialsPage({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Kind</TableHead>
-                <TableHead>Vault ref</TableHead>
-                <TableHead>Updated</TableHead>
+                <TableHead>{copy.columns.name}</TableHead>
+                <TableHead>{copy.columns.kind}</TableHead>
+                <TableHead>{copy.columns.vaultRef}</TableHead>
+                <TableHead>{copy.columns.updated}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -89,8 +125,8 @@ export function CredentialsPage({
                   <TableCell colSpan={4}>
                     <EmptyState
                       variant="flush"
-                      title="No credential profiles"
-                      description="Create credential metadata that points to Vault-backed SSH material."
+                      title={copy.emptyTitle}
+                      description={copy.emptyDescription}
                     />
                   </TableCell>
                 </TableRow>

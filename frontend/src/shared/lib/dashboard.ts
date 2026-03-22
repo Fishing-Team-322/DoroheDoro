@@ -1,3 +1,5 @@
+import { getSiteCopy } from "@/src/shared/lib/i18n/site-copy";
+
 const MINUTE_MS = 60 * 1000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
@@ -7,13 +9,15 @@ export function formatRelativeLabel(
   value: string | Date | null | undefined,
   locale: string
 ): string {
+  const resolvedLocale = locale === "ru" ? "ru" : "en";
+
   if (!value) {
-    return "n/a";
+    return getSiteCopy(resolvedLocale).common.na;
   }
 
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return typeof value === "string" ? value : "n/a";
+    return typeof value === "string" ? value : getSiteCopy(resolvedLocale).common.na;
   }
 
   const deltaMs = date.getTime() - Date.now();

@@ -1,16 +1,17 @@
 "use client";
 
 import {
-  KeyboardEvent as ReactKeyboardEvent,
-  ReactNode,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   useEffect,
   useId,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { Button } from "@/src/shared/ui/button";
 import { cn } from "@/src/shared/lib/cn";
+import { getSiteCopy, useOptionalI18n } from "@/src/shared/lib/i18n";
+import { Button } from "@/src/shared/ui/button";
 
 type DateTimePickerProps = {
   label: string;
@@ -21,22 +22,6 @@ type DateTimePickerProps = {
   disabled?: boolean;
   containerClassName?: string;
 };
-
-const WEEK_DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
-const MONTH_NAMES = [
-  "Январь",
-  "Февраль",
-  "Март",
-  "Апрель",
-  "Май",
-  "Июнь",
-  "Июль",
-  "Август",
-  "Сентябрь",
-  "Октябрь",
-  "Ноябрь",
-  "Декабрь",
-];
 
 function CalendarIcon() {
   return (
@@ -142,11 +127,11 @@ function formatToLocalValue(date: Date) {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
-function formatDisplayValue(value: string) {
+function formatDisplayValue(value: string, locale: string) {
   const date = parseLocalDateTime(value);
   if (!date) return "";
 
-  return new Intl.DateTimeFormat("ru-RU", {
+  return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -210,6 +195,9 @@ export function DateTimePicker({
   disabled,
   containerClassName,
 }: DateTimePickerProps) {
+  const i18n = useOptionalI18n();
+  const locale = i18n?.locale ?? "en";
+  const copy = getSiteCopy(locale).datePicker;
   const id = useId();
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -230,7 +218,6 @@ export function DateTimePicker({
     selectedDate ? `${selectedDate.getMinutes()}`.padStart(2, "0") : "00"
   );
 
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const parsed = parseLocalDateTime(value);
     setSelectedDate(parsed);
@@ -238,7 +225,6 @@ export function DateTimePicker({
     setHour(parsed ? `${parsed.getHours()}`.padStart(2, "0") : "00");
     setMinute(parsed ? `${parsed.getMinutes()}`.padStart(2, "0") : "00");
   }, [value]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!open) return;
@@ -271,7 +257,10 @@ export function DateTimePicker({
       : undefined;
 
   const days = useMemo(() => getMonthMatrix(viewDate), [viewDate]);
-  const displayValue = useMemo(() => formatDisplayValue(value), [value]);
+  const displayValue = useMemo(
+    () => formatDisplayValue(value, copy.locale),
+    [copy.locale, value]
+  );
 
   const applyValue = () => {
     if (!selectedDate) {
@@ -388,7 +377,7 @@ export function DateTimePicker({
                 </button>
 
                 <div className="text-sm font-semibold tracking-wide text-[var(--foreground)]">
-                  {MONTH_NAMES[viewDate.getMonth()]} {viewDate.getFullYear()}
+                  {copy.months[viewDate.getMonth()]} {viewDate.getFullYear()}
                 </div>
 
                 <button
@@ -405,7 +394,7 @@ export function DateTimePicker({
               </div>
 
               <div className="grid grid-cols-7 gap-1.5">
-                {WEEK_DAYS.map((day) => (
+                {copy.weekDays.map((day) => (
                   <div
                     key={day}
                     className="flex h-7 items-center justify-center text-[11px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]"
@@ -444,12 +433,12 @@ export function DateTimePicker({
               <div className="rounded-[20px] border border-[color:var(--border)] bg-[var(--input-background)] p-3">
                 <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
                   <ClockIcon />
-                  Время
+                  {copy.time}
                 </div>
 
                 <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
                   <CompactTimeField
-                    label="Часы"
+                    label={copy.hours}
                     value={hour}
                     onChange={(next) => setHour(normalizeTwoDigits(next, 23) || "00")}
                     onIncrement={() => setHour((current) => increment(current, 23))}
@@ -461,7 +450,7 @@ export function DateTimePicker({
                   </div>
 
                   <CompactTimeField
-                    label="Минуты"
+                    label={copy.minutes}
                     value={minute}
                     onChange={(next) =>
                       setMinute(normalizeTwoDigits(next, 59) || "00")
@@ -475,12 +464,12 @@ export function DateTimePicker({
               <div className="border-t border-[color:var(--border)] pt-3">
                 <div className="mb-3 text-sm text-[var(--muted-foreground)]">
                   {selectedDate
-                    ? `Выбрано: ${new Intl.DateTimeFormat("ru-RU", {
+                    ? `${copy.selectedPrefix} ${new Intl.DateTimeFormat(copy.locale, {
                         day: "2-digit",
                         month: "2-digit",
                         year: "numeric",
                       }).format(selectedDate)} ${hour}:${minute}`
-                    : "Дата не выбрана"}
+                    : copy.noDateSelected}
                 </div>
 
                 <div className="flex gap-3">
@@ -491,7 +480,7 @@ export function DateTimePicker({
                     className="h-11 flex-1"
                     onClick={clearValue}
                   >
-                    Очистить
+                    {copy.clear}
                   </Button>
 
                   <Button
@@ -501,7 +490,7 @@ export function DateTimePicker({
                     onClick={applyValue}
                     disabled={!selectedDate}
                   >
-                    Применить
+                    {copy.apply}
                   </Button>
                 </div>
               </div>
@@ -549,7 +538,7 @@ function CompactTimeField({
       </div>
 
       <div className="flex items-center gap-1.5">
-        <MiniStepperButton onClick={onDecrement}>−</MiniStepperButton>
+        <MiniStepperButton onClick={onDecrement}>-</MiniStepperButton>
 
         <input
           value={value}

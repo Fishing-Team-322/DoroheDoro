@@ -6,7 +6,7 @@ import { useTransition } from "react";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import type { Locale } from "@/src/shared/config";
 import { cn } from "@/src/shared/lib/cn";
-import { replacePathLocale } from "@/src/shared/lib/i18n";
+import { getSiteCopy, replacePathLocale } from "@/src/shared/lib/i18n";
 
 type DashboardSidebarLanguageSwitchProps = {
   locale: Locale;
@@ -29,6 +29,7 @@ export function DashboardSidebarLanguageSwitch({
   const router = useRouter();
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
+  const uiCopy = getSiteCopy(locale).langSwitch;
 
   const normalizedLocale = String(locale).toLowerCase();
   const currentLocale = normalizedLocale === "en" ? "en" : "ru";
@@ -69,6 +70,9 @@ export function DashboardSidebarLanguageSwitch({
               value={currentLocale}
               disabled={isPending}
               onChange={(value) => handleChangeLocale(value as Locale)}
+              ariaLabel={uiCopy.ariaLabel}
+              russianAlt={uiCopy.russian}
+              englishAlt={uiCopy.english}
             />
           </div>
 
@@ -84,6 +88,9 @@ export function DashboardSidebarLanguageSwitch({
               locale={currentLocale}
               disabled={isPending}
               onClick={() => handleChangeLocale(nextLocale)}
+              ariaLabel={uiCopy.switchLabel}
+              russianAlt={uiCopy.russian}
+              englishAlt={uiCopy.english}
             />
           </div>
         </div>
@@ -108,7 +115,7 @@ export function DashboardSidebarLanguageSwitch({
             collisionPadding={8}
             className="z-[9999] whitespace-nowrap rounded-md bg-[color:var(--surface-elevated)] px-3 py-2 text-sm font-medium leading-none text-white shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
           >
-            {currentLocale === "ru" ? "Язык" : "Language"}
+            {uiCopy.label}
             <Tooltip.Arrow className="fill-[color:var(--surface-elevated)]" />
           </Tooltip.Content>
         </Tooltip.Portal>
@@ -121,19 +128,25 @@ type LanguageFlagSwitchProps = {
   value: "ru" | "en";
   disabled?: boolean;
   onChange: (value: "ru" | "en") => void;
+  ariaLabel: string;
+  russianAlt: string;
+  englishAlt: string;
 };
 
 function LanguageFlagSwitch({
   value,
   disabled,
   onChange,
+  ariaLabel,
+  russianAlt,
+  englishAlt,
 }: LanguageFlagSwitchProps) {
   const activeIndex = value === "ru" ? 0 : 1;
 
   return (
     <div
       role="tablist"
-      aria-label="Language switch"
+      aria-label={ariaLabel}
       className={cn(
         "relative inline-flex items-center rounded-[16px] border border-white/8 bg-[rgba(255,255,255,0.04)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
         disabled && "pointer-events-none opacity-60"
@@ -160,7 +173,7 @@ function LanguageFlagSwitch({
         active={value === "ru"}
         disabled={disabled}
         imageSrc="/img/ru.png"
-        imageAlt="Russian"
+        imageAlt={russianAlt}
         onClick={() => onChange("ru")}
       />
 
@@ -168,7 +181,7 @@ function LanguageFlagSwitch({
         active={value === "en"}
         disabled={disabled}
         imageSrc="/img/en.png"
-        imageAlt="English"
+        imageAlt={englishAlt}
         onClick={() => onChange("en")}
       />
     </div>
@@ -225,17 +238,23 @@ function CompactFlagButton({
   locale,
   disabled,
   onClick,
+  ariaLabel,
+  russianAlt,
+  englishAlt,
 }: {
   locale: "ru" | "en";
   disabled?: boolean;
   onClick: () => void;
+  ariaLabel: string;
+  russianAlt: string;
+  englishAlt: string;
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
-      aria-label={locale === "ru" ? "Переключить язык" : "Switch language"}
+      aria-label={ariaLabel}
       className={cn(
         "inline-flex items-center justify-center rounded-[12px] border border-white/10 bg-[rgba(255,255,255,0.14)] shadow-[0_6px_18px_rgba(0,0,0,0.24)] transition-all duration-200 hover:bg-[rgba(255,255,255,0.18)]",
         disabled && "pointer-events-none opacity-60"
@@ -247,7 +266,7 @@ function CompactFlagButton({
     >
       <Image
         src={locale === "ru" ? "/img/ru.png" : "/img/en.png"}
-        alt={locale === "ru" ? "Russian" : "English"}
+        alt={locale === "ru" ? russianAlt : englishAlt}
         width={FLAG_SIZE}
         height={FLAG_SIZE}
         className="rounded-full object-cover"

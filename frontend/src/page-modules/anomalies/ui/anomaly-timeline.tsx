@@ -3,7 +3,10 @@
 import Link from "next/link";
 import type { Locale } from "@/src/shared/config";
 import { Badge } from "@/src/shared/ui";
-import { withLocalePath } from "@/src/shared/lib/i18n";
+import {
+  translateValueLabel,
+  withLocalePath,
+} from "@/src/shared/lib/i18n";
 import {
   formatDateTime,
 } from "@/src/features/operations/ui/operations-ui";
@@ -11,6 +14,11 @@ import {
   getSeverityTone,
   type AnomalyTimelineEntry,
 } from "@/src/shared/lib/operations-workbench";
+
+const linkLabelByLocale = {
+  en: "Open related alert",
+  ru: "Открыть связанный алерт",
+} as const;
 
 function toBadgeVariant(severity?: string) {
   const tone = getSeverityTone(severity);
@@ -33,6 +41,8 @@ export function AnomalyTimeline({
   locale: Locale;
   items: AnomalyTimelineEntry[];
 }) {
+  const linkLabel = linkLabelByLocale[locale];
+
   return (
     <div className="space-y-4">
       {items.map((item) => (
@@ -44,10 +54,12 @@ export function AnomalyTimeline({
 
           <div className="min-w-0 flex-1 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge>{item.kind}</Badge>
-              <Badge variant={toBadgeVariant(item.severity)}>{item.severity}</Badge>
+              <Badge>{translateValueLabel(item.kind, locale)}</Badge>
+              <Badge variant={toBadgeVariant(item.severity)}>
+                {translateValueLabel(item.severity, locale)}
+              </Badge>
               <span className="text-xs uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-                {formatDateTime(item.timestamp)}
+                {formatDateTime(item.timestamp, locale)}
               </span>
             </div>
 
@@ -64,7 +76,7 @@ export function AnomalyTimeline({
                   href={withLocalePath(locale, item.href)}
                   className="text-sm font-medium text-[color:var(--foreground)] underline-offset-4 hover:underline"
                 >
-                  Open related alert
+                  {linkLabel}
                 </Link>
               </div>
             ) : null}

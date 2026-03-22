@@ -14,20 +14,65 @@ import {
   TableRow,
   TableSortButton,
 } from "@/src/shared/ui";
+import { translateValueLabel, useI18n } from "@/src/shared/lib/i18n";
 import { useLiveLogs } from "../model";
 import { PageStack, formatDateTime } from "./operations-ui";
 
-const SEVERITY_OPTIONS = [
-  { value: "", label: "Любая severity" },
-  { value: "debug", label: "debug" },
-  { value: "info", label: "info" },
-  { value: "warn", label: "warn" },
-  { value: "error", label: "error" },
-  { value: "fatal", label: "fatal" },
-];
-
 type SortKey = "timestamp" | "severity" | "host" | "service" | "message";
 type SortDirection = "asc" | "desc" | null;
+
+const copyByLocale = {
+  en: {
+    severityAny: "Any severity",
+    title: "Live logs stream",
+    description:
+      "Watch new events from the live stream, pause the feed, and quickly filter by host, service, and severity.",
+    filters: {
+      host: "Host",
+      service: "Service",
+      pause: "Pause",
+      resume: "Resume",
+      clear: "Clear",
+      autoOn: "Autoscroll: on",
+      autoOff: "Autoscroll: off",
+    },
+    table: {
+      timestamp: "Time",
+      severity: "Severity",
+      host: "Host",
+      service: "Service",
+      message: "Message",
+      emptyTitle: "No events yet",
+      emptyDescription:
+        "Wait for new messages or relax the current filters.",
+    },
+  },
+  ru: {
+    severityAny: "Любая severity",
+    title: "Поток логов",
+    description:
+      "Смотрите новые события из live stream, ставьте поток на паузу и быстро фильтруйте его по host, service и severity.",
+    filters: {
+      host: "Хост",
+      service: "Сервис",
+      pause: "Пауза",
+      resume: "Продолжить",
+      clear: "Очистить",
+      autoOn: "Автоскролл: вкл",
+      autoOff: "Автоскролл: выкл",
+    },
+    table: {
+      timestamp: "Время",
+      severity: "Severity",
+      host: "Хост",
+      service: "Сервис",
+      message: "Сообщение",
+      emptyTitle: "Событий пока нет",
+      emptyDescription:
+        "Подождите новые сообщения или ослабьте текущие фильтры.",
+    },
+  },
+} as const;
 
 function getSeverityTone(
   value?: string
@@ -53,11 +98,13 @@ function getSeverityRank(value?: string) {
   return -1;
 }
 
-function compareStrings(a?: string | null, b?: string | null) {
-  return (a ?? "").localeCompare(b ?? "", "ru", { sensitivity: "base" });
+function compareStrings(a?: string | null, b?: string | null, locale?: string) {
+  return (a ?? "").localeCompare(b ?? "", locale, { sensitivity: "base" });
 }
 
 export function LiveLogsPage() {
+  const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const [host, setHost] = useState("");
   const [service, setService] = useState("");
   const [severity, setSeverity] = useState("");
@@ -67,6 +114,17 @@ export function LiveLogsPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const severityOptions = useMemo(
+    () => [
+      { value: "", label: copy.severityAny },
+      { value: "debug", label: "debug" },
+      { value: "info", label: "info" },
+      { value: "warn", label: "warn" },
+      { value: "error", label: "error" },
+      { value: "fatal", label: "fatal" },
+    ],
+    [copy.severityAny]
+  );
 
   const filters = useMemo(
     () => ({
@@ -106,13 +164,13 @@ export function LiveLogsPage() {
           result = getSeverityRank(a.severity) - getSeverityRank(b.severity);
           break;
         case "host":
-          result = compareStrings(a.host, b.host);
+          result = compareStrings(a.host, b.host, locale);
           break;
         case "service":
-          result = compareStrings(a.service, b.service);
+          result = compareStrings(a.service, b.service, locale);
           break;
         case "message":
-          result = compareStrings(a.message, b.message);
+          result = compareStrings(a.message, b.message, locale);
           break;
       }
 
@@ -120,7 +178,7 @@ export function LiveLogsPage() {
     });
 
     return items;
-  }, [liveLogs.items, sortKey, sortDirection]);
+  }, [liveLogs.items, locale, sortDirection, sortKey]);
 
   const currentSortDirection = sortDirection ?? undefined;
 
@@ -151,27 +209,25 @@ export function LiveLogsPage() {
         <div className="space-y-8">
           <div className="space-y-3">
             <h2 className="text-3xl font-semibold tracking-tight text-[color:var(--foreground)] md:text-5xl">
-              поток логов
+              {copy.title}
             </h2>
 
             <p className="max-w-3xl text-base leading-7 text-[color:var(--muted-foreground)] md:text-lg">
-              Здесь можно смотреть новые события из live stream,
-              приостанавливать поток и быстро фильтровать его по host, service и
-              severity.
+              {copy.description}
             </p>
           </div>
 
           <div className="border-t border-[color:var(--border)] pt-8">
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
               <Input
-                label="Host"
+                label={copy.filters.host}
                 value={host}
                 onChange={(event) => setHost(event.target.value)}
                 inputSize="md"
               />
 
               <Input
-                label="Service"
+                label={copy.filters.service}
                 value={service}
                 onChange={(event) => setService(event.target.value)}
                 inputSize="md"
@@ -181,8 +237,8 @@ export function LiveLogsPage() {
                 <Select
                   value={severity}
                   onChange={(event) => setSeverity(event.target.value)}
-                  options={SEVERITY_OPTIONS}
-                  placeholder="Любая severity"
+                  options={severityOptions}
+                  placeholder={copy.severityAny}
                   selectSize="md"
                   triggerClassName="h-14 px-4 text-sm border border-[var(--input-border)] hover:border-[var(--input-border-hover)] hover:bg-[var(--input-background-hover)] focus-visible:border-[var(--ring)] focus-visible:bg-[var(--input-background-focus)] focus-visible:shadow-[0_0_0_1px_var(--ring),0_0_0_2px_rgba(113,113,122,0.08)]"
                 />
@@ -195,7 +251,7 @@ export function LiveLogsPage() {
                 className="h-11 px-5"
                 onClick={() => setPaused((current) => !current)}
               >
-                {paused ? "Возобновить" : "Пауза"}
+                {paused ? copy.filters.resume : copy.filters.pause}
               </Button>
 
               <Button
@@ -203,7 +259,7 @@ export function LiveLogsPage() {
                 className="h-11 px-5"
                 onClick={() => liveLogs.clear()}
               >
-                Очистить
+                {copy.filters.clear}
               </Button>
 
               <Button
@@ -212,7 +268,7 @@ export function LiveLogsPage() {
                 className="h-11 px-5"
                 onClick={() => setAutoScroll((current) => !current)}
               >
-                {autoScroll ? "Автоскролл: вкл" : "Автоскролл: выкл"}
+                {autoScroll ? copy.filters.autoOn : copy.filters.autoOff}
               </Button>
             </div>
           </div>
@@ -228,7 +284,7 @@ export function LiveLogsPage() {
                         direction={currentSortDirection}
                         onClick={() => handleSort("timestamp")}
                       >
-                        время
+                        {copy.table.timestamp}
                       </TableSortButton>
                     </TableHead>
 
@@ -238,7 +294,7 @@ export function LiveLogsPage() {
                         direction={currentSortDirection}
                         onClick={() => handleSort("severity")}
                       >
-                        severity
+                        {copy.table.severity}
                       </TableSortButton>
                     </TableHead>
 
@@ -248,7 +304,7 @@ export function LiveLogsPage() {
                         direction={currentSortDirection}
                         onClick={() => handleSort("host")}
                       >
-                        host
+                        {copy.table.host}
                       </TableSortButton>
                     </TableHead>
 
@@ -258,7 +314,7 @@ export function LiveLogsPage() {
                         direction={currentSortDirection}
                         onClick={() => handleSort("service")}
                       >
-                        service
+                        {copy.table.service}
                       </TableSortButton>
                     </TableHead>
 
@@ -268,7 +324,7 @@ export function LiveLogsPage() {
                         direction={currentSortDirection}
                         onClick={() => handleSort("message")}
                       >
-                        сообщение
+                        {copy.table.message}
                       </TableSortButton>
                     </TableHead>
                   </TableRow>
@@ -283,7 +339,7 @@ export function LiveLogsPage() {
                         key={`${item.timestamp}-${item.host ?? "n/a"}-${item.message}`}
                       >
                         <TableCell className="whitespace-nowrap">
-                          {formatDateTime(item.timestamp)}
+                          {formatDateTime(item.timestamp, locale)}
                         </TableCell>
 
                         <TableCell>
@@ -296,7 +352,7 @@ export function LiveLogsPage() {
                                   : "text-[color:var(--foreground)]"
                             }`}
                           >
-                            {(item.severity ?? "n/a").toUpperCase()}
+                            {translateValueLabel(item.severity ?? "unknown", locale)}
                           </span>
                         </TableCell>
 
@@ -314,8 +370,8 @@ export function LiveLogsPage() {
                       <TableCell colSpan={5}>
                         <EmptyState
                           variant="flush"
-                          title="Пока нет событий"
-                          description="Подождите новые сообщения или ослабьте фильтры."
+                          title={copy.table.emptyTitle}
+                          description={copy.table.emptyDescription}
                         />
                       </TableCell>
                     </TableRow>
