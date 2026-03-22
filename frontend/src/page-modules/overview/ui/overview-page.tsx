@@ -1,9 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import type { Locale } from "@/src/shared/config";
-import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
+import { useI18n } from "@/src/shared/lib/i18n";
 import {
   getDashboardOverview,
   listAgents,
@@ -16,8 +14,7 @@ import {
   type DeploymentJobItem,
   type LogAnomalyItem,
 } from "@/src/shared/lib/runtime-api";
-import { Badge, Button, Card, EmptyState } from "@/src/shared/ui";
-import { PageHeader } from "@/src/widgets/dashboard-layout";
+import { Badge, Card, EmptyState } from "@/src/shared/ui";
 import {
   ErrorCard,
   LoadingCard,
@@ -68,7 +65,7 @@ function toBadgeVariant(value?: string) {
 }
 
 export function OverviewPage() {
-  const { dictionary, locale } = useI18n();
+  useI18n();
   const [data, setData] = useState<OverviewState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +104,9 @@ export function OverviewPage() {
       } catch (loadError) {
         if (!cancelled) {
           setError(
-            loadError instanceof Error ? loadError.message : "Failed to load overview"
+            loadError instanceof Error
+              ? loadError.message
+              : "Failed to load overview"
           );
         }
       } finally {
@@ -124,12 +123,16 @@ export function OverviewPage() {
     };
   }, []);
 
-  const openAlerts = data?.alerts.filter((item) => isOpenAlertStatus(item.status)) ?? [];
+  const openAlerts =
+    data?.alerts.filter((item) => isOpenAlertStatus(item.status)) ?? [];
   const criticalAlerts = openAlerts
     .filter((item) =>
-      ["critical", "high", "error", "fatal"].includes(item.severity.toLowerCase())
+      ["critical", "high", "error", "fatal"].includes(
+        item.severity.toLowerCase()
+      )
     )
     .slice(0, 5);
+
   const healthyAgents =
     data?.agents.filter((item) => isHealthyAgentStatus(item.status)) ?? [];
   const degradedAgents =
@@ -178,185 +181,129 @@ export function OverviewPage() {
                 />
               </section>
 
-              <section className="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-                <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
-                        Critical alerts
-                      </h2>
-                      <p className="text-base text-[color:var(--muted-foreground)]">
-                        Open high-severity signals that usually need the fastest
-                        response.
-                      </p>
-                    </div>
+              <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
+                <div className="space-y-1">
+                  <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
+                    Critical alerts
+                  </h2>
+                  <p className="text-base text-[color:var(--muted-foreground)]">
+                    Open high-severity signals that usually need the fastest
+                    response.
+                  </p>
+                </div>
 
-                    <Link href={withLocalePath(locale, "/security?tab=alerts")}>
-                      <Button variant="outline" size="sm" className="h-10 px-4">
-                        Open Security
-                      </Button>
-                    </Link>
-                  </div>
-
-                  {criticalAlerts.length === 0 ? (
-                    <EmptyState
-                      variant="flush"
-                      title="No critical alerts"
-                      description="High-severity open alerts are not currently piling up."
-                    />
-                  ) : (
-                    <div className="space-y-3">
-                      {criticalAlerts.map((alert) => (
-                        <div
-                          key={alert.alert_instance_id}
-                          className="rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={toBadgeVariant(alert.severity)}>
-                              {alert.severity}
-                            </Badge>
-                            <Badge>{alert.status}</Badge>
-                          </div>
-                          <p className="mt-3 text-base font-semibold text-[color:var(--foreground)]">
-                            {alert.title}
-                          </p>
-                          <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
-                            {alert.host || "n/a"} / {alert.service || "n/a"} /{" "}
-                            {alert.triggered_at}
-                          </p>
+                {criticalAlerts.length === 0 ? (
+                  <EmptyState
+                    variant="flush"
+                    title="No critical alerts"
+                    description="High-severity open alerts are not currently piling up."
+                  />
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {criticalAlerts.map((alert) => (
+                      <div
+                        key={alert.alert_instance_id}
+                        className="rounded-xl border border-[color:var(--border)] bg-[color:var(--background)] p-4"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant={toBadgeVariant(alert.severity)}>
+                            {alert.severity}
+                          </Badge>
+                          <Badge>{alert.status}</Badge>
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </section>
 
-                <QuickLinksPanel locale={locale} />
+                        <p className="mt-3 text-base font-semibold text-[color:var(--foreground)]">
+                          {alert.title}
+                        </p>
+
+                        <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
+                          {alert.host || "n/a"} / {alert.service || "n/a"} /{" "}
+                          {alert.triggered_at}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
 
               <section className="grid gap-4 xl:grid-cols-3">
-                <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
-                  <div>
-                    <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
-                      Anomalies summary
-                    </h2>
-                    <p className="text-base text-[color:var(--muted-foreground)]">
-                      Recent anomaly instances and their current state.
-                    </p>
-                  </div>
-
-                  {data.anomalies.length === 0 ? (
-                    <EmptyState
-                      variant="flush"
-                      title="No anomalies"
-                      description="No recent anomaly instances were returned."
-                    />
-                  ) : (
+                <SummaryPanel
+                  title="Anomalies summary"
+                  description="Recent anomaly instances and their current state."
+                  emptyTitle="No anomalies"
+                  emptyDescription="No recent anomaly instances were returned."
+                >
+                  {data.anomalies.length === 0 ? null : (
                     <div className="space-y-3">
                       {data.anomalies.slice(0, 5).map((item) => (
-                        <div
+                        <SummaryItemCard
                           key={item.alert_instance_id}
-                          className="rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={toBadgeVariant(item.severity)}>
-                              {item.severity}
-                            </Badge>
-                            <Badge>{item.status}</Badge>
-                          </div>
-                          <p className="mt-3 text-sm font-semibold text-[color:var(--foreground)]">
-                            {item.title}
-                          </p>
-                          <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
-                            {item.host} / {item.service}
-                          </p>
-                        </div>
+                          badges={[
+                            {
+                              label: item.severity,
+                              variant: toBadgeVariant(item.severity),
+                            },
+                            { label: item.status },
+                          ]}
+                          title={item.title}
+                          description={`${item.host} / ${item.service}`}
+                        />
                       ))}
                     </div>
                   )}
-                </section>
+                </SummaryPanel>
 
-                <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
-                  <div>
-                    <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
-                      Deployments summary
-                    </h2>
-                    <p className="text-base text-[color:var(--muted-foreground)]">
-                      Latest rollout jobs and their current phases.
-                    </p>
-                  </div>
-
-                  {data.deployments.length === 0 ? (
-                    <EmptyState
-                      variant="flush"
-                      title="No deployments"
-                      description="No deployment jobs were returned."
-                    />
-                  ) : (
+                <SummaryPanel
+                  title="Deployments summary"
+                  description="Latest rollout jobs and their current phases."
+                  emptyTitle="No deployments"
+                  emptyDescription="No deployment jobs were returned."
+                >
+                  {data.deployments.length === 0 ? null : (
                     <div className="space-y-3">
                       {data.deployments.slice(0, 5).map((job) => (
-                        <div
+                        <SummaryItemCard
                           key={job.job_id}
-                          className="rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={toBadgeVariant(job.status)}>
-                              {job.status}
-                            </Badge>
-                            <Badge>{job.current_phase || "phase:n/a"}</Badge>
-                          </div>
-                          <p className="mt-3 text-sm font-semibold text-[color:var(--foreground)]">
-                            {job.job_type}
-                          </p>
-                          <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
-                            Targets: {job.total_targets} / Executor:{" "}
-                            {job.executor_kind}
-                          </p>
-                        </div>
+                          badges={[
+                            {
+                              label: job.status,
+                              variant: toBadgeVariant(job.status),
+                            },
+                            { label: job.current_phase || "phase:n/a" },
+                          ]}
+                          title={job.job_type}
+                          description={`Targets: ${job.total_targets} / Executor: ${job.executor_kind}`}
+                        />
                       ))}
                     </div>
                   )}
-                </section>
+                </SummaryPanel>
 
-                <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
-                  <div>
-                    <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
-                      Agent health
-                    </h2>
-                    <p className="text-base text-[color:var(--muted-foreground)]">
-                      Degraded or stale agents that may reduce visibility.
-                    </p>
-                  </div>
-
-                  {degradedAgents.length === 0 ? (
-                    <EmptyState
-                      variant="flush"
-                      title="Agent fleet looks healthy"
-                      description="No degraded agents were detected in the latest registry snapshot."
-                    />
-                  ) : (
+                <SummaryPanel
+                  title="Agent health"
+                  description="Degraded or stale agents that may reduce visibility."
+                  emptyTitle="Agent fleet looks healthy"
+                  emptyDescription="No degraded agents were detected in the latest registry snapshot."
+                >
+                  {degradedAgents.length === 0 ? null : (
                     <div className="space-y-3">
                       {degradedAgents.slice(0, 5).map((agent) => (
-                        <div
+                        <SummaryItemCard
                           key={agent.agent_id}
-                          className="rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
-                        >
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge variant={toBadgeVariant(agent.status)}>
-                              {agent.status}
-                            </Badge>
-                            <Badge>{agent.version || "unknown"}</Badge>
-                          </div>
-                          <p className="mt-3 text-sm font-semibold text-[color:var(--foreground)]">
-                            {agent.hostname}
-                          </p>
-                          <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
-                            Last seen {agent.last_seen_at}
-                          </p>
-                        </div>
+                          badges={[
+                            {
+                              label: agent.status,
+                              variant: toBadgeVariant(agent.status),
+                            },
+                            { label: agent.version || "unknown" },
+                          ]}
+                          title={agent.hostname}
+                          description={`Last seen ${agent.last_seen_at}`}
+                        />
                       ))}
                     </div>
                   )}
-                </section>
+                </SummaryPanel>
               </section>
             </>
           ) : null}
@@ -386,73 +333,77 @@ function OverviewMetricCard({
   );
 }
 
-function QuickLinksPanel({ locale }: { locale: Locale }) {
-  const links = [
-    {
-      title: "Infrastructure",
-      description: "Resources, agents, and access",
-      href: withLocalePath(locale, "/infrastructure"),
-    },
-    {
-      title: "Security",
-      description: "Alerts, findings, policies, anomalies",
-      href: withLocalePath(locale, "/security"),
-    },
-    {
-      title: "Operations",
-      description: "Deployments and log history",
-      href: withLocalePath(locale, "/operations"),
-    },
-    {
-      title: "Live Logs",
-      description: "Open the streaming log view",
-      href: withLocalePath(locale, "/logs/live"),
-    },
-    {
-      title: "Integrations",
-      description: "Telegram instances and bindings",
-      href: withLocalePath(locale, "/integrations"),
-    },
-    {
-      title: "Audit",
-      description: "Recent state-changing events",
-      href: withLocalePath(locale, "/audit"),
-    },
-  ];
+function SummaryPanel({
+  title,
+  description,
+  emptyTitle,
+  emptyDescription,
+  children,
+}: {
+  title: string;
+  description: string;
+  emptyTitle: string;
+  emptyDescription: string;
+  children: React.ReactNode;
+}) {
+  const hasChildren = Boolean(children);
 
   return (
     <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
-      <div>
+      <div className="space-y-1">
         <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
-          Quick links
+          {title}
         </h2>
         <p className="text-base text-[color:var(--muted-foreground)]">
-          Shortcuts into the new larger sections.
+          {description}
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        {links.map((item) => (
-          <div
-            key={item.title}
-            className="space-y-3 rounded-lg border border-[color:var(--border)] bg-[color:var(--background)] p-4"
+      {hasChildren ? (
+        children
+      ) : (
+        <EmptyState
+          variant="flush"
+          title={emptyTitle}
+          description={emptyDescription}
+        />
+      )}
+    </section>
+  );
+}
+
+function SummaryItemCard({
+  badges,
+  title,
+  description,
+}: {
+  badges: Array<{
+    label: string;
+    variant?: "default" | "success" | "warning" | "danger";
+  }>;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-xl border border-[color:var(--border)] bg-[color:var(--background)] p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {badges.map((badge) => (
+          <Badge
+            key={`${badge.label}-${badge.variant ?? "default"}`}
+            variant={badge.variant}
           >
-            <div className="space-y-1">
-              <p className="text-base font-semibold text-[color:var(--foreground)]">
-                {item.title}
-              </p>
-              <p className="text-sm leading-6 text-[color:var(--muted-foreground)]">
-                {item.description}
-              </p>
-            </div>
-            <Link href={item.href}>
-              <Button variant="outline" size="sm" className="h-10 px-4">
-                Open
-              </Button>
-            </Link>
-          </div>
+            {badge.label}
+          </Badge>
         ))}
       </div>
-    </section>
+
+      <p className="mt-3 text-sm font-semibold text-[color:var(--foreground)]">
+        {title}
+      </p>
+
+      <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
+        {description}
+      </p>
+    </div>
   );
 }

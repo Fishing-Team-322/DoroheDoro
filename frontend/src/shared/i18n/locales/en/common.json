@@ -64,7 +64,7 @@
       "footerProduct": "Logovisor aéza"
     },
     "logout": {
-      "full": "Sign out",
+      "full": "sign out",
       "compact": "Out"
     }
   },
@@ -81,18 +81,18 @@
   "profile": {
     "title": "Profile",
     "description": "Update your visible profile data. This request uses the CSRF-aware fetch wrapper.",
-    "editTitle": "Edit profile",
+    "editTitle": "edit profile",
     "editDescription": "Saving sends `PATCH /profile` with the current CSRF token.",
-    "displayNameLabel": "Display name",
-    "save": "Save changes",
+    "displayNameLabel": "display name",
+    "save": "save changes",
     "success": "Profile updated successfully.",
     "fallbackError": "Unable to update profile.",
     "currentAccountTitle": "Current account",
     "currentAccountDescription": "Current user data loaded from `GET /auth/me`.",
     "fields": {
-      "email": "Email",
-      "login": "Login",
-      "displayName": "Display name"
+      "email": "email",
+      "login": "login",
+      "displayName": "display name"
     },
     "validation": {
       "displayNameMin": "Display name must contain at least 2 characters",
