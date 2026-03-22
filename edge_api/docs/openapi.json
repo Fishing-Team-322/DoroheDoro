@@ -18035,6 +18035,9 @@
             "type": "string",
             "format": "date-time"
           },
+          "agent_id": {
+            "type": "string"
+          },
           "host": {
             "type": "string"
           },
@@ -18059,6 +18062,9 @@
           "to": {
             "type": "string",
             "format": "date-time"
+          },
+          "agent_id": {
+            "type": "string"
           },
           "host": {
             "type": "string"

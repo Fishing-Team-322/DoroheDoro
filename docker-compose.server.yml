@@ -266,7 +266,7 @@ services:
       DEPLOYMENT_HTTP_ADDR: 0.0.0.0:8083
       DEPLOYMENT_EXECUTOR_KIND: ansible
       EDGE_PUBLIC_URL: ${EDGE_PUBLIC_URL:-https://edge.example.com}
-      EDGE_GRPC_ADDR: ${AGENT_PUBLIC_GRPC_ADDR:-edge.example.com:7443}
+      EDGE_GRPC_ADDR: ${AGENT_PUBLIC_GRPC_ADDR:-edge.example.com:443}
       AGENT_STATE_DIR_DEFAULT: /var/lib/doro-agent
       ANSIBLE_RUNNER_BIN: /usr/local/bin/ansible-runner
       ANSIBLE_PLAYBOOK_PATH: /app/deployments/ansible/playbooks/install-agent.yml

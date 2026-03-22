@@ -11205,6 +11205,8 @@
         "to":
           "type": "string"
           "format": "date-time"
+        "agent_id":
+          "type": "string"
         "host":
           "type": "string"
         "service":
@@ -11222,6 +11224,8 @@
         "to":
           "type": "string"
           "format": "date-time"
+        "agent_id":
+          "type": "string"
         "host":
           "type": "string"
         "service":

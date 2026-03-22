@@ -454,6 +454,9 @@ fn build_opensearch_query(filter: &query::LogQueryFilter) -> Value {
     if !filter.host.trim().is_empty() {
         must.push(json!({ "term": { "host": filter.host } }));
     }
+    if !filter.agent_id.trim().is_empty() {
+        must.push(json!({ "term": { "agent_id": filter.agent_id } }));
+    }
     if !filter.service.trim().is_empty() {
         must.push(json!({ "term": { "service": filter.service } }));
     }
@@ -490,6 +493,9 @@ fn build_clickhouse_where(filter: &query::LogQueryFilter) -> String {
     if !filter.host.trim().is_empty() {
         clauses.push(format!("host = {}", sql_string(filter.host.trim())));
     }
+    if !filter.agent_id.trim().is_empty() {
+        clauses.push(format!("agent_id = {}", sql_string(filter.agent_id.trim())));
+    }
     if !filter.service.trim().is_empty() {
         clauses.push(format!("service = {}", sql_string(filter.service.trim())));
     }
@@ -519,6 +525,36 @@ fn build_clickhouse_where(filter: &query::LogQueryFilter) -> String {
         String::new()
     } else {
         format!("WHERE {}", clauses.join(" AND "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_clickhouse_where, build_opensearch_query};
+    use common::proto::query;
+
+    #[test]
+    fn opensearch_query_includes_agent_filter() {
+        let filter = query::LogQueryFilter {
+            agent_id: "agent-123".to_string(),
+            ..Default::default()
+        };
+
+        let query = build_opensearch_query(&filter).to_string();
+
+        assert!(query.contains("\"term\":{\"agent_id\":\"agent-123\"}"));
+    }
+
+    #[test]
+    fn clickhouse_where_includes_agent_filter() {
+        let filter = query::LogQueryFilter {
+            agent_id: "agent-123".to_string(),
+            ..Default::default()
+        };
+
+        let where_sql = build_clickhouse_where(&filter);
+
+        assert!(where_sql.contains("agent_id = 'agent-123'"));
     }
 }
 

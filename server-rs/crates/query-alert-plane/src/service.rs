@@ -409,6 +409,7 @@ impl QueryAlertService {
             host: String::new(),
             service: String::new(),
             severity: String::new(),
+            agent_id: String::new(),
         };
 
         let active_hosts = self

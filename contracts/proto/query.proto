@@ -13,6 +13,7 @@ message LogQueryFilter {
   string host = 4;
   string service = 5;
   string severity = 6;
+  string agent_id = 7;
 }
 
 message LogEvent {

@@ -16,6 +16,7 @@ type logSearchRequestBody struct {
 	Query    string `json:"query"`
 	From     string `json:"from"`
 	To       string `json:"to"`
+	AgentID  string `json:"agent_id"`
 	Host     string `json:"host"`
 	Service  string `json:"service"`
 	Severity string `json:"severity"`
@@ -254,7 +255,7 @@ func logsSearchHandler(deps RouterDeps) http.HandlerFunc {
 			subject,
 			map[string]any{
 				"correlation_id": middleware.GetRequestID(r.Context()),
-				"filter":         buildLogQueryFilter(body.Query, body.From, body.To, body.Host, body.Service, body.Severity),
+				"filter":         buildLogQueryFilter(body.Query, body.From, body.To, body.AgentID, body.Host, body.Service, body.Severity),
 				"limit":          body.Limit,
 				"offset":         body.Offset,
 			},
@@ -813,11 +814,12 @@ func ensureRuntimeBridge(w http.ResponseWriter, r *http.Request, deps RouterDeps
 	return false
 }
 
-func buildLogQueryFilter(query, from, to, host, service, severity string) map[string]any {
+func buildLogQueryFilter(query, from, to, agentID, host, service, severity string) map[string]any {
 	return map[string]any{
 		"query":    strings.TrimSpace(query),
 		"from":     strings.TrimSpace(from),
 		"to":       strings.TrimSpace(to),
+		"agent_id": strings.TrimSpace(agentID),
 		"host":     strings.TrimSpace(host),
 		"service":  strings.TrimSpace(service),
 		"severity": strings.TrimSpace(severity),
@@ -829,6 +831,7 @@ func queryFilterFromRequest(r *http.Request) map[string]any {
 		r.URL.Query().Get("query"),
 		r.URL.Query().Get("from"),
 		r.URL.Query().Get("to"),
+		r.URL.Query().Get("agent_id"),
 		r.URL.Query().Get("host"),
 		r.URL.Query().Get("service"),
 		r.URL.Query().Get("severity"),

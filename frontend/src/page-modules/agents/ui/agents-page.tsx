@@ -33,6 +33,7 @@ import {
   createDeploymentPlan,
   getDeploymentById,
   getDeployments,
+  getAgentsRegistry,
   getPolicies,
   getPolicyById,
   retryDeployment,
@@ -64,7 +65,7 @@ const copyByLocale = {
     header: {
       title: "Agents",
       description:
-        "Operator-facing agent workspace wired only to confirmed public Edge API endpoints. Policy selection and deployments work today; registry, diagnostics, and enrollment still await Edge bridges.",
+        "The agent workspace now uses live public Edge API endpoints for the registry, bootstrap token issuance, policies, and deployments.",
     },
     toasts: {
       planLoadedTitle: "Plan preview loaded",
@@ -83,7 +84,7 @@ const copyByLocale = {
     notice: {
       title: "Public Edge API scope",
       description:
-        "This workspace uses only confirmed HTTP endpoints for policies and deployments. Agent registry, diagnostics, and bootstrap token issuance remain disabled until the missing public Edge bridges are exposed.",
+        "WEB now runs through the public Edge API for the agent registry, bootstrap token issuance, policies, and deployment flows.",
     },
     metrics: {
       policies: {
@@ -106,7 +107,7 @@ const copyByLocale = {
     registry: {
       title: "Agent Registry",
       description:
-        "The current public Edge API does not expose `/api/v1/agents` or diagnostics endpoints to WEB, so this table stays honest instead of mirroring internal gRPC or NATS state.",
+        "Source of truth: public `GET /api/v1/agents`. This table shows the actual registry state exposed by Edge from enrollment-plane.",
       createAgent: "Create Agent",
       columns: {
         host: "Host",
@@ -114,14 +115,14 @@ const copyByLocale = {
         policy: "Policy",
         lastSeen: "Last seen",
       },
-      emptyTitle: "Agent registry bridge is not available yet",
+      emptyTitle: "Edge API returned an empty agent registry",
       emptyDescription:
-        "Use the policy and deployment controls below today. Real agent list and diagnostics can be connected once Edge exposes public HTTP endpoints for them.",
+        "Agents will appear here automatically after enrollment or deployment.",
     },
     enrollment: {
       title: "Enrollment Bridge",
       description:
-        "Frontend structure is ready for future enrollment work, but bootstrap issuance remains disabled until Edge exposes the missing bridge.",
+        "Bootstrap token issuance is now available through public `POST /api/v1/agents/bootstrap-tokens`. Use the create-agent dialog to issue a token and prepare the enrollment command.",
       registryApi: "Registry API",
       diagnosticsApi: "Diagn. API",
       missingBridge: "Missing bridge",
@@ -170,7 +171,7 @@ const copyByLocale = {
         "The selected policy response does not include a materialized JSON body.",
       agentIdsLabel: "Explicit agent IDs (optional)",
       agentIdsHelp:
-        "Paste agent IDs only if you already know them. There is no public agent registry endpoint to populate this field automatically yet.",
+        "You can copy agent IDs from the registry above. Leave this field empty when deployment should resolve targets on its own.",
       paramsLabel: "Params JSON (optional)",
       paramsHelp:
         "Provide a flat JSON object. Values are serialized to strings to match the currently confirmed public HTTP shape.",
@@ -458,6 +459,28 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { dictionary, locale } = useI18n();
   const copy = copyByLocale[locale];
   const { showToast } = useToast();
+  const headerDescription =
+    locale === "ru"
+      ? "Рабочее пространство агентов теперь использует живые публичные endpoint'ы Edge API для реестра, bootstrap token issuance, политик и раскаток."
+      : "The agent workspace now uses live public Edge API endpoints for the registry, bootstrap token issuance, policies, and deployments.";
+  const noticeDescription =
+    locale === "ru"
+      ? "WEB работает через публичный Edge API: доступен реестр агентов, выдача bootstrap-токенов, политики и deployment flows."
+      : "WEB now runs through the public Edge API for the agent registry, bootstrap token issuance, policies, and deployment flows.";
+  const registryDescription =
+    locale === "ru"
+      ? "Источник данных: публичный `GET /api/v1/agents`. Таблица показывает фактическое состояние агентов, которое Edge отдает из enrollment-plane."
+      : "Source of truth: public `GET /api/v1/agents`. This table shows the actual registry state exposed by Edge from enrollment-plane.";
+  const enrollmentDescription =
+    locale === "ru"
+      ? "Bootstrap token issuance уже доступен через публичный `POST /api/v1/agents/bootstrap-tokens`. Используйте диалог создания агента для выпуска токена и подготовки enrollment-команды."
+      : "Bootstrap token issuance is now available through public `POST /api/v1/agents/bootstrap-tokens`. Use the create-agent dialog to issue a token and prepare the enrollment command.";
+  const agentIdsHelp =
+    locale === "ru"
+      ? "Список ID можно брать из реестра агентов выше. Поле остается опциональным, если deployment должен сам выбрать targets."
+      : "You can copy agent IDs from the registry above. Leave this field empty when deployment should resolve targets on its own.";
+  const enrollmentStatusLabel =
+    locale === "ru" ? "Bootstrap API" : "Bootstrap API";
 
   const [createAgentDialogOpen, setCreateAgentDialogOpen] = useState(false);
   const [selectedPolicyId, setSelectedPolicyId] = useState<string | null>(null);
@@ -487,6 +510,12 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
     enabled: Boolean(selectedPolicyId),
     queryFn: (signal) => getPolicyById(selectedPolicyId ?? "", signal),
     deps: [selectedPolicyId],
+  });
+
+  const agentsQuery = useApiQuery({
+    queryFn: (signal) => getAgentsRegistry({ signal }),
+    deps: [],
+    pollIntervalMs: 10_000,
   });
 
   const deploymentsQuery = useApiQuery({
@@ -681,11 +710,6 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   const content = (
     <div className="space-y-6">
-      <NoticeBanner
-        title={copy.notice.title}
-        description={copy.notice.description}
-      />
-
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label={copy.metrics.policies.label}
@@ -734,7 +758,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
         <SectionCard
           title={copy.registry.title}
-          description={copy.registry.description}
+          description={registryDescription}
           action={
             <Button
               size="sm"
@@ -745,47 +769,95 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
             </Button>
           }
         >
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{copy.registry.columns.host}</TableHead>
-                <TableHead>{copy.registry.columns.status}</TableHead>
-                <TableHead>{copy.registry.columns.policy}</TableHead>
-                <TableHead>{copy.registry.columns.lastSeen}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow>
-                <TableCell colSpan={4}>
-                  <EmptyState
-                    variant="flush"
-                    title={copy.registry.emptyTitle}
-                    description={copy.registry.emptyDescription}
-                  />
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+          {agentsQuery.isLoading && !agentsQuery.data ? (
+            <LoadingState
+              label={locale === "ru" ? "Загружаем реестр агентов..." : "Loading agent registry..."}
+            />
+          ) : agentsQuery.error && !agentsQuery.data ? (
+            <ErrorState
+              error={agentsQuery.error}
+              retry={() => void agentsQuery.refetch()}
+            />
+          ) : (
+            <div className="space-y-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{copy.registry.columns.host}</TableHead>
+                    <TableHead>{copy.registry.columns.status}</TableHead>
+                    <TableHead>{copy.registry.columns.policy}</TableHead>
+                    <TableHead>{copy.registry.columns.lastSeen}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(agentsQuery.data?.items.length ?? 0) === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4}>
+                        <EmptyState
+                          variant="flush"
+                          title={
+                            locale === "ru"
+                              ? "Edge API вернул пустой реестр агентов"
+                              : "Edge API returned an empty agent registry"
+                          }
+                          description={
+                            locale === "ru"
+                              ? "После enrollment или deployment агенты появятся здесь автоматически."
+                              : "Agents will appear here automatically after enrollment or deployment."
+                          }
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    agentsQuery.data?.items.map((agent) => (
+                      <TableRow key={agent.agent_id}>
+                        <TableCell className="font-medium text-[color:var(--foreground)]">
+                          <div>{agent.hostname}</div>
+                          <div className="mt-1 text-xs text-[color:var(--muted-foreground)]">
+                            {agent.agent_id}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge value={agent.status} />
+                        </TableCell>
+                        <TableCell>
+                          {formatMaybeValue(
+                            agent.effective_policy?.policy_name ??
+                              agent.effective_policy?.policy_revision,
+                            locale
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {formatDateTime(agent.last_seen_at, locale)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+              <RequestMetaLine meta={agentsQuery.meta} />
+            </div>
+          )}
         </SectionCard>
 
         <SectionCard
           title={copy.enrollment.title}
-          description={copy.enrollment.description}
+          description={enrollmentDescription}
         >
           <div className="space-y-4">
             <DetailGrid
               items={[
                 {
                   label: copy.enrollment.registryApi,
-                  value: <StatusBadge value="unavailable" />,
+                  value: <StatusBadge value="online" />,
                 },
                 {
                   label: copy.enrollment.diagnosticsApi,
-                  value: <StatusBadge value="unavailable" />,
+                  value: <StatusBadge value="online" />,
                 },
                 {
-                  label: copy.enrollment.missingBridge,
-                  value: "agents.bootstrap-token.issue",
+                  label: enrollmentStatusLabel,
+                  value: "POST /api/v1/agents/bootstrap-tokens",
                 },
               ]}
             />
@@ -795,7 +867,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 variant="outline"
                 size="sm"
                 className="h-10 px-4"
-                disabled
+                onClick={() => setCreateAgentDialogOpen(true)}
               >
                 {copy.enrollment.issueBootstrapToken}
               </Button>
@@ -984,7 +1056,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
             <TextAreaField
               id="agent_ids"
               label={copy.builder.agentIdsLabel}
-              helperText={copy.builder.agentIdsHelp}
+              helperText={agentIdsHelp}
               value={agentIdsText}
               onChange={(event) => setAgentIdsText(event.target.value)}
               placeholder={"agent-01\nagent-02"}
@@ -1438,7 +1510,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
       {!embedded ? (
         <PageHeader
           title={copy.header.title}
-          description={copy.header.description}
+          description={headerDescription}
           breadcrumbs={[
             { label: dictionary.common.dashboard, href: "#" },
             { label: copy.header.title },

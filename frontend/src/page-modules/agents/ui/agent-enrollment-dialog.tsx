@@ -9,22 +9,26 @@ import {
   TextAreaField,
   formatMaybeValue,
 } from "@/src/features/operations/ui/operations-ui";
-import type { PolicySummary } from "@/src/shared/lib/runtime-api";
-import { Badge, Button, Card, Input, Select } from "@/src/shared/ui";
+import {
+  getPolicyRevisions,
+  issueBootstrapToken,
+  type PolicySummary,
+} from "@/src/shared/lib/runtime-api";
+import { Badge, Button, Card, Input, Select, useToast } from "@/src/shared/ui";
 
 const copyByLocale = {
   en: {
     bootstrapTokenPlaceholder:
-      "Unavailable until the public Edge API bridge is exposed",
+      "Issue a bootstrap token for the selected policy",
     title: "Create Agent",
-    badge: "UI stub",
+    badge: "Edge API",
     description:
-      "Prepare the future enrollment payload using only data already loaded in WEB. No create or enrollment request is sent from this dialog.",
+      "Prepare enrollment parameters, issue a bootstrap token through the public Edge API, and get a working agent enrollment command.",
     close: "Close",
     notice: {
-      title: "Public Edge API bridge required",
+      title: "Public Edge API bridge is live",
       description:
-        "Real agent create and enrollment flows will become available only after Edge exposes a public HTTP bridge for bootstrap token issuance and enrollment.",
+        "This dialog now uses the live public Edge API bridge: it resolves the policy revision, issues a bootstrap token, and updates the enrollment command without manual host edits.",
     },
     form: {
       agentName: "Agent name",
@@ -43,7 +47,7 @@ const copyByLocale = {
     policyPreview: {
       title: "Policy preview",
       description:
-        "Preview is based on the currently loaded policy list and does not call policy creation or bootstrap endpoints.",
+        "The selected policy comes from the live Edge API. Bootstrap issuance resolves the current policy revision before requesting a token.",
       fields: {
         name: "Policy name",
         id: "Policy ID",
@@ -58,16 +62,16 @@ const copyByLocale = {
     },
     bootstrap: {
       label: "Bootstrap token",
-      help: "Disabled until Edge exposes the public bridge for `agents.bootstrap-token.issue`.",
+      help: "Issued through `POST /api/v1/agents/bootstrap-tokens`.",
       button: "Issue Bootstrap Token",
     },
     commandPreview: {
       title: "Enrollment command preview",
       description:
-        "Preview only. The command remains incomplete until a public bootstrap token bridge exists.",
+        "Once a bootstrap token is issued, this command is updated automatically and becomes ready for a real enrollment.",
     },
     footer:
-      "Real enrollment and create actions stay disabled on purpose until a public Edge API bridge is available for WEB.",
+      "Issue a bootstrap token, then use the prepared enrollment command or the deployment workflow on the main page.",
     cancel: "Cancel",
     prepare: "Prepare Enrollment",
   },
@@ -145,6 +149,32 @@ export function AgentEnrollmentDialog({
   locale: "ru" | "en";
 }) {
   const copy = copyByLocale[locale];
+  const { showToast } = useToast();
+  const liveBadge = locale === "ru" ? "Edge API" : "Edge API";
+  const description =
+    locale === "ru"
+      ? "Соберите enrollment-параметры, выпустите bootstrap-токен через публичный Edge API и получите рабочую команду для запуска агента."
+      : "Prepare enrollment parameters, issue a bootstrap token through the public Edge API, and get a working agent enrollment command.";
+  const noticeTitle =
+    locale === "ru"
+      ? "Публичный мост Edge API активен"
+      : "Public Edge API bridge is live";
+  const noticeDescription =
+    locale === "ru"
+      ? "Диалог использует живой публичный мост Edge API: получает ревизию policy, выпускает bootstrap-токен и обновляет enrollment-команду без ручных правок на хостах."
+      : "This dialog now uses the live public Edge API bridge: it resolves the policy revision, issues a bootstrap token, and updates the enrollment command without manual host edits.";
+  const commandDescription =
+    locale === "ru"
+      ? "После выдачи bootstrap-токена команда автоматически обновится и станет пригодной для реального enrollment."
+      : "Once a bootstrap token is issued, this command is updated automatically and becomes ready for a real enrollment.";
+  const bootstrapTokenPlaceholder =
+    locale === "ru"
+      ? "Выдайте bootstrap-токен для выбранной policy"
+      : "Issue a bootstrap token for the selected policy";
+  const footerText =
+    locale === "ru"
+      ? "Выдайте bootstrap-токен, затем используйте готовую enrollment-команду или deployment workflow на основной странице."
+      : "Issue a bootstrap token, then use the prepared enrollment command or the deployment workflow on the main page.";
   const [agentName, setAgentName] = useState("");
   const [hostname, setHostname] = useState("");
   const [environment, setEnvironment] = useState("");
@@ -152,6 +182,12 @@ export function AgentEnrollmentDialog({
   const [selectedPolicyId, setSelectedPolicyId] = useState(
     initialPolicyId ?? ""
   );
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState<string>();
+  const [bootstrapTokenValue, setBootstrapTokenValue] = useState("");
+  const [bootstrapExpiresAtUnixMs, setBootstrapExpiresAtUnixMs] = useState<
+    number | undefined
+  >();
 
   useEffect(() => {
     if (!open) {
@@ -200,11 +236,100 @@ export function AgentEnrollmentDialog({
       `  --environment "${environment.trim() || "<environment>"}" \\`,
       ...labelTokens.map((label) => `  --label "${label}" \\`),
       `  --policy-id "${selectedPolicy?.id ?? "<policy-id>"}" \\`,
-      '  --bootstrap-token "<public-edge-api-bridge-required>"',
+      `  --bootstrap-token "${bootstrapTokenValue || "<issue-bootstrap-token>"}"`,
     ];
 
     return lines.join("\n");
-  }, [agentName, environment, hostname, labelTokens, selectedPolicy?.id]);
+  }, [
+    agentName,
+    bootstrapTokenValue,
+    environment,
+    hostname,
+    labelTokens,
+    selectedPolicy?.id,
+  ]);
+
+  useEffect(() => {
+    setBootstrapError(undefined);
+    setBootstrapTokenValue("");
+    setBootstrapExpiresAtUnixMs(undefined);
+  }, [resolvedSelectedPolicyId, open]);
+
+  const bootstrapHelperText = bootstrapError
+    ? bootstrapError
+    : bootstrapExpiresAtUnixMs
+      ? locale === "ru"
+        ? `Токен активен до ${new Date(bootstrapExpiresAtUnixMs).toLocaleString(
+            locale
+          )}.`
+        : `Token is valid until ${new Date(bootstrapExpiresAtUnixMs).toLocaleString(
+            locale
+          )}.`
+      : locale === "ru"
+        ? "Токен будет выпущен через `POST /api/v1/agents/bootstrap-tokens`."
+        : "The token will be issued through `POST /api/v1/agents/bootstrap-tokens`.";
+
+  const handleIssueBootstrapToken = async () => {
+    if (!selectedPolicy) {
+      return;
+    }
+
+    setBootstrapLoading(true);
+    setBootstrapError(undefined);
+
+    try {
+      const revisionsResponse = await getPolicyRevisions(selectedPolicy.id);
+      const revisions = [...revisionsResponse.items];
+      const revision =
+        revisions.find((item) => item.revision === selectedPolicy.revision) ??
+        revisions.sort((left, right) => {
+          return (
+            new Date(right.created_at).getTime() -
+            new Date(left.created_at).getTime()
+          );
+        })[0];
+
+      if (!revision?.policy_revision_id) {
+        throw new Error(
+          locale === "ru"
+            ? "Edge API не вернул policy_revision_id для выбранной policy."
+            : "Edge API did not return a policy_revision_id for the selected policy."
+        );
+      }
+
+      const response = await issueBootstrapToken({
+        policyId: selectedPolicy.id,
+        policyRevisionId: revision.policy_revision_id,
+        requestedBy:
+          agentName.trim() || hostname.trim() || environment.trim() || "web-ui",
+        expiresAtUnixMs: Date.now() + 60 * 60 * 1000,
+      });
+
+      setBootstrapTokenValue(response.data.bootstrapToken);
+      setBootstrapExpiresAtUnixMs(response.data.expiresAtUnixMs);
+      showToast({
+        title:
+          locale === "ru"
+            ? "Bootstrap-токен выдан"
+            : "Bootstrap token issued",
+        description:
+          locale === "ru"
+            ? "Enrollment-команда обновлена актуальным токеном."
+            : "The enrollment command was updated with the new token.",
+        variant: "success",
+      });
+    } catch (error) {
+      setBootstrapError(
+        error instanceof Error
+          ? error.message
+          : locale === "ru"
+            ? "Не удалось выдать bootstrap-токен."
+            : "Failed to issue a bootstrap token."
+      );
+    } finally {
+      setBootstrapLoading(false);
+    }
+  };
 
   if (!open || typeof document === "undefined") {
     return null;
@@ -233,11 +358,11 @@ export function AgentEnrollmentDialog({
                   >
                     {copy.title}
                   </h2>
-                  <Badge variant="warning">{copy.badge}</Badge>
+                  <Badge variant="success">{liveBadge}</Badge>
                 </div>
 
                 <p className="max-w-3xl text-sm leading-6 text-[color:var(--muted-foreground)]">
-                  {copy.description}
+                  {description}
                 </p>
               </div>
 
@@ -252,8 +377,8 @@ export function AgentEnrollmentDialog({
             </div>
 
             <NoticeBanner
-              title={copy.notice.title}
-              description={copy.notice.description}
+              title={noticeTitle}
+              description={noticeDescription}
             />
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -379,17 +504,18 @@ export function AgentEnrollmentDialog({
               <div className="space-y-4 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
                 <Input
                   label={copy.bootstrap.label}
-                  value={copy.bootstrapTokenPlaceholder}
+                  value={bootstrapTokenValue || bootstrapTokenPlaceholder}
                   readOnly
-                  disabled
-                  helperText={copy.bootstrap.help}
+                  helperText={bootstrapHelperText}
                 />
 
                 <Button
                   variant="outline"
                   size="sm"
                   className="h-10 px-4"
-                  disabled
+                  loading={bootstrapLoading}
+                  disabled={!selectedPolicy}
+                  onClick={() => void handleIssueBootstrapToken()}
                 >
                   {copy.bootstrap.button}
                 </Button>
@@ -401,7 +527,7 @@ export function AgentEnrollmentDialog({
                     {copy.commandPreview.title}
                   </p>
                   <p className="mt-1 text-sm leading-6 text-[color:var(--muted-foreground)]">
-                    {copy.commandPreview.description}
+                    {commandDescription}
                   </p>
                 </div>
 
@@ -413,7 +539,7 @@ export function AgentEnrollmentDialog({
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--border)] pt-4">
               <p className="max-w-3xl text-sm leading-6 text-[color:var(--muted-foreground)]">
-                {copy.footer}
+                {footerText}
               </p>
 
               <div className="flex flex-wrap gap-2">
@@ -425,8 +551,14 @@ export function AgentEnrollmentDialog({
                 >
                   {copy.cancel}
                 </Button>
-                <Button size="sm" className="h-10 px-4" disabled>
-                  {copy.prepare}
+                <Button
+                  size="sm"
+                  className="h-10 px-4"
+                  loading={bootstrapLoading}
+                  disabled={!selectedPolicy}
+                  onClick={() => void handleIssueBootstrapToken()}
+                >
+                  {copy.bootstrap.button}
                 </Button>
               </div>
             </div>

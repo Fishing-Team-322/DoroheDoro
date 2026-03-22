@@ -323,9 +323,20 @@ export type DeploymentDetails = {
 };
 
 export type BootstrapTokenIssuePayload = {
-  hostId?: string;
-  hostGroupId?: string;
-  note?: string;
+  policyId: string;
+  policyRevisionId: string;
+  requestedBy: string;
+  expiresAtUnixMs: number;
+};
+
+export type BootstrapTokenItem = {
+  tokenId: string;
+  bootstrapToken: string;
+  policyId: string;
+  policyRevisionId: string;
+  expiresAtUnixMs: number;
+  createdAtUnixMs: number;
+  raw?: unknown;
 };
 
 export type AgentItem = {
@@ -336,12 +347,25 @@ export type AgentItem = {
   metadata_json: Record<string, unknown>;
   first_seen_at: string;
   last_seen_at: string;
+  effective_policy?: {
+    policy_id?: string;
+    policy_revision_id?: string;
+    policy_revision?: string;
+    assigned_at?: string;
+    policy_name?: string;
+    policy_description?: string;
+  };
 };
 
 export type AgentDiagnosticsItem = {
   agent_id: string;
   payload_json: Record<string, unknown>;
   created_at: string;
+};
+
+export type AgentRegistryList = {
+  items: AgentItem[];
+  raw?: unknown;
 };
 
 export type LogEventItem = {
@@ -732,6 +756,45 @@ const normalizeBootstrapPreview = (value: unknown): BootstrapPreview => {
   };
 };
 
+const normalizeBootstrapToken = (value: unknown): BootstrapTokenItem => {
+  const record = asRecord(value);
+
+  return {
+    tokenId: asString(record.token_id) ?? "unknown-token",
+    bootstrapToken: asString(record.bootstrap_token) ?? "",
+    policyId: asString(record.policy_id) ?? "",
+    policyRevisionId: asString(record.policy_revision_id) ?? "",
+    expiresAtUnixMs: asNumber(record.expires_at_unix_ms) ?? 0,
+    createdAtUnixMs: asNumber(record.created_at_unix_ms) ?? 0,
+    raw: value,
+  };
+};
+
+const normalizeAgentItem = (value: unknown): AgentItem => {
+  const record = asRecord(value);
+  const effectivePolicy = pickObject(record.effective_policy);
+
+  return {
+    agent_id: asString(record.agent_id) ?? "unknown-agent",
+    hostname: asString(record.hostname) ?? "unknown-host",
+    status: asString(record.status) ?? "unknown",
+    version: asString(record.version) ?? "",
+    metadata_json: pickObject(record.metadata_json) ?? {},
+    first_seen_at: asString(record.first_seen_at) ?? "",
+    last_seen_at: asString(record.last_seen_at) ?? "",
+    effective_policy: effectivePolicy
+      ? {
+          policy_id: asString(effectivePolicy.policy_id),
+          policy_revision_id: asString(effectivePolicy.policy_revision_id),
+          policy_revision: asString(effectivePolicy.policy_revision),
+          assigned_at: asString(effectivePolicy.assigned_at),
+          policy_name: asString(effectivePolicy.policy_name),
+          policy_description: asString(effectivePolicy.policy_description),
+        }
+      : undefined,
+  };
+};
+
 const normalizeDeploymentPlan = (value: unknown): DeploymentPlan => {
   const record = asRecord(value);
 
@@ -961,17 +1024,49 @@ export async function cancelDeployment(
 }
 
 export async function issueBootstrapToken(
-  payload: BootstrapTokenIssuePayload
-): Promise<never> {
-  // TODO: Missing public Edge API bridge for agents.bootstrap-token.issue.
-  void payload;
-  throw new Error(
-    "Bootstrap token issuance is unavailable until the public Edge API bridge is exposed."
+  payload: BootstrapTokenIssuePayload,
+  signal?: AbortSignal
+): Promise<RuntimeRequestResult<BootstrapTokenItem>> {
+  await ensureCsrfToken();
+  const response = await runtimeApiClient.postWithMeta<unknown>(
+    "/api/v1/agents/bootstrap-tokens",
+    {
+      policy_id: payload.policyId,
+      policy_revision_id: payload.policyRevisionId,
+      requested_by: payload.requestedBy,
+      expires_at_unix_ms: payload.expiresAtUnixMs,
+    },
+    { signal }
   );
+  const record = asRecord(response.data);
+
+  return {
+    meta: response.meta,
+    data: normalizeBootstrapToken(record.item ?? response.data),
+  };
 }
 
 export function listAgents() {
   return runtimeApiClient.get<{ items: AgentItem[]; request_id: string }>("/api/v1/agents");
+}
+
+export async function getAgentsRegistry(
+  options: {
+    signal?: AbortSignal;
+  } = {}
+): Promise<RuntimeRequestResult<AgentRegistryList>> {
+  const response = await runtimeApiClient.getWithMeta<unknown>("/api/v1/agents", {
+    signal: options.signal,
+  });
+  const record = asRecord(response.data);
+
+  return {
+    meta: response.meta,
+    data: {
+      items: asArray(record.items).map(normalizeAgentItem),
+      raw: response.data,
+    },
+  };
 }
 
 export function getAgentDiagnostics(agentId: string) {
