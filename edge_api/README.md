@@ -50,6 +50,7 @@ Stable WEB boundary routes:
 
 - auth/session
 - agents
+- agent bootstrap tokens
 - policies
 - hosts
 - host groups
@@ -113,6 +114,12 @@ Rules:
 - there is no silent fallback from mTLS to insecure transport
 
 The boundary already supports the stable client-cert path used by the agent install contract.
+
+Post-enrollment agent RPC rules:
+
+- when mTLS is enabled, the verified client certificate identity is required
+- the certificate identity must match `req.agent_id`
+- the boundary returns real gRPC auth errors instead of collapsing them into `InvalidArgument`
 
 ## Local and server runs
 

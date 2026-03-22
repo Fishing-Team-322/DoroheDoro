@@ -351,7 +351,7 @@ mod tests {
 
         assert_eq!(manifest.version, "0.2.0");
         assert_eq!(manifest.generated_at, "2026-03-21T12:00:00Z");
-        assert_eq!(manifest.artifacts.len(), 5);
+        assert_eq!(manifest.artifacts.len(), 3);
     }
 
     #[test]
@@ -399,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_container_artifact_when_preferred() {
+    fn falls_back_to_tarball_when_container_artifact_is_unavailable() {
         let manifest: super::ReleaseManifest = serde_json::from_str(include_str!(
             "../../../../deployments/artifacts/example.manifest.json"
         ))
@@ -423,14 +423,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(resolution.artifact.package_type, "container");
+        assert_eq!(resolution.artifact.package_type, "tar.gz");
         assert_eq!(
-            resolution.artifact.image_reference.as_deref(),
-            Some("docker.io/example/doro-agent:0.2.0")
+            resolution.artifact.source_uri,
+            "releases/0.2.0/doro-agent_0.2.0_linux_amd64.tar.gz"
         );
-        assert_eq!(
-            resolution.artifact.image_digest_reference.as_deref(),
-            Some("docker.io/example/doro-agent@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
-        );
+        assert!(resolution.artifact.image_reference.is_none());
+        assert!(resolution.artifact.image_digest_reference.is_none());
     }
 }

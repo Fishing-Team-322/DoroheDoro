@@ -126,6 +126,7 @@ func Load() (Config, error) {
 			RequestTimeout: parseDuration(env("NATS_REQUEST_TIMEOUT", "3s"), 3*time.Second),
 			Subjects: subjects.Registry{
 				AgentsEnrollRequest:           env("SUBJECT_AGENTS_ENROLL_REQUEST", defaultSubjects.AgentsEnrollRequest),
+				AgentsBootstrapTokenIssue:     env("SUBJECT_AGENTS_BOOTSTRAP_TOKEN_ISSUE", defaultSubjects.AgentsBootstrapTokenIssue),
 				AgentsPolicyFetch:             env("SUBJECT_AGENTS_POLICY_FETCH", defaultSubjects.AgentsPolicyFetch),
 				AgentsHeartbeat:               env("SUBJECT_AGENTS_HEARTBEAT", defaultSubjects.AgentsHeartbeat),
 				AgentsDiagnostics:             env("SUBJECT_AGENTS_DIAGNOSTICS", defaultSubjects.AgentsDiagnostics),

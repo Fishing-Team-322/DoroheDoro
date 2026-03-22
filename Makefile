@@ -1,4 +1,4 @@
-.PHONY: build run test tidy fmt compose-config stack-up stack-down stack-logs edge-config edge-up edge-down swagger swagger-check agent-release agent-manifest pki-dev-ca pki-edge-cert pki-agent-cert server-smoke
+.PHONY: build run test tidy fmt compose-config stack-up stack-down stack-logs edge-config edge-up edge-down swagger swagger-check agent-release agent-manifest pki-dev-ca pki-edge-cert pki-agent-cert server-smoke agent-smoke
 
 APP_DIR := edge_api
 SERVER_ENV_FILE ?= .env.server
@@ -49,6 +49,9 @@ server-smoke:
 	cd server-rs && cargo test --manifest-path Cargo.toml -p enrollment-plane --test smoke -- --ignored --nocapture
 	cd server-rs && cargo test --manifest-path Cargo.toml -p control-plane --test smoke -- --ignored --nocapture
 	cd server-rs && cargo test --manifest-path Cargo.toml -p deployment-plane --test smoke -- --ignored --nocapture
+
+agent-smoke:
+	bash scripts/smoke-agent-rs.sh
 
 agent-release:
 	bash scripts/release/build-agent-artifacts.sh

@@ -80,8 +80,16 @@ impl EnrollmentService {
             .map_err(|error| AppError::internal(format!("load policy by token: {error}")))?
             .ok_or_else(|| AppError::unauthenticated("invalid bootstrap token"))?;
 
+        let tls_identity = request.tls_identity.trim();
         let existing_agent_id = request.existing_agent_id.trim();
-        let chosen_agent_id = if !existing_agent_id.is_empty()
+        let chosen_agent_id = if !tls_identity.is_empty() {
+            if !existing_agent_id.is_empty() && existing_agent_id != tls_identity {
+                return Err(AppError::unauthenticated(
+                    "existing_agent_id does not match the presented tls identity",
+                ));
+            }
+            tls_identity.to_string()
+        } else if !existing_agent_id.is_empty()
             && self
                 .repo
                 .agent_exists(existing_agent_id)
@@ -498,7 +506,7 @@ fn map_to_json(map: &BTreeMap<String, String>) -> AppResult<Value> {
 fn default_policy_body() -> Value {
     json!({
         "revision": "rev-1",
-        "sources": ["/var/log/*.log", "journald"],
+        "sources": ["/tmp/doro-agent-bootstrap.log"],
         "labels": {
             "env": "dev",
             "plane": "data"

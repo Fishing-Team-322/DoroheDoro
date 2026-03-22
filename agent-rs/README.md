@@ -4,7 +4,7 @@
 
 ## Current scope
 
-- first-run enrollment through the current Go edge ingress without changing the existing wire contract
+- first-run enrollment and re-enrollment through the current Go edge ingress
 - persisted local identity, applied policy revision, offsets, and spool metadata in `state_dir/state.db`
 - policy-driven file source runtime for `transport.mode=edge`
 - `mock` mode for local smoke tests with static `sources`
@@ -173,3 +173,9 @@ sqlite3 /var/lib/doro-agent/state.db 'select batch_id, approx_bytes, attempt_cou
 ```
 
 More runtime detail lives in [`docs/runtime-audit.md`](./docs/runtime-audit.md) and [`../docs/agent-runtime.md`](../docs/agent-runtime.md).
+
+For the integrated local boundary smoke with real mTLS and ingest verification, run:
+
+```bash
+make agent-smoke
+```

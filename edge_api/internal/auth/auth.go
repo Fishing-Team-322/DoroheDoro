@@ -92,10 +92,41 @@ func FromGRPC(ctx context.Context) (model.AuthContext, error) {
 }
 
 func RequireAgent(ctx context.Context, agentID string) error {
-	if strings.TrimSpace(agentID) == "" {
-		return status.Error(codes.Unauthenticated, "agent_id is required")
+	return RequireAgentWithMTLS(ctx, agentID, false)
+}
+
+func RequireAgentWithMTLS(ctx context.Context, agentID string, mtlsEnabled bool) error {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return status.Error(codes.InvalidArgument, "agent_id is required")
+	}
+	if !mtlsEnabled {
+		return nil
+	}
+
+	tlsAgentID, err := RequireTLSIdentity(ctx, true)
+	if err != nil {
+		return err
+	}
+	if tlsAgentID != agentID {
+		return status.Error(codes.PermissionDenied, "agent_id does not match the presented tls identity")
 	}
 	return nil
+}
+
+func RequireTLSIdentity(ctx context.Context, mtlsEnabled bool) (string, error) {
+	if !mtlsEnabled {
+		return "", nil
+	}
+	tlsIdentity, ok := TLSIdentity(ctx)
+	if !ok {
+		return "", status.Error(codes.Unauthenticated, "verified agent TLS identity is required")
+	}
+	agentID := strings.TrimSpace(tlsIdentity.AgentID())
+	if agentID == "" {
+		return "", status.Error(codes.Unauthenticated, "verified agent TLS identity is required")
+	}
+	return agentID, nil
 }
 
 func first(values []string) string {

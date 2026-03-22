@@ -12,6 +12,7 @@ message EnrollRequest {
   string version = 4;
   map<string, string> metadata = 5;
   string existing_agent_id = 6;
+  string tls_identity = 7;
 }
 
 message EnrollResponse {

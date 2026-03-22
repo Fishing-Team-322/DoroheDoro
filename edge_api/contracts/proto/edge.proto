@@ -16,6 +16,7 @@ message EnrollRequest {
   string enrollment_token = 1;
   string host = 2;
   map<string, string> labels = 3;
+  string existing_agent_id = 4;
 }
 
 message EnrollResponse {
@@ -47,6 +48,8 @@ message HeartbeatRequest {
   string host = 2;
   int64 sent_at_unix_ms = 3;
   string status = 4;
+  string version = 5;
+  map<string, string> host_metadata = 6;
 }
 
 message DiagnosticsRequest {

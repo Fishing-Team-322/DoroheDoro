@@ -209,4 +209,13 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().contains("unsupported policy source type"));
     }
+
+    #[test]
+    fn rejects_unsupported_start_at() {
+        let error = parse_file_sources(
+            r#"{"sources":[{"type":"file","path":"/var/log/syslog","start_at":"middle"}]}"#,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("start_at"));
+    }
 }

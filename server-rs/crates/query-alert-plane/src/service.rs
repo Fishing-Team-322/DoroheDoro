@@ -195,6 +195,7 @@ impl QueryAlertService {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
     fn record_rejected(&self) {
         self.detection
             .metrics

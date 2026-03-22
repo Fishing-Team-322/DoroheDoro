@@ -632,6 +632,102 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ErrorEnvelope"
+  "/api/v1/agents/bootstrap-tokens":
+    "post":
+      "security":
+        - "SessionCookie":
+            []
+      "tags":
+        - "agents"
+      "summary": "Issue bootstrap token for agent enrollment"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/AgentBootstrapTokenRequest"
+      "responses":
+        "201":
+          "description": "Created."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+            "X-NATS-Subject":
+              "$ref": "#/components/headers/NatsSubject"
+          "content":
+            "application/json":
+              "schema":
+                "type": "object"
+                "properties":
+                  "item":
+                    "$ref": "#/components/schemas/AgentBootstrapTokenItem"
+                  "request_id":
+                    "type": "string"
+                "required":
+                  - "request_id"
+        "400":
+          "description": "Invalid request payload or parameters."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "401":
+          "description": "Authentication is required or the session is missing."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "403":
+          "description": "CSRF or permission validation failed."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "404":
+          "description": "Requested resource was not found."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "502":
+          "description": "Invalid upstream response or bridge decode failure."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "503":
+          "description": "Upstream runtime or NATS bridge is unavailable."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "504":
+          "description": "Upstream request timed out."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
   "/api/v1/agents/{id}":
     "get":
       "security":
@@ -9713,6 +9809,47 @@
       "required":
         - "agent_id"
         - "created_at"
+    "AgentBootstrapTokenRequest":
+      "type": "object"
+      "properties":
+        "policy_id":
+          "type": "string"
+        "policy_revision_id":
+          "type": "string"
+        "requested_by":
+          "type": "string"
+        "expires_at_unix_ms":
+          "type": "integer"
+          "minimum": 0
+      "required":
+        - "policy_id"
+        - "policy_revision_id"
+        - "requested_by"
+        - "expires_at_unix_ms"
+    "AgentBootstrapTokenItem":
+      "type": "object"
+      "properties":
+        "token_id":
+          "type": "string"
+        "bootstrap_token":
+          "type": "string"
+        "policy_id":
+          "type": "string"
+        "policy_revision_id":
+          "type": "string"
+        "expires_at_unix_ms":
+          "type": "integer"
+          "minimum": 0
+        "created_at_unix_ms":
+          "type": "integer"
+          "minimum": 0
+      "required":
+        - "token_id"
+        - "bootstrap_token"
+        - "policy_id"
+        - "policy_revision_id"
+        - "expires_at_unix_ms"
+        - "created_at_unix_ms"
     "AgentIssue":
       "type": "object"
       "properties":

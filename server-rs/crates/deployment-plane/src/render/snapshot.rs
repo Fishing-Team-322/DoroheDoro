@@ -3,10 +3,20 @@ use serde_json::Value;
 
 pub fn policy_to_source_paths(policy_body_json: &Value) -> AppResult<Vec<String>> {
     if let Some(paths) = policy_body_json.get("paths").and_then(Value::as_array) {
+        if paths.is_empty() {
+            return Err(AppError::invalid_argument(
+                "policy paths must not be empty for deployment bootstrap",
+            ));
+        }
         return collect_string_paths("paths", paths);
     }
 
     if let Some(sources) = policy_body_json.get("sources").and_then(Value::as_array) {
+        if sources.is_empty() {
+            return Err(AppError::invalid_argument(
+                "policy sources must not be empty for deployment bootstrap",
+            ));
+        }
         if sources.iter().all(Value::is_string) {
             return collect_string_paths("sources", sources);
         }
@@ -34,10 +44,14 @@ pub fn policy_to_source_paths(policy_body_json: &Value) -> AppResult<Vec<String>
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| AppError::invalid_argument("file source path is required"))?;
-            if path.contains('*') || path.contains('?') {
-                return Err(AppError::invalid_argument(format!(
-                    "glob paths are not supported in deployment bootstrap: {path}"
-                )));
+            validate_supported_bootstrap_path(path)?;
+            if let Some(start_at) = object.get("start_at").and_then(Value::as_str) {
+                let start_at = start_at.trim();
+                if start_at != "beginning" && start_at != "end" {
+                    return Err(AppError::invalid_argument(format!(
+                        "unsupported start_at `{start_at}` in deployment bootstrap"
+                    )));
+                }
             }
             rendered.push(path.to_string());
         }
@@ -87,17 +101,18 @@ pub fn policy_to_source_paths_preview(
                 warnings.push("file source without path will be skipped".to_string());
                 continue;
             };
-            if path.eq_ignore_ascii_case("journald") {
-                warnings.push(
-                    "journald source is not supported by current agent bootstrap".to_string(),
-                );
+            if let Err(error) = validate_supported_bootstrap_path(path) {
+                warnings.push(error.to_string());
                 continue;
             }
-            if path.contains('*') || path.contains('?') {
-                warnings.push(format!(
-                    "glob path `{path}` is not supported by current agent bootstrap"
-                ));
-                continue;
+            if let Some(start_at) = object.get("start_at").and_then(Value::as_str) {
+                let start_at = start_at.trim();
+                if start_at != "beginning" && start_at != "end" {
+                    warnings.push(format!(
+                        "unsupported start_at `{start_at}` is not supported by current agent bootstrap"
+                    ));
+                    continue;
+                }
             }
             rendered.push(path.to_string());
         }
@@ -110,6 +125,20 @@ pub fn policy_to_source_paths_preview(
     ))
 }
 
+fn validate_supported_bootstrap_path(path: &str) -> AppResult<()> {
+    if path.eq_ignore_ascii_case("journald") {
+        return Err(AppError::invalid_argument(
+            "journald source is not supported by current agent bootstrap",
+        ));
+    }
+    if path.contains('*') || path.contains('?') {
+        return Err(AppError::invalid_argument(format!(
+            "glob path `{path}` is not supported by current agent bootstrap"
+        )));
+    }
+    Ok(())
+}
+
 fn collect_string_paths(label: &str, values: &[Value]) -> AppResult<Vec<String>> {
     let mut rendered = Vec::new();
     for value in values {
@@ -118,16 +147,7 @@ fn collect_string_paths(label: &str, values: &[Value]) -> AppResult<Vec<String>>
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| AppError::invalid_argument(format!("{label} must contain strings")))?;
-        if path.eq_ignore_ascii_case("journald") {
-            return Err(AppError::invalid_argument(
-                "journald sources are not supported in deployment bootstrap",
-            ));
-        }
-        if path.contains('*') || path.contains('?') {
-            return Err(AppError::invalid_argument(format!(
-                "glob paths are not supported in deployment bootstrap: {path}"
-            )));
-        }
+        validate_supported_bootstrap_path(path)?;
         rendered.push(path.to_string());
     }
     Ok(rendered)
@@ -147,15 +167,8 @@ fn collect_preview_paths(label: &str, values: &[Value]) -> AppResult<(Vec<String
             ));
             continue;
         };
-        if path.eq_ignore_ascii_case("journald") {
-            warnings
-                .push("journald source is not supported by current agent bootstrap".to_string());
-            continue;
-        }
-        if path.contains('*') || path.contains('?') {
-            warnings.push(format!(
-                "glob path `{path}` is not supported by current agent bootstrap"
-            ));
+        if let Err(error) = validate_supported_bootstrap_path(path) {
+            warnings.push(error.to_string());
             continue;
         }
         rendered.push(path.to_string());
@@ -179,5 +192,14 @@ mod tests {
     fn rejects_globs() {
         let error = policy_to_source_paths(&json!({ "paths": ["/var/log/*.log"] })).unwrap_err();
         assert!(error.to_string().contains("glob"));
+    }
+
+    #[test]
+    fn rejects_unsupported_start_at() {
+        let error = policy_to_source_paths(&json!({
+            "sources": [{"type": "file", "path": "/var/log/syslog", "start_at": "middle"}]
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("start_at"));
     }
 }

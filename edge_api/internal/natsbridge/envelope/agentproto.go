@@ -22,6 +22,7 @@ type EnrollRequest struct {
 	Version         string
 	Metadata        map[string]string
 	ExistingAgentID string
+	TLSIdentity     string
 }
 
 type EnrollResponse struct {
@@ -45,6 +46,23 @@ type FetchPolicyResponse struct {
 	PolicyBodyJSON    string
 	Status            string
 	RespondedAtUnixMs int64
+}
+
+type IssueBootstrapTokenRequest struct {
+	CorrelationID    string
+	PolicyID         string
+	PolicyRevisionID string
+	RequestedBy      string
+	ExpiresAtUnixMs  int64
+}
+
+type IssueBootstrapTokenResponse struct {
+	TokenID          string
+	BootstrapToken   string
+	PolicyID         string
+	PolicyRevisionID string
+	ExpiresAtUnixMs  int64
+	CreatedAtUnixMs  int64
 }
 
 type ListAgentsRequest struct {
@@ -182,6 +200,7 @@ func EncodeEnrollRequest(request EnrollRequest) []byte {
 	out = appendStringField(out, 4, request.Version)
 	out = appendStringMapField(out, 5, request.Metadata)
 	out = appendStringField(out, 6, request.ExistingAgentID)
+	out = appendStringField(out, 7, request.TLSIdentity)
 	return out
 }
 
@@ -235,6 +254,16 @@ func EncodeFetchPolicyRequest(request FetchPolicyRequest) []byte {
 	var out []byte
 	out = appendStringField(out, 1, request.CorrelationID)
 	out = appendStringField(out, 2, request.AgentID)
+	return out
+}
+
+func EncodeIssueBootstrapTokenRequest(request IssueBootstrapTokenRequest) []byte {
+	var out []byte
+	out = appendStringField(out, 1, request.CorrelationID)
+	out = appendStringField(out, 2, request.PolicyID)
+	out = appendStringField(out, 3, request.PolicyRevisionID)
+	out = appendStringField(out, 4, request.RequestedBy)
+	out = appendInt64Field(out, 5, request.ExpiresAtUnixMs)
 	return out
 }
 
@@ -305,6 +334,52 @@ func DecodeFetchPolicyResponse(data []byte) (FetchPolicyResponse, error) {
 				return err
 			}
 			out.RespondedAtUnixMs = decoded
+		}
+		return nil
+	})
+	return out, err
+}
+
+func DecodeIssueBootstrapTokenResponse(data []byte) (IssueBootstrapTokenResponse, error) {
+	var out IssueBootstrapTokenResponse
+	err := walkFields(data, func(num protowire.Number, kind protowire.Type, value []byte) error {
+		switch num {
+		case 1:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.TokenID = decoded
+		case 2:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.BootstrapToken = decoded
+		case 3:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.PolicyID = decoded
+		case 4:
+			decoded, err := consumeString(kind, value)
+			if err != nil {
+				return err
+			}
+			out.PolicyRevisionID = decoded
+		case 5:
+			decoded, err := consumeInt64(kind, value)
+			if err != nil {
+				return err
+			}
+			out.ExpiresAtUnixMs = decoded
+		case 6:
+			decoded, err := consumeInt64(kind, value)
+			if err != nil {
+				return err
+			}
+			out.CreatedAtUnixMs = decoded
 		}
 		return nil
 	})

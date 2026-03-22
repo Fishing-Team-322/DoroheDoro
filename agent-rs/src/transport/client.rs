@@ -149,6 +149,7 @@ impl AgentTransport for EdgeGrpcTransport {
                     enrollment_token: request.bootstrap_token,
                     host: request.hostname,
                     labels,
+                    existing_agent_id: request.existing_agent_id.unwrap_or_default(),
                 },
             )
             .await?;
@@ -195,6 +196,8 @@ impl AgentTransport for EdgeGrpcTransport {
                     host: payload.hostname,
                     sent_at_unix_ms: payload.sent_at_unix_ms,
                     status: payload.status,
+                    version: payload.version,
+                    host_metadata: payload.host_metadata,
                 },
             )
             .await?;

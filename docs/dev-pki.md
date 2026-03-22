@@ -55,19 +55,29 @@ That means the local demo stack is mTLS-ready by default and does not require ma
 
 ## Manual smoke against live compose
 
-Run the built-in fake agent inside the running `edge-api` container:
+Run the real `agent-rs` smoke flow:
 
 ```bash
-docker exec dorohedoro-edge-api-1 /bin/sh -lc \
-  "FAKE_AGENT_TLS_CA_FILE=/certs/ca.crt \
-   FAKE_AGENT_TLS_CERT_FILE=/certs/agent.crt \
-   FAKE_AGENT_TLS_KEY_FILE=/certs/agent.key \
-   FAKE_AGENT_TLS_SERVER_NAME=edge-api \
-   EDGE_API_GRPC_ADDR=127.0.0.1:9090 \
-   /usr/local/bin/fake-agent"
+make agent-smoke
 ```
 
-This smoke path validates the live boundary with a real client certificate. In the current repository state, this is the reproducible mTLS proof because `agent-rs` itself does not yet expose client-certificate configuration in its install/runtime contract.
+The smoke script:
+
+- starts the local compose stack
+- copies the live dev CA and client cert from `edge-api`
+- issues a bootstrap token through `POST /api/v1/agents/bootstrap-tokens`
+- runs the real `agent-rs`
+- verifies enroll, policy apply, heartbeat, diagnostics, ingest, and restart without duplicate identity
+
+Important identity rule:
+
+- when mTLS is enabled, the client certificate CN or first SAN becomes the logical `agent_id`
+- the default compose dev client certificate uses `agent-dev`
+- for a custom identity, issue a custom client certificate with:
+
+```bash
+bash scripts/pki/issue-agent-cert.sh .tmp/pki/dev <agent_id>
+```
 
 ## Expected security behavior
 
@@ -75,5 +85,6 @@ This smoke path validates the live boundary with a real client certificate. In t
 - missing client cert with mTLS enabled -> rejected
 - invalid client cert -> rejected
 - valid client cert signed by the dev CA -> accepted
+- post-enrollment requests with mismatched `agent_id` -> rejected
 
 This is transport-level mTLS for demo/dev. It is not a full production PKI lifecycle system.

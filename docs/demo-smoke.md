@@ -137,27 +137,22 @@ curl -N http://localhost:8080/api/v1/stream/deployments
 
 Create another deployment job while the stream is open. You should receive `ready`, `status` and `step` events.
 
-## 10. Enroll an agent over gRPC + mTLS
+## 10. Enroll a real agent over gRPC + mTLS
 
-Run the smoke client inside the live `edge-api` container:
+Run the real agent smoke:
 
 ```bash
-docker exec dorohedoro-edge-api-1 /bin/sh -lc \
-  "FAKE_AGENT_TLS_CA_FILE=/certs/ca.crt \
-   FAKE_AGENT_TLS_CERT_FILE=/certs/agent.crt \
-   FAKE_AGENT_TLS_KEY_FILE=/certs/agent.key \
-   FAKE_AGENT_TLS_SERVER_NAME=edge-api \
-   EDGE_API_GRPC_ADDR=127.0.0.1:9090 \
-   /usr/local/bin/fake-agent"
+make agent-smoke
 ```
 
 Expected:
 
-- `Enroll` succeeds
-- `FetchPolicy` succeeds
-- `SendHeartbeat` succeeds
-- `SendDiagnostics` succeeds
-- `IngestLogs` succeeds
+- bootstrap token issuance succeeds
+- `agent-rs` enroll succeeds
+- policy fetch and apply succeed
+- heartbeat and diagnostics appear through edge read endpoints
+- file log delivery reaches the query path
+- restarting with the same client certificate does not create a duplicate agent record
 
 ## 11. Inspect agents, logs, alerts and audit
 

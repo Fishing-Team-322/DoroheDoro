@@ -157,6 +157,8 @@ const spec = {
       CredentialItem: { type: 'object', properties: { credentials_profile_id: str, name: str, kind: str, description: str, vault_ref: str, created_at: dt, updated_at: dt }, required: ['credentials_profile_id', 'name', 'kind', 'vault_ref', 'created_at', 'updated_at'] },
       AgentItem: { type: 'object', properties: { agent_id: str, hostname: str, status: str, version: str, metadata_json: freeObject, first_seen_at: dt, last_seen_at: dt }, required: ['agent_id', 'hostname', 'status', 'first_seen_at', 'last_seen_at'] },
       AgentDiagnosticsItem: { type: 'object', properties: { agent_id: str, payload_json: freeObject, created_at: dt }, required: ['agent_id', 'created_at'] },
+      AgentBootstrapTokenRequest: { type: 'object', properties: { policy_id: str, policy_revision_id: str, requested_by: str, expires_at_unix_ms: u64 }, required: ['policy_id', 'policy_revision_id', 'requested_by', 'expires_at_unix_ms'] },
+      AgentBootstrapTokenItem: { type: 'object', properties: { token_id: str, bootstrap_token: str, policy_id: str, policy_revision_id: str, expires_at_unix_ms: u64, created_at_unix_ms: u64 }, required: ['token_id', 'bootstrap_token', 'policy_id', 'policy_revision_id', 'expires_at_unix_ms', 'created_at_unix_ms'] },
       AgentIssue: { type: 'object', properties: { code: str, severity: str, domain: str, source: str, message: str }, required: ['code', 'severity', 'domain', 'message'] },
       AgentDiagnosticsCheck: { type: 'object', properties: { check_id: str, name: str, status: str, severity: str, domain: str, message: str, hint: str }, required: ['check_id', 'name', 'status', 'severity', 'domain', 'message'] },
       AgentDataFreshnessSection: { type: 'object', properties: { status: str, observed_at: dt, age_sec: u64, note: str }, required: ['status'] },
@@ -498,6 +500,7 @@ paths['/api/v1/auth/logout'] = { post: paths['/auth/logout'].post };
 paths['/api/v1/auth/me'] = { get: paths['/auth/me'].get };
 
 paths['/api/v1/agents'] = { get: listOp('agents', 'List agents', 'AgentItem') };
+paths['/api/v1/agents/bootstrap-tokens'] = { post: writeOp('agents', 'Issue bootstrap token for agent enrollment', 'AgentBootstrapTokenRequest', 'AgentBootstrapTokenItem', 201) };
 paths['/api/v1/agents/{id}'] = { get: itemOp('agents', 'Get agent', 'AgentItem', { params: [p('id', 'Agent ID.')] }) };
 paths['/api/v1/agents/{id}/diagnostics'] = { get: listOp('agents', 'List diagnostics for an agent', 'AgentDiagnosticsItem', { params: [p('id', 'Agent ID.')] }) };
 paths['/api/v1/agents/{id}/policy'] = { get: itemOp('agents', 'Get current policy bound to an agent', 'PolicyItem', { params: [p('id', 'Agent ID.')] }) };

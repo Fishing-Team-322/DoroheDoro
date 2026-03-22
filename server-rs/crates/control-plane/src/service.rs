@@ -1435,13 +1435,14 @@ fn validate_policy_body(value: &Value) -> AppResult<()> {
         let entries = sources
             .as_array()
             .ok_or_else(|| AppError::invalid_argument("policy sources must be an array"))?;
+        if entries.is_empty() {
+            return Err(AppError::invalid_argument(
+                "policy sources must not be empty",
+            ));
+        }
         for source in entries {
             if let Some(source_str) = source.as_str() {
-                if source_str.trim().is_empty() {
-                    return Err(AppError::invalid_argument(
-                        "policy sources must not contain empty strings",
-                    ));
-                }
+                validate_supported_policy_path(source_str, "policy sources")?;
                 continue;
             }
 
@@ -1467,7 +1468,16 @@ fn validate_policy_body(value: &Value) -> AppResult<()> {
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| AppError::invalid_argument("policy file source path is required"))?;
-            let _ = path;
+            validate_supported_policy_path(path, "policy file source path")?;
+
+            if let Some(start_at) = source_object.get("start_at").and_then(Value::as_str) {
+                let start_at = start_at.trim();
+                if start_at != "beginning" && start_at != "end" {
+                    return Err(AppError::invalid_argument(format!(
+                        "unsupported start_at `{start_at}` for policy file source"
+                    )));
+                }
+            }
         }
     }
 
@@ -1484,16 +1494,37 @@ fn validate_string_array(value: &Value, field: &str) -> AppResult<()> {
     let items = value
         .as_array()
         .ok_or_else(|| AppError::invalid_argument(format!("{field} must be an array")))?;
+    if items.is_empty() {
+        return Err(AppError::invalid_argument(format!(
+            "{field} must not be empty"
+        )));
+    }
     for item in items {
         let item = item
             .as_str()
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        if item.is_none() {
+        let Some(item) = item else {
             return Err(AppError::invalid_argument(format!(
                 "{field} must contain non-empty strings"
             )));
-        }
+        };
+        validate_supported_policy_path(item, field)?;
+    }
+    Ok(())
+}
+
+fn validate_supported_policy_path(path: &str, field: &str) -> AppResult<()> {
+    let path = path.trim();
+    if path.eq_ignore_ascii_case("journald") {
+        return Err(AppError::invalid_argument(format!(
+            "{field} must not contain journald sources"
+        )));
+    }
+    if path.contains('*') || path.contains('?') {
+        return Err(AppError::invalid_argument(format!(
+            "{field} must not contain glob paths: {path}"
+        )));
     }
     Ok(())
 }
@@ -1538,6 +1569,47 @@ fn validate_credentials_input(input: &CredentialProfileInput) -> AppResult<()> {
         return Err(AppError::invalid_argument("vault reference is required"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::validate_policy_body;
+
+    #[test]
+    fn accepts_file_only_policy_subset() {
+        validate_policy_body(&json!({
+            "sources": [
+                {"type": "file", "path": "/var/log/syslog", "start_at": "end"}
+            ]
+        }))
+        .unwrap();
+    }
+
+    #[test]
+    fn rejects_journald_and_globs() {
+        let journald = validate_policy_body(&json!({"paths":["journald"]})).unwrap_err();
+        assert!(journald.to_string().contains("journald"));
+
+        let glob = validate_policy_body(&json!({"paths":["/var/log/*.log"]})).unwrap_err();
+        assert!(glob.to_string().contains("glob"));
+    }
+
+    #[test]
+    fn rejects_unsupported_source_types_and_start_at() {
+        let source_type = validate_policy_body(&json!({
+            "sources": [{"type": "journald", "path": "journald"}]
+        }))
+        .unwrap_err();
+        assert!(source_type.to_string().contains("source type"));
+
+        let start_at = validate_policy_body(&json!({
+            "sources": [{"type": "file", "path": "/var/log/syslog", "start_at": "middle"}]
+        }))
+        .unwrap_err();
+        assert!(start_at.to_string().contains("start_at"));
+    }
 }
 
 fn validate_cluster_fields(name: &str, slug: &str) -> AppResult<()> {

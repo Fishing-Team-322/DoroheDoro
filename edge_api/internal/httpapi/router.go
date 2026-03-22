@@ -92,6 +92,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 		api.Post("/auth/logout", compatAuth.handleLogout)
 
 		api.Get("/agents", agentsListHandler(deps))
+		api.Post("/agents/bootstrap-tokens", agentBootstrapTokenCreateHandler(deps))
 		api.Get("/agents/{id}", agentDetailHandler(deps))
 		api.Get("/agents/{id}/diagnostics", agentDiagnosticsHandler(deps))
 		api.Get("/agents/{id}/policy", agentPolicyHandler(deps))

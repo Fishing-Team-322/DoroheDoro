@@ -32,12 +32,18 @@ func (s *Server) Enroll(ctx context.Context, req *edgev1.EnrollRequest) (*edgev1
 	if req == nil || strings.TrimSpace(req.GetEnrollmentToken()) == "" || strings.TrimSpace(req.GetHost()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "enrollment_token and host are required")
 	}
+	tlsIdentity, err := auth.RequireTLSIdentity(ctx, s.cfg.GRPC.MTLSEnabled)
+	if err != nil {
+		return nil, err
+	}
 	reply, err := s.requestAgentReply(ctx, s.cfg.NATS.Subjects.AgentsEnrollRequest, envelope.EncodeEnrollRequest(envelope.EnrollRequest{
-		CorrelationID:  middleware.GetRequestID(ctx),
-		BootstrapToken: req.GetEnrollmentToken(),
-		Hostname:       req.GetHost(),
-		Version:        strings.TrimSpace(req.Labels["version"]),
-		Metadata:       req.Labels,
+		CorrelationID:   middleware.GetRequestID(ctx),
+		BootstrapToken:  req.GetEnrollmentToken(),
+		Hostname:        req.GetHost(),
+		Version:         strings.TrimSpace(req.Labels["version"]),
+		Metadata:        req.Labels,
+		ExistingAgentID: strings.TrimSpace(req.GetExistingAgentId()),
+		TLSIdentity:     tlsIdentity,
 	}))
 	if err != nil {
 		return nil, err
@@ -55,7 +61,13 @@ func (s *Server) Enroll(ctx context.Context, req *edgev1.EnrollRequest) (*edgev1
 }
 
 func (s *Server) FetchPolicy(ctx context.Context, req *edgev1.FetchPolicyRequest) (*edgev1.FetchPolicyResponse, error) {
-	if req == nil || strings.TrimSpace(req.GetAgentId()) == "" {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
+	}
+	if err := auth.RequireAgentWithMTLS(ctx, req.GetAgentId(), s.cfg.GRPC.MTLSEnabled); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.GetAgentId()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
 	reply, err := s.requestAgentReply(ctx, s.cfg.NATS.Subjects.AgentsPolicyFetch, envelope.EncodeFetchPolicyRequest(envelope.FetchPolicyRequest{
@@ -81,13 +93,18 @@ func (s *Server) FetchPolicy(ctx context.Context, req *edgev1.FetchPolicyRequest
 }
 
 func (s *Server) SendHeartbeat(ctx context.Context, req *edgev1.HeartbeatRequest) (*edgev1.Ack, error) {
-	if req == nil || auth.RequireAgent(ctx, req.GetAgentId()) != nil {
+	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
+	}
+	if err := auth.RequireAgentWithMTLS(ctx, req.GetAgentId(), s.cfg.GRPC.MTLSEnabled); err != nil {
+		return nil, err
 	}
 	if err := s.bridge.Publish(ctx, s.cfg.NATS.Subjects.AgentsHeartbeat, envelope.EncodeHeartbeatPayload(envelope.HeartbeatPayload{
 		AgentID:      req.GetAgentId(),
 		Hostname:     req.Host,
+		Version:      req.GetVersion(),
 		Status:       req.Status,
+		HostMetadata: req.HostMetadata,
 		SentAtUnixMs: req.SentAtUnixMs,
 	})); err != nil {
 		return nil, mapBridgeError(err)
@@ -96,8 +113,11 @@ func (s *Server) SendHeartbeat(ctx context.Context, req *edgev1.HeartbeatRequest
 }
 
 func (s *Server) SendDiagnostics(ctx context.Context, req *edgev1.DiagnosticsRequest) (*edgev1.Ack, error) {
-	if req == nil || auth.RequireAgent(ctx, req.GetAgentId()) != nil {
+	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
+	}
+	if err := auth.RequireAgentWithMTLS(ctx, req.GetAgentId(), s.cfg.GRPC.MTLSEnabled); err != nil {
+		return nil, err
 	}
 	if err := s.bridge.Publish(ctx, s.cfg.NATS.Subjects.AgentsDiagnostics, envelope.EncodeDiagnosticsPayload(envelope.DiagnosticsPayload{
 		AgentID:      req.GetAgentId(),
@@ -110,8 +130,11 @@ func (s *Server) SendDiagnostics(ctx context.Context, req *edgev1.DiagnosticsReq
 }
 
 func (s *Server) IngestLogs(ctx context.Context, req *edgev1.IngestLogsRequest) (*edgev1.IngestLogsResponse, error) {
-	if req == nil || auth.RequireAgent(ctx, req.GetAgentId()) != nil {
+	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
+	}
+	if err := auth.RequireAgentWithMTLS(ctx, req.GetAgentId(), s.cfg.GRPC.MTLSEnabled); err != nil {
+		return nil, err
 	}
 	if len(req.GetEvents()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "events are required")

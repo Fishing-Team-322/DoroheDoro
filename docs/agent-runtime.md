@@ -236,6 +236,8 @@ Identity rules:
 
 - persisted identity is reused whenever possible
 - re-enroll happens only when identity is missing or rejected by the server
+- when mTLS is enabled, the client certificate CN or first SAN becomes the canonical logical `agent_id`
+- restarting or re-enrolling with the same client certificate must keep the same logical agent record
 - diagnostics expose `identity_status` as `reused`, `newly_enrolled`, or `re_enrolled`
 
 Operational guidance:
@@ -338,10 +340,11 @@ Expected behavior:
 
 - HTTPS endpoints use rustls
 - mTLS client auth is optional in config but required if the edge endpoint enforces it
+- when mTLS is enabled on the edge, `req.agent_id` must match the client certificate identity
 - if `edge_grpc_addr` uses an IP literal, TLS verification falls back to `edge_url` host unless `tls.server_name` explicitly overrides it
 - TLS settings are rejected on plaintext HTTP endpoints
 
-`doctor` / `check-config` validates:
+`doctor` / `preflight` validates:
 
 - config syntax
 - endpoint shape
@@ -356,13 +359,50 @@ Typical signals:
 - `last_connect_error`: DNS, routing, refused connection, timeout, or temporary endpoint outage
 - `runtime_status=degraded` with `last_policy_error`: policy fetch or apply problem while last good runtime config is still in use
 
-## `doctor` / `check-config`
+## Fresh Bootstrap And Re-Enrollment Flow
+
+The current reproducible bootstrap flow for a real Linux-host `agent-rs` is:
+
+1. issue or choose an mTLS client certificate
+2. use the certificate CN or SAN value as the expected logical `agent_id`
+3. issue a bootstrap token through `POST /api/v1/agents/bootstrap-tokens`
+4. start `agent-rs` with the bootstrap token, edge address, CA, client cert, and client key
+5. wait for `enroll -> fetch policy -> apply policy -> heartbeat -> diagnostics`
+6. append a test line to `/tmp/doro-agent-bootstrap.log`
+7. verify the line reaches the query path
+
+Current default bootstrap policy:
+
+- path: `/tmp/doro-agent-bootstrap.log`
+- source type: `file`
+- no `journald`
+- no globs
+
+Useful verification points:
+
+- `GET /api/v1/agents/<agent_id>`
+- `GET /api/v1/agents/<agent_id>/diagnostics`
+- `GET /api/v1/agents/<agent_id>/policy`
+- `POST /api/v1/logs/search`
+- local `state_dir/state.db`
+- local `state_dir/runtime/diagnostics-snapshot.json`
+
+Practical re-enroll check:
+
+- stop the agent
+- keep the same client certificate
+- remove local `state.db` or local identity
+- start the agent again with the same bootstrap token and certificate
+- verify the same logical `agent_id` is reused and no duplicate agent record appears
+
+## `doctor` / `preflight`
 
 Run:
 
 ```bash
 cd agent-rs
-cargo run -- check-config --config ./config/agent.example.yaml
+cargo run -- preflight --config ./config/agent.example.yaml
+cargo run -- doctor --config ./config/agent.example.yaml --json
 ```
 
 Preflight checks:
@@ -396,7 +436,7 @@ Canonical package layout:
 
 The packaged unit now runs:
 
-- `ExecStartPre=/usr/bin/doro-agent check-config --config /etc/doro-agent/config.yaml`
+- `ExecStartPre=/usr/bin/doro-agent preflight --config /etc/doro-agent/config.yaml`
 - `ExecStart=/usr/bin/doro-agent run --config /etc/doro-agent/config.yaml`
 
 ## Remote Linux validation checklist

@@ -20,6 +20,7 @@ type EnrollRequest struct {
 	EnrollmentToken string            `json:"enrollment_token,omitempty"`
 	Host            string            `json:"host,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`
+	ExistingAgentId string            `json:"existing_agent_id,omitempty"`
 }
 
 type EnrollResponse struct {
@@ -47,10 +48,12 @@ type FetchPolicyResponse struct {
 }
 
 type HeartbeatRequest struct {
-	AgentId      string `json:"agent_id,omitempty"`
-	Host         string `json:"host,omitempty"`
-	SentAtUnixMs int64  `json:"sent_at_unix_ms,omitempty"`
-	Status       string `json:"status,omitempty"`
+	AgentId      string            `json:"agent_id,omitempty"`
+	Host         string            `json:"host,omitempty"`
+	SentAtUnixMs int64             `json:"sent_at_unix_ms,omitempty"`
+	Status       string            `json:"status,omitempty"`
+	Version      string            `json:"version,omitempty"`
+	HostMetadata map[string]string `json:"host_metadata,omitempty"`
 }
 
 type DiagnosticsRequest struct {
@@ -91,6 +94,12 @@ func (x *EnrollRequest) GetHost() string {
 	}
 	return x.Host
 }
+func (x *EnrollRequest) GetExistingAgentId() string {
+	if x == nil {
+		return ""
+	}
+	return x.ExistingAgentId
+}
 func (x *FetchPolicyRequest) GetAgentId() string {
 	if x == nil {
 		return ""
@@ -108,6 +117,12 @@ func (x *HeartbeatRequest) GetAgentId() string {
 		return ""
 	}
 	return x.AgentId
+}
+func (x *HeartbeatRequest) GetVersion() string {
+	if x == nil {
+		return ""
+	}
+	return x.Version
 }
 func (x *DiagnosticsRequest) GetAgentId() string {
 	if x == nil {

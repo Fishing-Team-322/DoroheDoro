@@ -257,7 +257,7 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
                 correlation_id: new_corr_id(),
                 name: "baseline".to_string(),
                 description: "baseline policy".to_string(),
-                policy_body_json: r#"{"paths":["/var/log/*.log"]}"#.to_string(),
+                policy_body_json: r#"{"paths":["/var/log/syslog"]}"#.to_string(),
                 audit: test_audit(),
             },
         )
@@ -278,6 +278,26 @@ async fn policies_inventory_credentials_flow() -> anyhow::Result<()> {
         )
         .await?;
     assert_eq!(updated_policy.latest_revision, "rev-2");
+
+    let rejected_message = harness
+        .nats
+        .request(
+            CONTROL_POLICIES_CREATE.to_string(),
+            encode_message(&CreatePolicyRequest {
+                correlation_id: new_corr_id(),
+                name: "invalid-glob".to_string(),
+                description: "invalid policy".to_string(),
+                policy_body_json: r#"{"paths":["/var/log/*.log"]}"#.to_string(),
+                audit: test_audit(),
+            })
+            .into(),
+        )
+        .await?;
+    let rejected_envelope: RuntimeReplyEnvelope =
+        decode_message(rejected_message.payload.as_ref())?;
+    assert_eq!(rejected_envelope.status, "error");
+    assert_eq!(rejected_envelope.code, "invalid_argument");
+    assert!(rejected_envelope.message.contains("glob"));
 
     let revisions: GetPolicyRevisionsResponse = harness
         .request_payload(

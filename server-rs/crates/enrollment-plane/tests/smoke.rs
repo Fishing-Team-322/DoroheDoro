@@ -170,6 +170,7 @@ async fn enrollment_policy_heartbeat_and_diagnostics_flow() -> anyhow::Result<()
             .into_iter()
             .collect(),
         existing_agent_id: String::new(),
+        tls_identity: String::new(),
     };
 
     let enroll_message = harness
@@ -216,7 +217,9 @@ async fn enrollment_policy_heartbeat_and_diagnostics_flow() -> anyhow::Result<()
     let fetch_response: FetchPolicyResponse = decode_message(&fetch_envelope.payload)?;
     assert_eq!(fetch_response.agent_id, enroll_response.agent_id);
     assert_eq!(fetch_response.policy_revision, "rev-1");
-    assert!(fetch_response.policy_body_json.contains("/var/log/*.log"));
+    assert!(fetch_response
+        .policy_body_json
+        .contains("/tmp/doro-agent-bootstrap.log"));
 
     let heartbeat = HeartbeatPayload {
         agent_id: fetch_response.agent_id.clone(),
@@ -241,14 +244,15 @@ async fn enrollment_policy_heartbeat_and_diagnostics_flow() -> anyhow::Result<()
         let pool = harness.pool.clone();
         let agent_id = fetch_response.agent_id.clone();
         async move {
-            let row = sqlx::query_as::<_, (String, String)>(
-                "SELECT status, COALESCE(version, '') FROM agents WHERE agent_id = $1",
+            let row = sqlx::query_as::<_, (String, String, String)>(
+                "SELECT status, COALESCE(version, ''), COALESCE(metadata_json->>'kernel', '') FROM agents WHERE agent_id = $1",
             )
             .bind(agent_id)
             .fetch_one(&pool)
             .await?;
             anyhow::ensure!(row.0 == "active");
             anyhow::ensure!(row.1 == "0.2.0");
+            anyhow::ensure!(row.2 == "6.8");
             Ok(())
         }
     })
@@ -284,6 +288,85 @@ async fn enrollment_policy_heartbeat_and_diagnostics_flow() -> anyhow::Result<()
         }
     })
     .await?;
+
+    harness.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore]
+#[serial]
+async fn mtls_identity_controls_reenroll_without_duplicates() -> anyhow::Result<()> {
+    let harness = TestHarness::start().await?;
+
+    let first_message = harness
+        .nats
+        .request(
+            AGENTS_ENROLL_REQUEST.to_string(),
+            encode_message(&EnrollRequest {
+                correlation_id: "corr-enroll-cert-1".to_string(),
+                bootstrap_token: "dev-bootstrap-token".to_string(),
+                hostname: "cert-host".to_string(),
+                version: "0.1.0".to_string(),
+                metadata: Default::default(),
+                existing_agent_id: String::new(),
+                tls_identity: "agent-cert-1".to_string(),
+            })
+            .into(),
+        )
+        .await?;
+    let first_envelope: RuntimeReplyEnvelope = decode_message(first_message.payload.as_ref())?;
+    assert_eq!(first_envelope.status, "ok");
+    let first_response: EnrollResponse = decode_message(&first_envelope.payload)?;
+    assert_eq!(first_response.agent_id, "agent-cert-1");
+
+    let second_message = harness
+        .nats
+        .request(
+            AGENTS_ENROLL_REQUEST.to_string(),
+            encode_message(&EnrollRequest {
+                correlation_id: "corr-enroll-cert-2".to_string(),
+                bootstrap_token: "dev-bootstrap-token".to_string(),
+                hostname: "cert-host".to_string(),
+                version: "0.1.1".to_string(),
+                metadata: Default::default(),
+                existing_agent_id: "agent-cert-1".to_string(),
+                tls_identity: "agent-cert-1".to_string(),
+            })
+            .into(),
+        )
+        .await?;
+    let second_envelope: RuntimeReplyEnvelope = decode_message(second_message.payload.as_ref())?;
+    assert_eq!(second_envelope.status, "ok");
+    let second_response: EnrollResponse = decode_message(&second_envelope.payload)?;
+    assert_eq!(second_response.agent_id, "agent-cert-1");
+
+    let count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM agents WHERE agent_id = $1")
+        .bind("agent-cert-1")
+        .fetch_one(&harness.pool)
+        .await?;
+    assert_eq!(count, 1);
+
+    let mismatch_message = harness
+        .nats
+        .request(
+            AGENTS_ENROLL_REQUEST.to_string(),
+            encode_message(&EnrollRequest {
+                correlation_id: "corr-enroll-cert-3".to_string(),
+                bootstrap_token: "dev-bootstrap-token".to_string(),
+                hostname: "cert-host".to_string(),
+                version: "0.1.2".to_string(),
+                metadata: Default::default(),
+                existing_agent_id: "other-agent".to_string(),
+                tls_identity: "agent-cert-1".to_string(),
+            })
+            .into(),
+        )
+        .await?;
+    let mismatch_envelope: RuntimeReplyEnvelope =
+        decode_message(mismatch_message.payload.as_ref())?;
+    assert_eq!(mismatch_envelope.status, "error");
+    assert_eq!(mismatch_envelope.code, "unauthenticated");
 
     harness.shutdown().await;
     Ok(())

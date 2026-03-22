@@ -54,6 +54,36 @@ func TestFetchPolicyResponseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestIssueBootstrapTokenResponseRoundTrip(t *testing.T) {
+	payload := EncodeAgentReplyEnvelope(AgentReplyEnvelope{
+		Status:        "ok",
+		Code:          "ok",
+		CorrelationID: "corr-3",
+		Payload: func() []byte {
+			var out []byte
+			out = appendStringField(out, 1, "token-1")
+			out = appendStringField(out, 2, "bootstrap-abc")
+			out = appendStringField(out, 3, "policy-1")
+			out = appendStringField(out, 4, "revision-1")
+			out = appendInt64Field(out, 5, 100)
+			out = appendInt64Field(out, 6, 50)
+			return out
+		}(),
+	})
+
+	envelope, err := DecodeAgentReplyEnvelope(payload)
+	if err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	response, err := DecodeIssueBootstrapTokenResponse(envelope.Payload)
+	if err != nil {
+		t.Fatalf("decode issue bootstrap token response: %v", err)
+	}
+	if response.TokenID != "token-1" || response.BootstrapToken != "bootstrap-abc" {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+}
+
 func EncodeFetchPolicyResponseFixture(response FetchPolicyResponse) []byte {
 	var out []byte
 	out = appendStringField(out, 1, response.AgentID)
