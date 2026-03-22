@@ -225,6 +225,7 @@ services:
     entrypoint: ["/bin/sh", "/vault/bootstrap/init-dev.sh"]
     volumes:
       - ./deployments/vault/init-dev.sh:/vault/bootstrap/init-dev.sh:ro
+      - ./deployments/vault/control-plane-policy.hcl:/vault/bootstrap/control-plane-policy.hcl:ro
       - ./deployments/vault/deployment-plane-policy.hcl:/vault/bootstrap/deployment-plane-policy.hcl:ro
       - edge-api-certs:/certs:ro
 
@@ -268,6 +269,21 @@ services:
       ENROLLMENT_HTTP_ADDR: 0.0.0.0:8081
       CONTROL_HTTP_ADDR: 0.0.0.0:8082
       ENROLLMENT_DEV_BOOTSTRAP_TOKEN: dev-bootstrap-token
+      EDGE_PUBLIC_URL: http://localhost:8080
+      TELEGRAM_WORKER_ENABLED: ${TELEGRAM_WORKER_ENABLED:-true}
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
+      TELEGRAM_REQUEST_TIMEOUT_MS: ${TELEGRAM_REQUEST_TIMEOUT_MS:-5000}
+      TELEGRAM_MIN_SEND_INTERVAL_MS: ${TELEGRAM_MIN_SEND_INTERVAL_MS:-250}
+      TELEGRAM_WORKER_POLL_INTERVAL_MS: ${TELEGRAM_WORKER_POLL_INTERVAL_MS:-2000}
+      TELEGRAM_WORKER_BATCH_SIZE: ${TELEGRAM_WORKER_BATCH_SIZE:-20}
+      TELEGRAM_DELIVERY_MAX_ATTEMPTS: ${TELEGRAM_DELIVERY_MAX_ATTEMPTS:-4}
+      VAULT_ADDR: http://vault:8200
+      VAULT_ROLE_ID: control-plane-role-id
+      VAULT_SECRET_ID: control-plane-secret-id
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      ALL_PROXY: ${ALL_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost,nats,postgres,enrollment-plane,control-plane,deployment-plane,ingestion-plane,query-alert-plane,opensearch,clickhouse,vault,agent-artifacts,edge-api,frontend,nginx}
       RUST_LOG: info
     depends_on:
       postgres:
@@ -276,6 +292,8 @@ services:
         condition: service_healthy
       enrollment-plane:
         condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully
     ports:
       - "8082:8082"
     healthcheck:

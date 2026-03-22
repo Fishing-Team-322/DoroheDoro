@@ -10,7 +10,11 @@ done
 
 vault secrets enable -path=secret kv-v2 >/dev/null 2>&1 || true
 vault auth enable approle >/dev/null 2>&1 || true
+vault policy write control-plane /vault/bootstrap/control-plane-policy.hcl
 vault policy write deployment-plane /vault/bootstrap/deployment-plane-policy.hcl
+vault write auth/approle/role/control-plane token_policies=control-plane token_ttl=1h token_max_ttl=4h >/dev/null
+vault write auth/approle/role/control-plane/role-id role_id=control-plane-role-id >/dev/null 2>&1 || true
+vault write -f auth/approle/role/control-plane/custom-secret-id secret_id=control-plane-secret-id >/dev/null 2>&1 || true
 vault write auth/approle/role/deployment-plane token_policies=deployment-plane token_ttl=1h token_max_ttl=4h >/dev/null
 vault write auth/approle/role/deployment-plane/role-id role_id=dev-role-id >/dev/null 2>&1 || true
 vault write -f auth/approle/role/deployment-plane/custom-secret-id secret_id=dev-secret-id >/dev/null 2>&1 || true

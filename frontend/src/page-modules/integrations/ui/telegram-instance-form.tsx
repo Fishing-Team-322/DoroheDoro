@@ -1,55 +1,72 @@
 "use client";
 
 import { FormEvent } from "react";
-import { translateValueLabel, useI18n } from "@/src/shared/lib/i18n";
+import { useI18n } from "@/src/shared/lib/i18n";
 import { Button, Input, Select, Switch } from "@/src/shared/ui";
+import { TextAreaField } from "@/src/features/operations/ui/operations-ui";
 import {
-  TextAreaField,
-} from "@/src/features/operations/ui/operations-ui";
-import type { TelegramInstanceDraft } from "@/src/shared/lib/telegram-integrations-store";
+  TELEGRAM_PARSE_MODES,
+  type TelegramIntegrationDraft,
+} from "@/src/shared/lib/telegram-integrations";
+import type { ClusterItem } from "@/src/shared/lib/runtime-api";
 import { ClusterBindingEditor } from "./cluster-binding-editor";
 
 const copyByLocale = {
   en: {
-    instanceName: "Instance name",
-    instanceNamePlaceholder: "Primary Ops Bot",
+    instanceName: "Integration name",
+    instanceNamePlaceholder: "ops-telegram",
+    botName: "Bot display name",
+    botNamePlaceholder: "Primary Ops Bot",
     defaultChatId: "Default chat id",
     defaultChatIdPlaceholder: "-10025001001",
-    botToken: "Bot token",
-    botTokenPlaceholder: "750001:AA-demo-ops-primary",
-    statusAria: "Telegram instance status",
-    enabled: "Instance enabled",
-    paused: "Instance paused",
+    secretRef: "Vault secret ref",
+    secretRefPlaceholder: "vault://secret/data/integrations/tg/ops-primary",
+    secretRefHint:
+      "Required when creating a new Telegram integration or rotating secret material.",
+    parseMode: "Parse mode",
+    integrationEnabled: "Integration active",
+    integrationPaused: "Integration paused",
+    deliveryEnabled: "Telegram delivery enabled",
+    deliveryDisabled: "Telegram delivery paused",
     notes: "Operator notes",
-    notesPlaceholder: "Routing notes, ownership, escalation hints...",
-    bindingsTitle: "Cluster bindings",
+    notesPlaceholder: "Ownership, escalation notes, change reason...",
+    bindingsTitle: "Delivery bindings",
     bindingsDescription:
-      "Bind one instance to multiple clusters or operator routes without touching backend contracts.",
-    testConnection: "Test connection",
+      "Bindings now follow the live backend contract: scope, event types, and severity threshold.",
+    testConnection: "Send healthcheck",
     deleteInstance: "Delete instance",
+    maskedSecretRef: "Current secret ref",
   },
   ru: {
-    instanceName: "Имя инстанса",
-    instanceNamePlaceholder: "Primary Ops Bot",
+    instanceName: "Имя интеграции",
+    instanceNamePlaceholder: "ops-telegram",
+    botName: "Отображаемое имя бота",
+    botNamePlaceholder: "Primary Ops Bot",
     defaultChatId: "Chat ID по умолчанию",
     defaultChatIdPlaceholder: "-10025001001",
-    botToken: "Токен бота",
-    botTokenPlaceholder: "750001:AA-demo-ops-primary",
-    statusAria: "Статус Telegram-инстанса",
-    enabled: "Инстанс включен",
-    paused: "Инстанс на паузе",
+    secretRef: "Vault secret ref",
+    secretRefPlaceholder: "vault://secret/data/integrations/tg/ops-primary",
+    secretRefHint:
+      "Нужен при создании новой Telegram-интеграции или при ротации секрета.",
+    parseMode: "Parse mode",
+    integrationEnabled: "Интеграция активна",
+    integrationPaused: "Интеграция на паузе",
+    deliveryEnabled: "Доставка в Telegram включена",
+    deliveryDisabled: "Доставка в Telegram приостановлена",
     notes: "Заметки оператора",
-    notesPlaceholder: "Заметки по маршрутизации, ownership, подсказки по эскалации...",
-    bindingsTitle: "Привязки кластеров",
+    notesPlaceholder: "Ownership, эскалация, причина изменения...",
+    bindingsTitle: "Привязки доставки",
     bindingsDescription:
-      "Привяжите один инстанс к нескольким кластерам или операторским маршрутам, не меняя backend-контракты.",
-    testConnection: "Проверить подключение",
+      "Привязки теперь совпадают с живым backend-контрактом: scope, event types и severity threshold.",
+    testConnection: "Отправить healthcheck",
     deleteInstance: "Удалить инстанс",
+    maskedSecretRef: "Текущий secret ref",
   },
 } as const;
 
 export function TelegramInstanceForm({
   draft,
+  clusters,
   onChange,
   onSubmit,
   onTestConnection,
@@ -60,8 +77,9 @@ export function TelegramInstanceForm({
   saving,
   deletable,
 }: {
-  draft: TelegramInstanceDraft;
-  onChange: (value: TelegramInstanceDraft) => void;
+  draft: TelegramIntegrationDraft;
+  clusters: ClusterItem[];
+  onChange: (value: TelegramIntegrationDraft) => void;
   onSubmit: () => void;
   onTestConnection: () => void;
   onDelete?: () => void;
@@ -89,6 +107,17 @@ export function TelegramInstanceForm({
           placeholder={copy.instanceNamePlaceholder}
         />
         <Input
+          label={copy.botName}
+          value={draft.botName}
+          onChange={(event) =>
+            onChange({ ...draft, botName: event.target.value })
+          }
+          placeholder={copy.botNamePlaceholder}
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Input
           label={copy.defaultChatId}
           value={draft.defaultChatId}
           onChange={(event) =>
@@ -96,46 +125,73 @@ export function TelegramInstanceForm({
           }
           placeholder={copy.defaultChatIdPlaceholder}
         />
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Input
-          label={copy.botToken}
-          value={draft.botToken}
-          onChange={(event) => onChange({ ...draft, botToken: event.target.value })}
-          placeholder={copy.botTokenPlaceholder}
-        />
-
         <div className="space-y-2">
           <Select
-            value={draft.status}
+            value={draft.parseMode}
             onChange={(event) =>
               onChange({
                 ...draft,
-                status: event.target.value as TelegramInstanceDraft["status"],
+                parseMode: event.target
+                  .value as TelegramIntegrationDraft["parseMode"],
               })
             }
-            options={[
-              { value: "active", label: translateValueLabel("active", locale) },
-              { value: "paused", label: translateValueLabel("paused", locale) },
-              { value: "degraded", label: translateValueLabel("degraded", locale) },
-            ]}
+            options={TELEGRAM_PARSE_MODES.map((mode) => ({
+              value: mode,
+              label: mode,
+            }))}
             selectSize="lg"
-            aria-label={copy.statusAria}
-          />
-          <Switch
-            checked={draft.enabled}
-            onCheckedChange={(checked) => onChange({ ...draft, enabled: checked })}
-            switchLabel={draft.enabled ? copy.enabled : copy.paused}
+            aria-label={copy.parseMode}
           />
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <Input
+          label={copy.secretRef}
+          value={draft.secretRef}
+          onChange={(event) =>
+            onChange({ ...draft, secretRef: event.target.value })
+          }
+          placeholder={copy.secretRefPlaceholder}
+        />
+        <p className="text-sm text-[color:var(--muted-foreground)]">
+          {copy.secretRefHint}
+        </p>
+        {draft.maskedSecretRef ? (
+          <p className="text-sm text-[color:var(--muted-foreground)]">
+            {copy.maskedSecretRef}: {draft.maskedSecretRef}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Switch
+          checked={draft.isActive}
+          onCheckedChange={(checked) =>
+            onChange({ ...draft, isActive: checked })
+          }
+          switchLabel={
+            draft.isActive ? copy.integrationEnabled : copy.integrationPaused
+          }
+        />
+        <Switch
+          checked={draft.deliveryEnabled}
+          onCheckedChange={(checked) =>
+            onChange({ ...draft, deliveryEnabled: checked })
+          }
+          switchLabel={
+            draft.deliveryEnabled ? copy.deliveryEnabled : copy.deliveryDisabled
+          }
+        />
       </div>
 
       <TextAreaField
         id="telegram-notes"
         label={copy.notes}
-        value={draft.notes}
-        onChange={(event) => onChange({ ...draft, notes: event.target.value })}
+        value={draft.description}
+        onChange={(event) =>
+          onChange({ ...draft, description: event.target.value })
+        }
         placeholder={copy.notesPlaceholder}
       />
 
@@ -152,15 +208,23 @@ export function TelegramInstanceForm({
         <ClusterBindingEditor
           value={draft.bindings}
           onChange={(bindings) => onChange({ ...draft, bindings })}
+          clusters={clusters}
         />
       </div>
 
       {formError ? (
-        <p className="text-sm text-[color:var(--status-danger-fg)]">{formError}</p>
+        <p className="text-sm text-[color:var(--status-danger-fg)]">
+          {formError}
+        </p>
       ) : null}
 
       <div className="flex flex-wrap gap-3">
-        <Button type="button" variant="outline" loading={testing} onClick={onTestConnection}>
+        <Button
+          type="button"
+          variant="outline"
+          loading={testing}
+          onClick={onTestConnection}
+        >
           {copy.testConnection}
         </Button>
         <Button type="submit" loading={saving}>

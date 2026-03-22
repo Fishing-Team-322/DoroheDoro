@@ -45,10 +45,11 @@ pub async fn read_telegram_secret(
 
 async fn read_secret(config: &VaultRuntimeConfig, vault_ref: &str) -> AppResult<VaultSecretMap> {
     let token = login(config).await?;
+    let normalized_ref = normalize_vault_ref(vault_ref);
     let url = format!(
         "{}/v1/{}",
         config.addr.trim_end_matches('/'),
-        vault_ref.trim_start_matches('/')
+        normalized_ref.trim_start_matches('/')
     );
     let payload = reqwest::Client::new()
         .get(url)
@@ -73,6 +74,15 @@ async fn read_secret(config: &VaultRuntimeConfig, vault_ref: &str) -> AppResult<
             "vault secret `{vault_ref}` did not return a kv-like data object"
         ))
     })
+}
+
+fn normalize_vault_ref(vault_ref: &str) -> String {
+    vault_ref
+        .trim()
+        .strip_prefix("vault://")
+        .unwrap_or_else(|| vault_ref.trim())
+        .trim_start_matches('/')
+        .to_string()
 }
 
 async fn login(config: &VaultRuntimeConfig) -> AppResult<String> {
@@ -123,7 +133,7 @@ fn extract_secret_map(payload: Value) -> Option<VaultSecretMap> {
 mod tests {
     use serde_json::json;
 
-    use super::{extract_secret_map, TelegramSecretMaterial, VaultSecretMap};
+    use super::{extract_secret_map, normalize_vault_ref, TelegramSecretMaterial, VaultSecretMap};
 
     #[test]
     fn extracts_kv_v2_secret_payload() {
@@ -158,5 +168,17 @@ mod tests {
         };
 
         assert_eq!(material.bot_token, "999:xyz");
+    }
+
+    #[test]
+    fn normalizes_vault_scheme_prefix() {
+        assert_eq!(
+            normalize_vault_ref("vault://secret/data/integrations/tg/secops"),
+            "secret/data/integrations/tg/secops"
+        );
+        assert_eq!(
+            normalize_vault_ref("secret/data/integrations/tg/secops"),
+            "secret/data/integrations/tg/secops"
+        );
     }
 }

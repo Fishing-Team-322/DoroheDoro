@@ -1,112 +1,96 @@
 "use client";
 
 import { useI18n } from "@/src/shared/lib/i18n";
-import { Button, Card, Input, Select, Switch } from "@/src/shared/ui";
 import {
-  createEmptyBinding,
-  type TelegramClusterBinding,
-  type TelegramSeverityLevel,
-} from "@/src/shared/lib/telegram-integrations-store";
+  createEmptyTelegramBindingDraft,
+  TELEGRAM_EVENT_TYPES,
+  TELEGRAM_SEVERITY_THRESHOLDS,
+  toggleTelegramEventType,
+  type TelegramBindingDraft,
+  type TelegramBindingEventType,
+} from "@/src/shared/lib/telegram-integrations";
+import { Button, Card, Select, Switch } from "@/src/shared/ui";
+import type { ClusterItem } from "@/src/shared/lib/runtime-api";
 
 const copyByLocale = {
   en: {
-    presets: {
-      criticalOnly: "Critical only",
-      warningPlus: "Warning + Critical",
-      full: "Info + Warning + Critical",
-    },
     bindingPrefix: "Binding",
     bindingDescription:
-      "Route one Telegram instance to a cluster/operator scope.",
+      "Bind Telegram delivery to a global scope or one cluster.",
     enabled: "Enabled",
     paused: "Paused",
     remove: "Remove",
+    scope: "Scope",
+    global: "Global",
     cluster: "Cluster",
-    clusterPlaceholder: "core / edge / security",
-    routeLabel: "Route label",
-    routeLabelPlaceholder: "core-oncall",
-    chatId: "Chat ID",
-    chatIdPlaceholder: "-10025001001",
-    severityProfileAria: "severity profile",
+    clusterLabel: "Cluster scope",
+    clusterPlaceholder: "Pick a cluster",
+    severity: "Minimum severity",
+    events: "Event types",
     add: "Add binding",
   },
   ru: {
-    presets: {
-      criticalOnly: "Только critical",
-      warningPlus: "Warning + Critical",
-      full: "Info + Warning + Critical",
-    },
     bindingPrefix: "Привязка",
     bindingDescription:
-      "Направьте один Telegram-инстанс в cluster/operator scope.",
+      "Привяжите доставку Telegram к global scope или к одному кластеру.",
     enabled: "Включено",
     paused: "Пауза",
     remove: "Удалить",
+    scope: "Скоуп",
+    global: "Global",
     cluster: "Кластер",
-    clusterPlaceholder: "core / edge / security",
-    routeLabel: "Метка маршрута",
-    routeLabelPlaceholder: "core-oncall",
-    chatId: "Chat ID",
-    chatIdPlaceholder: "-10025001001",
-    severityProfileAria: "профиль severity",
+    clusterLabel: "Кластерный scope",
+    clusterPlaceholder: "Выберите кластер",
+    severity: "Минимальная severity",
+    events: "Типы событий",
     add: "Добавить привязку",
   },
 } as const;
 
-function getPresetValue(
-  severities: TelegramSeverityLevel[],
-  presets: Array<{ value: string; severities: TelegramSeverityLevel[] }>
-) {
-  return (
-    presets.find(
-      (item) => item.severities.join("|") === severities.join("|")
-    )?.value ?? "warning-plus"
-  );
+function buildClusterOptions(
+  locale: "ru" | "en",
+  clusters: ClusterItem[]
+): Array<{ value: string; label: string }> {
+  const copy = copyByLocale[locale];
+  return [
+    { value: "", label: copy.clusterPlaceholder },
+    ...clusters.map((cluster) => ({
+      value: cluster.cluster_id,
+      label: `${cluster.name} (${cluster.slug})`,
+    })),
+  ];
 }
 
 export function ClusterBindingEditor({
   value,
   onChange,
+  clusters,
 }: {
-  value: TelegramClusterBinding[];
-  onChange: (value: TelegramClusterBinding[]) => void;
+  value: TelegramBindingDraft[];
+  onChange: (value: TelegramBindingDraft[]) => void;
+  clusters: ClusterItem[];
 }) {
   const { locale } = useI18n();
   const copy = copyByLocale[locale];
-  const severityPresets: Array<{
-    value: string;
-    label: string;
-    severities: TelegramSeverityLevel[];
-  }> = [
-    {
-      value: "critical-only",
-      label: copy.presets.criticalOnly,
-      severities: ["critical"],
-    },
-    {
-      value: "warning-plus",
-      label: copy.presets.warningPlus,
-      severities: ["warning", "critical"],
-    },
-    {
-      value: "full",
-      label: copy.presets.full,
-      severities: ["info", "warning", "critical"],
-    },
-  ];
-  const bindings = value.length > 0 ? value : [createEmptyBinding()];
+  const bindings =
+    value.length > 0 ? value : [createEmptyTelegramBindingDraft()];
+  const clusterOptions = buildClusterOptions(locale, clusters);
 
   const updateBinding = (
-    bindingId: string,
-    updater: (binding: TelegramClusterBinding) => TelegramClusterBinding
+    bindingIndex: number,
+    updater: (binding: TelegramBindingDraft) => TelegramBindingDraft
   ) => {
-    onChange(bindings.map((binding) => (binding.id === bindingId ? updater(binding) : binding)));
+    onChange(
+      bindings.map((binding, index) =>
+        index === bindingIndex ? updater(binding) : binding
+      )
+    );
   };
 
   return (
     <div className="space-y-3">
       {bindings.map((binding, index) => (
-        <Card key={binding.id} className="space-y-4 p-4">
+        <Card key={binding.id ?? `binding-${index}`} className="space-y-4 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-[color:var(--foreground)]">
@@ -119,14 +103,14 @@ export function ClusterBindingEditor({
 
             <div className="flex items-center gap-3">
               <Switch
-                checked={binding.enabled}
+                checked={binding.isActive}
                 onCheckedChange={(checked) =>
-                  updateBinding(binding.id, (current) => ({
+                  updateBinding(index, (current) => ({
                     ...current,
-                    enabled: checked,
+                    isActive: checked,
                   }))
                 }
-                switchLabel={binding.enabled ? copy.enabled : copy.paused}
+                switchLabel={binding.isActive ? copy.enabled : copy.paused}
               />
               <Button
                 variant="ghost"
@@ -135,8 +119,10 @@ export function ClusterBindingEditor({
                 onClick={() =>
                   onChange(
                     bindings.length === 1
-                      ? [createEmptyBinding()]
-                      : bindings.filter((item) => item.id !== binding.id)
+                      ? [createEmptyTelegramBindingDraft()]
+                      : bindings.filter(
+                          (_, currentIndex) => currentIndex !== index
+                        )
                   )
                 }
               >
@@ -145,62 +131,118 @@ export function ClusterBindingEditor({
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Input
-              label={copy.cluster}
-              value={binding.cluster}
-              onChange={(event) =>
-                updateBinding(binding.id, (current) => ({
-                  ...current,
-                  cluster: event.target.value,
-                }))
-              }
-              placeholder={copy.clusterPlaceholder}
-            />
-            <Input
-              label={copy.routeLabel}
-              value={binding.routeLabel}
-              onChange={(event) =>
-                updateBinding(binding.id, (current) => ({
-                  ...current,
-                  routeLabel: event.target.value,
-                }))
-              }
-              placeholder={copy.routeLabelPlaceholder}
-            />
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <p className="text-sm text-[color:var(--muted-foreground)]">
+                {copy.scope}
+              </p>
+              <div className="inline-flex gap-2">
+                <Button
+                  type="button"
+                  variant={
+                    binding.scopeType === "global" ? "default" : "outline"
+                  }
+                  size="sm"
+                  onClick={() =>
+                    updateBinding(index, (current) => ({
+                      ...current,
+                      scopeType: "global",
+                      scopeId: "",
+                    }))
+                  }
+                >
+                  {copy.global}
+                </Button>
+                <Button
+                  type="button"
+                  variant={
+                    binding.scopeType === "cluster" ? "default" : "outline"
+                  }
+                  size="sm"
+                  onClick={() =>
+                    updateBinding(index, (current) => ({
+                      ...current,
+                      scopeType: "cluster",
+                    }))
+                  }
+                >
+                  {copy.cluster}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm text-[color:var(--muted-foreground)]">
+                {copy.clusterLabel}
+              </p>
+              <Select
+                value={binding.scopeType === "cluster" ? binding.scopeId : ""}
+                onChange={(event) =>
+                  updateBinding(index, (current) => ({
+                    ...current,
+                    scopeId: event.target.value,
+                    scopeType: event.target.value
+                      ? "cluster"
+                      : current.scopeType,
+                  }))
+                }
+                options={clusterOptions}
+                selectSize="lg"
+                disabled={binding.scopeType !== "cluster"}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm text-[color:var(--muted-foreground)]">
+                {copy.severity}
+              </p>
+              <Select
+                value={binding.severityThreshold}
+                onChange={(event) =>
+                  updateBinding(index, (current) => ({
+                    ...current,
+                    severityThreshold: event.target
+                      .value as TelegramBindingDraft["severityThreshold"],
+                  }))
+                }
+                options={TELEGRAM_SEVERITY_THRESHOLDS.map((severity) => ({
+                  value: severity,
+                  label: severity,
+                }))}
+                selectSize="lg"
+              />
+            </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <Input
-              label={copy.chatId}
-              value={binding.chatId}
-              onChange={(event) =>
-                updateBinding(binding.id, (current) => ({
-                  ...current,
-                  chatId: event.target.value,
-                }))
-              }
-              placeholder={copy.chatIdPlaceholder}
-            />
+          <div className="space-y-2">
+            <p className="text-sm text-[color:var(--muted-foreground)]">
+              {copy.events}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {TELEGRAM_EVENT_TYPES.map((eventType) => {
+                const selected = binding.eventTypes.includes(eventType);
 
-            <Select
-              value={getPresetValue(binding.severities, severityPresets)}
-              onChange={(event) => {
-                const preset =
-                  severityPresets.find((item) => item.value === event.target.value) ??
-                  severityPresets[1];
-                updateBinding(binding.id, (current) => ({
-                  ...current,
-                  severities: preset.severities,
-                }));
-              }}
-              options={severityPresets.map((item) => ({
-                value: item.value,
-                label: item.label,
-              }))}
-              selectSize="lg"
-              aria-label={`${copy.bindingPrefix} ${index + 1} ${copy.severityProfileAria}`}
-            />
+                return (
+                  <Button
+                    key={eventType}
+                    type="button"
+                    variant={selected ? "default" : "outline"}
+                    size="sm"
+                    onClick={() =>
+                      updateBinding(index, (current) => ({
+                        ...current,
+                        eventTypes: toggleTelegramEventType(
+                          current.eventTypes,
+                          eventType as TelegramBindingEventType
+                        ),
+                      }))
+                    }
+                  >
+                    {eventType}
+                  </Button>
+                );
+              })}
+            </div>
           </div>
         </Card>
       ))}
@@ -209,7 +251,9 @@ export function ClusterBindingEditor({
         variant="outline"
         size="sm"
         className="h-10 px-4"
-        onClick={() => onChange([...bindings, createEmptyBinding()])}
+        onClick={() =>
+          onChange([...bindings, createEmptyTelegramBindingDraft()])
+        }
       >
         {copy.add}
       </Button>

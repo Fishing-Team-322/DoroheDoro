@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/example/dorohedoro/internal/auth"
 	"github.com/example/dorohedoro/internal/middleware"
 	"github.com/example/dorohedoro/internal/natsbridge/envelope"
 )
@@ -28,6 +30,23 @@ type integrationBindingRequest struct {
 	SeverityThreshold string          `json:"severity_threshold"`
 	IsActive          bool            `json:"is_active"`
 	Reason            string          `json:"reason"`
+}
+
+type integrationTelegramHealthcheckRequest struct {
+	ChatIDOverride string `json:"chat_id_override"`
+	Reason         string `json:"reason"`
+}
+
+type telegramHealthcheckEvent struct {
+	SchemaVersion  string `json:"schema_version"`
+	RequestID      string `json:"request_id"`
+	IntegrationID  string `json:"integration_id"`
+	CorrelationID  string `json:"correlation_id"`
+	CreatedAt      string `json:"created_at"`
+	ChatIDOverride string `json:"chat_id_override,omitempty"`
+	ActorID        string `json:"actor_id,omitempty"`
+	ActorType      string `json:"actor_type,omitempty"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 type integrationItem struct {
@@ -322,6 +341,56 @@ func integrationUnbindHandler(deps RouterDeps) http.HandlerFunc {
 		middleware.WriteJSON(w, http.StatusOK, map[string]any{
 			"status":     "ok",
 			"request_id": firstNonEmpty(reply.CorrelationID, middleware.GetRequestID(r.Context())),
+		})
+	}
+}
+
+func integrationTelegramHealthcheckHandler(deps RouterDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		integrationID := strings.TrimSpace(chi.URLParam(r, "id"))
+		if integrationID == "" {
+			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", "integration id is required")
+			return
+		}
+
+		var body integrationTelegramHealthcheckRequest
+		if err := decodeJSONBody(r, &body); err != nil {
+			middleware.WriteError(w, r, http.StatusBadRequest, "invalid_argument", err.Error())
+			return
+		}
+
+		ac := auth.Context(r.Context())
+		requestID := middleware.GetRequestID(r.Context())
+		subject := deps.Config.NATS.Subjects.NotificationsTelegramHealthcheckRequest
+		event := telegramHealthcheckEvent{
+			SchemaVersion:  "v1",
+			RequestID:      requestID,
+			IntegrationID:  integrationID,
+			CorrelationID:  requestID,
+			CreatedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+			ChatIDOverride: strings.TrimSpace(body.ChatIDOverride),
+			ActorID:        strings.TrimSpace(ac.Subject),
+			ActorType:      "user",
+			Reason:         firstNonEmpty(strings.TrimSpace(body.Reason), "website telegram healthcheck requested"),
+		}
+
+		if err := deps.Bridge.PublishJSON(r.Context(), subject, event); err != nil {
+			deps.Logger.Error("telegram healthcheck publish failed",
+				zap.String("subject", subject),
+				zap.String("request_id", requestID),
+				zap.Error(err),
+			)
+			middleware.WriteTransportError(w, r, err)
+			return
+		}
+
+		w.Header().Set("X-NATS-Subject", subject)
+		middleware.WriteJSON(w, http.StatusAccepted, map[string]any{
+			"status":         "queued",
+			"request_id":     requestID,
+			"correlation_id": requestID,
+			"integration_id": integrationID,
+			"subject":        subject,
 		})
 	}
 }

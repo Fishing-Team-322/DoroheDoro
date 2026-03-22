@@ -98,6 +98,24 @@ func TestDefaultsMatchServerRSEnrollmentSubjects(t *testing.T) {
 	if registry.DeploymentsPlanCreate != "deployments.plan.create" {
 		t.Fatalf("unexpected deployments plan subject: %s", registry.DeploymentsPlanCreate)
 	}
+	if registry.NotificationsDispatchRequested != "notifications.dispatch.requested.v1" {
+		t.Fatalf("unexpected notifications dispatch subject: %s", registry.NotificationsDispatchRequested)
+	}
+	if registry.NotificationsTelegramDispatchRequested != "notifications.telegram.dispatch.requested.v1" {
+		t.Fatalf("unexpected telegram dispatch requested subject: %s", registry.NotificationsTelegramDispatchRequested)
+	}
+	if registry.NotificationsTelegramDispatchSucceeded != "notifications.telegram.dispatch.succeeded.v1" {
+		t.Fatalf("unexpected telegram dispatch succeeded subject: %s", registry.NotificationsTelegramDispatchSucceeded)
+	}
+	if registry.NotificationsTelegramDispatchFailed != "notifications.telegram.dispatch.failed.v1" {
+		t.Fatalf("unexpected telegram dispatch failed subject: %s", registry.NotificationsTelegramDispatchFailed)
+	}
+	if registry.NotificationsTelegramHealthcheckRequest != "notifications.telegram.healthcheck.requested.v1" {
+		t.Fatalf("unexpected telegram healthcheck request subject: %s", registry.NotificationsTelegramHealthcheckRequest)
+	}
+	if registry.NotificationsTelegramHealthcheckResult != "notifications.telegram.healthcheck.result.v1" {
+		t.Fatalf("unexpected telegram healthcheck result subject: %s", registry.NotificationsTelegramHealthcheckResult)
+	}
 	if registry.StreamLogs != "ui.stream.logs" {
 		t.Fatalf("unexpected logs stream subject: %s", registry.StreamLogs)
 	}

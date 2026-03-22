@@ -27,9 +27,11 @@ type StreamRequest struct {
 }
 
 type streamFilter struct {
-	Host     string
-	Service  string
-	Severity string
+	Host          string
+	Service       string
+	Severity      string
+	IntegrationID string
+	RequestID     string
 }
 
 func NewGateway(bridge *natsbridge.Bridge, cfg config.StreamConfig) *Gateway {
@@ -51,9 +53,11 @@ func (g *Gateway) ServeMany(w http.ResponseWriter, r *http.Request, requests []S
 		return
 	}
 	filters := streamFilter{
-		Host:     strings.TrimSpace(r.URL.Query().Get("host")),
-		Service:  strings.TrimSpace(r.URL.Query().Get("service")),
-		Severity: strings.TrimSpace(r.URL.Query().Get("severity")),
+		Host:          strings.TrimSpace(r.URL.Query().Get("host")),
+		Service:       strings.TrimSpace(r.URL.Query().Get("service")),
+		Severity:      strings.TrimSpace(r.URL.Query().Get("severity")),
+		IntegrationID: strings.TrimSpace(r.URL.Query().Get("integration_id")),
+		RequestID:     strings.TrimSpace(r.URL.Query().Get("request_id")),
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -151,14 +155,18 @@ func subjectsJSON(requests []StreamRequest) string {
 }
 
 func matchesFilter(data []byte, filter streamFilter) bool {
-	if filter.Host == "" && filter.Service == "" && filter.Severity == "" {
+	if filter.Host == "" && filter.Service == "" && filter.Severity == "" && filter.IntegrationID == "" && filter.RequestID == "" {
 		return true
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return true
 	}
-	return matchField(payload, "host", filter.Host) && matchField(payload, "service", filter.Service) && matchField(payload, "severity", filter.Severity)
+	return matchField(payload, "host", filter.Host) &&
+		matchField(payload, "service", filter.Service) &&
+		matchField(payload, "severity", filter.Severity) &&
+		matchField(payload, "integration_id", filter.IntegrationID) &&
+		matchField(payload, "request_id", filter.RequestID)
 }
 
 func matchField(payload map[string]any, key, expected string) bool {

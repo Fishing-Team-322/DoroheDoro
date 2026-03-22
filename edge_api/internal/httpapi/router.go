@@ -176,6 +176,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 		api.Patch("/integrations/{id}", integrationUpdateHandler(deps))
 		api.Post("/integrations/{id}/bindings", integrationBindHandler(deps))
 		api.Delete("/integrations/{id}/bindings/{bindingId}", integrationUnbindHandler(deps))
+		api.Post("/integrations/{id}/telegram/healthcheck", integrationTelegramHealthcheckHandler(deps))
 
 		api.Get("/tickets", ticketsListHandler(deps))
 		api.Get("/tickets/{id}", ticketDetailHandler(deps))
@@ -207,6 +208,14 @@ func NewRouter(deps RouterDeps) http.Handler {
 		})
 		api.Get("/stream/agents", func(w http.ResponseWriter, r *http.Request) {
 			deps.Stream.Serve(w, r, stream.StreamRequest{Subject: deps.Config.NATS.Subjects.StreamAgents, Event: "agent"})
+		})
+		api.Get("/stream/integrations", func(w http.ResponseWriter, r *http.Request) {
+			deps.Stream.ServeMany(w, r, []stream.StreamRequest{
+				{Subject: deps.Config.NATS.Subjects.NotificationsTelegramDispatchRequested, Event: "telegram-delivery-queued"},
+				{Subject: deps.Config.NATS.Subjects.NotificationsTelegramDispatchSucceeded, Event: "telegram-delivery-succeeded"},
+				{Subject: deps.Config.NATS.Subjects.NotificationsTelegramDispatchFailed, Event: "telegram-delivery-failed"},
+				{Subject: deps.Config.NATS.Subjects.NotificationsTelegramHealthcheckResult, Event: "telegram-healthcheck-result"},
+			})
 		})
 		api.Get("/stream/agent-events", func(w http.ResponseWriter, r *http.Request) {
 			if deps.AgentStatus == nil {

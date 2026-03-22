@@ -162,6 +162,40 @@ pub fn normalize_telegram_config(
         .map(|value| value.to_storage_value())
 }
 
+pub fn merge_existing_telegram_config(
+    kind: &str,
+    integration_name: &str,
+    existing: &Value,
+    update: &Value,
+) -> Value {
+    if kind != TELEGRAM_INTEGRATION_KIND {
+        return update.clone();
+    }
+
+    let Some(update_object) = update.as_object() else {
+        return update.clone();
+    };
+
+    let has_secret_ref = optional_string(update_object, "secret_ref")
+        .map(|value| !value.is_empty())
+        .unwrap_or(false);
+    if has_secret_ref {
+        return update.clone();
+    }
+
+    let Some(secret_ref) = TelegramIntegrationConfig::from_value(existing, integration_name)
+        .ok()
+        .map(|config| config.secret_ref)
+        .filter(|value| !value.is_empty())
+    else {
+        return update.clone();
+    };
+
+    let mut merged = update_object.clone();
+    merged.insert("secret_ref".to_string(), Value::String(secret_ref));
+    Value::Object(merged)
+}
+
 pub fn sanitize_integration_model(mut integration: IntegrationModel) -> IntegrationModel {
     if integration.kind != TELEGRAM_INTEGRATION_KIND {
         return integration;
@@ -398,9 +432,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        mask_secret_ref, normalize_binding_event_types, normalize_binding_scope,
-        normalize_delivery_severity, normalize_telegram_config, sanitize_telegram_config_value,
-        severity_rank, telegram_binding_matches, TELEGRAM_INTEGRATION_KIND,
+        mask_secret_ref, merge_existing_telegram_config, normalize_binding_event_types,
+        normalize_binding_scope, normalize_delivery_severity, normalize_telegram_config,
+        sanitize_telegram_config_value, severity_rank, telegram_binding_matches,
+        TELEGRAM_INTEGRATION_KIND,
     };
 
     #[test]
@@ -468,6 +503,35 @@ mod tests {
                 "has_secret_ref": true,
                 "masked_secret_ref": mask_secret_ref("vault://kv/data/integrations/tg/secops")
             })
+        );
+    }
+
+    #[test]
+    fn preserves_existing_secret_ref_during_update_merge() {
+        let merged = merge_existing_telegram_config(
+            TELEGRAM_INTEGRATION_KIND,
+            "secops-primary",
+            &json!({
+                "bot_name": "secops-primary",
+                "parse_mode": "HTML",
+                "secret_ref": "vault://kv/data/integrations/tg/secops",
+                "message_template_version": "v1",
+                "delivery_enabled": true
+            }),
+            &json!({
+                "bot_name": "secops-renamed",
+                "parse_mode": "plain",
+                "default_chat_id": "-100100",
+                "message_template_version": "v1",
+                "delivery_enabled": false,
+                "has_secret_ref": true,
+                "masked_secret_ref": "vault://k...cops"
+            }),
+        );
+
+        assert_eq!(
+            merged.get("secret_ref").and_then(serde_json::Value::as_str),
+            Some("vault://kv/data/integrations/tg/secops")
         );
     }
 

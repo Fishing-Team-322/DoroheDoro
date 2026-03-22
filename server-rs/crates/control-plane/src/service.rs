@@ -18,8 +18,9 @@ use crate::{
     },
     repository::{ControlRepository, PermissionDefinition},
     telegram::{
-        normalize_binding_event_types, normalize_binding_scope, normalize_delivery_severity,
-        normalize_telegram_config, sanitize_integration_model, TELEGRAM_INTEGRATION_KIND,
+        merge_existing_telegram_config, normalize_binding_event_types, normalize_binding_scope,
+        normalize_delivery_severity, normalize_telegram_config, sanitize_integration_model,
+        TELEGRAM_INTEGRATION_KIND,
     },
 };
 
@@ -1066,8 +1067,14 @@ impl ControlService {
             .ok_or_else(|| {
                 AppError::not_found(format!("integration {} not found", input.integration_id))
             })?;
+        let merged_config = merge_existing_telegram_config(
+            &existing.kind,
+            &existing.name,
+            &existing.config_json,
+            &input.config,
+        );
         let normalized_config =
-            normalize_telegram_config(&existing.kind, &input.name, &input.config)?;
+            normalize_telegram_config(&existing.kind, &input.name, &merged_config)?;
         let integration = self
             .repo
             .update_integration(

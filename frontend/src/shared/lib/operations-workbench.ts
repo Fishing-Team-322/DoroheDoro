@@ -3,28 +3,32 @@
 import type { Locale } from "@/src/shared/config";
 import { getSiteCopy, translateValueLabel } from "@/src/shared/lib/i18n";
 import {
+  listClusters,
   listAgents,
   listAlerts,
   listAlertRules,
   listAudit,
   listDeployments,
+  listIntegrations,
   listLogAnomalies,
   listPolicies,
   type AgentItem,
   type AlertInstanceItem,
   type AlertRuleItem,
+  type ClusterItem,
   type DeploymentDetailResponse,
   type DeploymentStepItem,
   type DeploymentTargetItem,
+  type IntegrationItem,
   type LogAnomalyItem,
   type PolicyItem,
 } from "@/src/shared/lib/runtime-api";
 import {
-  loadTelegramInstances,
+  buildTelegramRuntimeInstances,
   projectTelegramDeliveries,
   type TelegramDeliveryProjection,
-  type TelegramInstance,
-} from "@/src/shared/lib/telegram-integrations-store";
+  type TelegramRuntimeInstance,
+} from "@/src/shared/lib/telegram-integrations";
 
 export type SeverityTone = "default" | "success" | "warning" | "danger";
 
@@ -137,7 +141,7 @@ export type AlertsWorkbenchData = {
   generatedAt: string;
   alerts: AlertDetailModel[];
   rules: AlertRuleItem[];
-  telegramInstances: TelegramInstance[];
+  telegramInstances: TelegramRuntimeInstance[];
 };
 
 export type DeploymentRolloutPhase = {
@@ -162,7 +166,9 @@ function formatCount(value: number, locale: Locale) {
   return new Intl.NumberFormat(locale).format(value);
 }
 
-export function getAnomalyModeDefinitions(locale: Locale): AnomalyModeDefinition[] {
+export function getAnomalyModeDefinitions(
+  locale: Locale
+): AnomalyModeDefinition[] {
   const copy = getSiteCopy(locale).workbench.anomalies.modes;
 
   return [
@@ -195,7 +201,11 @@ function normalizeSeverity(value?: string): SecurityFindingSeverity {
   if (normalized === "error" || normalized === "high") {
     return "high";
   }
-  if (normalized === "warning" || normalized === "warn" || normalized === "medium") {
+  if (
+    normalized === "warning" ||
+    normalized === "warn" ||
+    normalized === "medium"
+  ) {
     return "medium";
   }
   return "low";
@@ -246,7 +256,9 @@ function buildSecurityFindings(input: {
       title: copy.agentsCoverage.title,
       severity: degradedAgents.length > 2 ? "critical" : "high",
       status: "open",
-      summary: copy.agentsCoverage.summary(formatCount(degradedAgents.length, locale)),
+      summary: copy.agentsCoverage.summary(
+        formatCount(degradedAgents.length, locale)
+      ),
       impact: copy.agentsCoverage.impact,
       evidence: degradedAgents
         .slice(0, 4)
@@ -262,7 +274,9 @@ function buildSecurityFindings(input: {
     });
   }
 
-  const openAlerts = input.alerts.filter((item) => isOpenAlertStatus(item.status));
+  const openAlerts = input.alerts.filter((item) =>
+    isOpenAlertStatus(item.status)
+  );
   if (openAlerts.length > 0) {
     findings.push({
       id: "open-alerts",
@@ -324,9 +338,10 @@ function buildSecurityFindings(input: {
         .slice(0, 4)
         .map(
           (item, index) =>
-            `${copy.deploymentPrefix} ${index + 1}: ${
-              translateValueLabel(item.status ?? copy.unknownStatus, locale)
-            }`
+            `${copy.deploymentPrefix} ${index + 1}: ${translateValueLabel(
+              item.status ?? copy.unknownStatus,
+              locale
+            )}`
         ),
       recommendedAction: copy.deploymentInstability.recommendedAction,
       relatedRoute: {
@@ -342,7 +357,9 @@ function buildSecurityFindings(input: {
       title: copy.auditBurst.title,
       severity: "medium",
       status: "watching",
-      summary: copy.auditBurst.summary(formatCount(input.recentAuditCount, locale)),
+      summary: copy.auditBurst.summary(
+        formatCount(input.recentAuditCount, locale)
+      ),
       impact: copy.auditBurst.impact,
       evidence: [copy.auditBurst.evidence],
       recommendedAction: copy.auditBurst.recommendedAction,
@@ -367,18 +384,29 @@ function buildSecurityFindings(input: {
 export async function getSecurityPostureData(
   locale: Locale
 ): Promise<SecurityPostureData> {
-  const [agentsResponse, alertsResponse, policiesResponse, deploymentsResponse, auditResponse] =
-    await Promise.all([
-      listAgents(),
-      listAlerts({ limit: 30, offset: 0 }),
-      listPolicies(),
-      listDeployments(),
-      listAudit({ limit: 20, offset: 0 }),
-    ]);
+  const [
+    agentsResponse,
+    alertsResponse,
+    policiesResponse,
+    deploymentsResponse,
+    auditResponse,
+  ] = await Promise.all([
+    listAgents(),
+    listAlerts({ limit: 30, offset: 0 }),
+    listPolicies(),
+    listDeployments(),
+    listAudit({ limit: 20, offset: 0 }),
+  ]);
 
-  const openAlerts = alertsResponse.items.filter((item) => isOpenAlertStatus(item.status));
-  const unhealthyAgents = agentsResponse.items.filter((item) => !isHealthyAgent(item));
-  const activePolicies = policiesResponse.items.filter((item) => item.is_active);
+  const openAlerts = alertsResponse.items.filter((item) =>
+    isOpenAlertStatus(item.status)
+  );
+  const unhealthyAgents = agentsResponse.items.filter(
+    (item) => !isHealthyAgent(item)
+  );
+  const activePolicies = policiesResponse.items.filter(
+    (item) => item.is_active
+  );
   const failingDeployments = deploymentsResponse.items.filter((item) =>
     isFailingDeploymentStatus(item.status)
   );
@@ -400,10 +428,7 @@ export async function getSecurityPostureData(
         value: `${formatCount(
           agentsResponse.items.length - unhealthyAgents.length,
           locale
-        )}/${formatCount(
-          agentsResponse.items.length,
-          locale
-        )}`,
+        )}/${formatCount(agentsResponse.items.length, locale)}`,
         tone: unhealthyAgents.length > 0 ? "warning" : "success",
         helperText: summaryCopy.healthyAgents.helperText,
       },
@@ -414,7 +439,10 @@ export async function getSecurityPostureData(
           policiesResponse.items.length,
           locale
         )}`,
-        tone: activePolicies.length === policiesResponse.items.length ? "success" : "warning",
+        tone:
+          activePolicies.length === policiesResponse.items.length
+            ? "success"
+            : "warning",
         helperText: summaryCopy.activePolicies.helperText,
       },
       {
@@ -447,7 +475,9 @@ export async function getAnomalyWorkbenchData(
     listAlerts({ limit: 20, offset: 0 }),
   ]);
 
-  const openAlerts = alertsResponse.items.filter((item) => isOpenAlertStatus(item.status));
+  const openAlerts = alertsResponse.items.filter((item) =>
+    isOpenAlertStatus(item.status)
+  );
 
   const anomalies = anomaliesResponse.items.map((item) => {
     const matchingAlerts = openAlerts.filter(
@@ -501,7 +531,9 @@ export async function getAnomalyWorkbenchData(
       href: `/security?tab=alerts&alert=${item.alert_instance_id}`,
     })),
   ].sort((left, right) => {
-    return new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime();
+    return (
+      new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime()
+    );
   });
 
   return {
@@ -550,28 +582,43 @@ function buildAlertExplanation(
 
   return copy.explanationWithoutAnomaly(
     alert.title,
-    rule?.name ?? (locale === "ru" ? "несопоставленное правило" : "an unmapped rule")
+    rule?.name ??
+      (locale === "ru" ? "несопоставленное правило" : "an unmapped rule")
   );
 }
 
 export async function getAlertsWorkbenchData(
   locale: Locale
 ): Promise<AlertsWorkbenchData> {
-  const [alertsResponse, rulesResponse, anomaliesResponse, agentsResponse, securityData] =
-    await Promise.all([
-      listAlerts({ limit: 30, offset: 0 }),
-      listAlertRules({ limit: 30, offset: 0 }),
-      listLogAnomalies({ limit: 30, offset: 0 }),
-      listAgents(),
-      getSecurityPostureData(locale),
-    ]);
+  const [
+    alertsResponse,
+    rulesResponse,
+    anomaliesResponse,
+    agentsResponse,
+    securityData,
+    integrationsResponse,
+    clustersResponse,
+  ] = await Promise.all([
+    listAlerts({ limit: 30, offset: 0 }),
+    listAlertRules({ limit: 30, offset: 0 }),
+    listLogAnomalies({ limit: 30, offset: 0 }),
+    listAgents(),
+    getSecurityPostureData(locale),
+    listIntegrations({ limit: 100, offset: 0 }),
+    listClusters({ limit: 100, offset: 0 }),
+  ]);
 
-  const telegramInstances = loadTelegramInstances();
+  const telegramInstances = buildTelegramRuntimeInstances(
+    integrationsResponse.items as IntegrationItem[],
+    clustersResponse.items as ClusterItem[]
+  );
   const copy = getSiteCopy(locale).workbench.alerts;
   const commonCopy = getSiteCopy(locale).common;
 
   const alerts = alertsResponse.items.map((alert) => {
-    const rule = rulesResponse.items.find((item) => item.alert_rule_id === alert.alert_rule_id);
+    const rule = rulesResponse.items.find(
+      (item) => item.alert_rule_id === alert.alert_rule_id
+    );
     const anomaly =
       anomaliesResponse.items.find(
         (item) =>
@@ -612,7 +659,10 @@ export async function getAlertsWorkbenchData(
           label: copy.severity,
           value: translateValueLabel(alert.severity, locale),
         },
-        { label: copy.status, value: translateValueLabel(alert.status, locale) },
+        {
+          label: copy.status,
+          value: translateValueLabel(alert.status, locale),
+        },
         { label: copy.host, value: alert.host || commonCopy.na },
         { label: copy.service, value: alert.service || commonCopy.na },
         { label: copy.fingerprint, value: alert.fingerprint || commonCopy.na },
@@ -717,7 +767,8 @@ export function deriveDeploymentImageFlow(
   return {
     installMode:
       detail.item.total_targets > 1 ? copy.rollingInstall : copy.singleInstall,
-    rolloutState: detail.item.current_phase || detail.item.status || copy.unknown,
+    rolloutState:
+      detail.item.current_phase || detail.item.status || copy.unknown,
     imageLabel: image.imageLabel,
     imageSource: image.imageSource,
     affectedTargets: detail.item.total_targets,

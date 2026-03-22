@@ -7,7 +7,8 @@ Telegram delivery for `telegram_bot` integrations is owned by `server-rs/crates/
 - existing `/api/v1/integrations*` shapes stay unchanged
 - `telegram_bot` now uses a strict server-side `config_json` contract
 - outbound delivery is routed by `integration_bindings` and executed by an internal control-plane worker
-- healthcheck is triggered over NATS, not via a new public HTTP endpoint
+- healthcheck can be queued from the boundary via `POST /api/v1/integrations/{id}/telegram/healthcheck`
+- website integrations workspace consumes the live backend API and the `/api/v1/stream/integrations` SSE stream
 
 ## `config_json` v1
 
@@ -31,6 +32,7 @@ Rules:
 - `message_template_version` is fixed to `v1`
 - `secret_ref` is required
 - `default_chat_id` is optional for normal routing but required for healthcheck unless `chat_id_override` is provided
+- `secret_ref` may be stored either as `vault://secret/data/...` or as the raw Vault KV path `secret/data/...`; runtime normalizes the `vault://` prefix
 
 Sanitized response example returned by integrations list/get/create/update:
 
@@ -76,6 +78,24 @@ Sanitized response example returned by integrations list/get/create/update:
 | publish | `notifications.telegram.healthcheck.requested.v1` | Request Telegram healthcheck |
 | publish | `notifications.telegram.healthcheck.result.v1` | Healthcheck result |
 | publish | `audit.events.append` | Runtime audit sink used for queueing, retry, success, dead-letter, healthcheck |
+
+## Boundary HTTP / SSE
+
+- `GET /api/v1/integrations`
+- `GET /api/v1/integrations/{id}`
+- `POST /api/v1/integrations`
+- `PATCH /api/v1/integrations/{id}`
+- `POST /api/v1/integrations/{id}/bindings`
+- `DELETE /api/v1/integrations/{id}/bindings/{bindingId}`
+- `POST /api/v1/integrations/{id}/telegram/healthcheck`
+- `GET /api/v1/stream/integrations`
+
+The integrations SSE stream currently fans out:
+
+- `telegram-delivery-queued`
+- `telegram-delivery-succeeded`
+- `telegram-delivery-failed`
+- `telegram-healthcheck-result`
 
 ## Generic notification envelope example
 
@@ -189,13 +209,18 @@ Common machine-readable status codes:
 - `VAULT_ADDR`
 - `VAULT_ROLE_ID`
 - `VAULT_SECRET_ID`
+- standard outbound proxy envs are also supported operationally through the container runtime when the hosting provider blocks direct access to `api.telegram.org`:
+  - `HTTPS_PROXY`
+  - `HTTP_PROXY`
+  - `ALL_PROXY`
+  - `NO_PROXY`
 
 ## Local smoke
 
 1. Create the Vault secret referenced by `secret_ref` with one of the keys: `bot_token`, `token`, `telegram_token`.
 2. Create a `telegram_bot` integration through the existing integrations endpoint or control subject.
 3. Bind it to a cluster with `event_types_json=["alerts.firing"]` and a severity threshold.
-4. Start `control-plane` with `TELEGRAM_WORKER_ENABLED=true`.
+4. Start `control-plane` with `TELEGRAM_WORKER_ENABLED=true` and Vault AppRole credentials.
 5. Publish one `notifications.dispatch.requested.v1` envelope and verify:
    - one row in `telegram_deliveries`
    - one or more rows in `telegram_delivery_attempts`
@@ -207,7 +232,7 @@ Common machine-readable status codes:
 ## Rollout
 
 1. Apply migration `0010_control_telegram_orchestrator.sql`.
-2. Configure Vault and `TELEGRAM_*` env vars.
+2. Configure Vault and `TELEGRAM_*` env vars. The provided compose/vault bootstrap now provisions a dedicated `control-plane` AppRole (`control-plane-role-id` / `control-plane-secret-id`) for local and single-host demo stacks.
 3. Deploy the new `control-plane` binary with `TELEGRAM_WORKER_ENABLED=false`.
 4. Run one healthcheck request against a non-production chat.
 5. Enable `TELEGRAM_WORKER_ENABLED=true`.

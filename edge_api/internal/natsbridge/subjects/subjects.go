@@ -104,6 +104,13 @@ type Registry struct {
 	AuditList         string
 	AuditEventsAppend string
 
+	NotificationsDispatchRequested          string
+	NotificationsTelegramDispatchRequested  string
+	NotificationsTelegramDispatchSucceeded  string
+	NotificationsTelegramDispatchFailed     string
+	NotificationsTelegramHealthcheckRequest string
+	NotificationsTelegramHealthcheckResult  string
+
 	LogsIngestRaw        string
 	LogsIngestNormalized string
 
@@ -216,6 +223,13 @@ func Defaults() Registry {
 
 		AuditList:         "audit.list",
 		AuditEventsAppend: "audit.events.append",
+
+		NotificationsDispatchRequested:          "notifications.dispatch.requested.v1",
+		NotificationsTelegramDispatchRequested:  "notifications.telegram.dispatch.requested.v1",
+		NotificationsTelegramDispatchSucceeded:  "notifications.telegram.dispatch.succeeded.v1",
+		NotificationsTelegramDispatchFailed:     "notifications.telegram.dispatch.failed.v1",
+		NotificationsTelegramHealthcheckRequest: "notifications.telegram.healthcheck.requested.v1",
+		NotificationsTelegramHealthcheckResult:  "notifications.telegram.healthcheck.result.v1",
 
 		LogsIngestRaw:        "logs.ingest.raw",
 		LogsIngestNormalized: "logs.ingest.normalized",
