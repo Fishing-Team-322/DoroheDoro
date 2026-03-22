@@ -64,8 +64,8 @@
       "footerProduct": "Логовизор аéза"
     },
     "logout": {
-      "full": "Выйти",
-      "compact": "Выйти"
+      "full": "выйти",
+      "compact": "выйти"
     }
   },
   "navigation": {
@@ -84,7 +84,7 @@
     "editTitle": "редактирование профиля",
     "editDescription": "Сохранение отправляет `PATCH /profile` с текущим CSRF-токеном.",
     "displayNameLabel": "отображаемое имя",
-    "save": "Сохранить изменения",
+    "save": "сохранить изменения",
     "success": "Профиль успешно обновлен.",
     "fallbackError": "Не удалось обновить профиль.",
     "currentAccountTitle": "Текущий аккаунт",

@@ -150,7 +150,7 @@ export function PoliciesPage({ embedded = false }: { embedded?: boolean } = {}) 
                         key={policy.policy_id}
                         className={
                           policy.policy_id === selectedPolicyId
-                            ? "bg-[color:rgba(56,189,248,0.08)]"
+                            ? "bg-transparent"
                             : undefined
                         }
                         onClick={() => setSelectedPolicyId(policy.policy_id)}

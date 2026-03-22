@@ -23,10 +23,10 @@ import {
   GridIcon,
   HomeIcon,
   MenuIcon,
-  RocketIcon,
   ServerIcon,
-  SettingsIcon,
   ShieldIcon,
+  TerminalIcon,
+  UserIcon,
 } from "../icons";
 import { useSidebarCollapsedState } from "../model/use-sidebar-collapsed-state";
 
@@ -437,13 +437,13 @@ function getSidebarIcon(item: Pick<NavItem, "key">) {
     case "security":
       return ShieldIcon;
     case "operations":
-      return RocketIcon;
+      return TerminalIcon;
     case "integrations":
       return GridIcon;
     case "audit":
       return ActivityIcon;
     case "profile":
-      return SettingsIcon;
+      return UserIcon;
     default:
       return undefined;
   }

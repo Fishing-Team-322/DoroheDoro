@@ -1,7 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useI18n } from "@/src/shared/lib/i18n";
 import {
@@ -43,6 +43,66 @@ type SearchState = {
   severity: string;
 };
 
+function getSeverityClasses(severity: LogEventItem["severity"] | LogAnomalyItem["severity"]) {
+  switch (severity) {
+    case "debug":
+      return "bg-slate-400/8 text-slate-500 border-slate-400/10";
+    case "info":
+      return "bg-sky-400/8 text-sky-500 border-sky-400/10";
+    case "warn":
+      return "bg-amber-400/8 text-amber-500 border-amber-400/10";
+    case "error":
+      return "bg-rose-400/8 text-rose-500 border-rose-400/10";
+    case "fatal":
+      return "bg-red-400/8 text-red-500 border-red-400/10";
+    default:
+      return "bg-slate-400/8 text-slate-500 border-slate-400/10";
+  }
+}
+
+function getStatusClasses(status: LogAnomalyItem["status"]) {
+  switch (status) {
+    case "open":
+      return "bg-rose-400/8 text-rose-500 border-rose-400/10";
+    case "acknowledged":
+      return "bg-amber-400/8 text-amber-500 border-amber-400/10";
+    case "resolved":
+      return "bg-emerald-400/8 text-emerald-500 border-emerald-400/10";
+    default:
+      return "bg-slate-400/8 text-slate-500 border-slate-400/10";
+  }
+}
+
+function SeverityBadge({
+  severity,
+}: {
+  severity: LogEventItem["severity"] | LogAnomalyItem["severity"];
+}) {
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-md border px-2 py-1 text-xs font-normal capitalize",
+        getSeverityClasses(severity),
+      ].join(" ")}
+    >
+      {severity}
+    </span>
+  );
+}
+
+function StatusBadge({ status }: { status: LogAnomalyItem["status"] }) {
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-md border px-2 py-1 text-xs font-normal capitalize",
+        getStatusClasses(status),
+      ].join(" ")}
+    >
+      {status}
+    </span>
+  );
+}
+
 export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { dictionary } = useI18n();
   const router = useRouter();
@@ -60,14 +120,27 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [service, setService] = useState(urlService);
   const [agentId, setAgentId] = useState(urlAgentId);
   const [severity, setSeverity] = useState(urlSeverity);
+
   const [items, setItems] = useState<LogEventItem[]>([]);
   const [anomalies, setAnomalies] = useState<LogAnomalyItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const currentState = useMemo<SearchState>(
+    () => ({
+      query: urlQuery,
+      host: urlHost,
+      service: urlService,
+      agentId: urlAgentId,
+      severity: urlSeverity,
+    }),
+    [urlAgentId, urlHost, urlQuery, urlService, urlSeverity],
+  );
+
   async function runSearch(state: SearchState) {
     setLoading(true);
     setError(null);
+
     try {
       const [logsResponse, anomaliesResponse] = await Promise.all([
         searchLogs({
@@ -87,6 +160,7 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
           offset: 0,
         }),
       ]);
+
       setItems(logsResponse.items);
       setAnomalies(anomaliesResponse.items);
     } catch (loadError) {
@@ -97,21 +171,14 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
   }
 
   useEffect(() => {
-    const nextState = {
-      query: urlQuery,
-      host: urlHost,
-      service: urlService,
-      agentId: urlAgentId,
-      severity: urlSeverity,
-    };
-
     setQuery(urlQuery);
     setHost(urlHost);
     setService(urlService);
     setAgentId(urlAgentId);
     setSeverity(urlSeverity);
-    void runSearch(nextState);
-  }, [urlAgentId, urlHost, urlQuery, urlService, urlSeverity]);
+
+    void runSearch(currentState);
+  }, [currentState, urlAgentId, urlHost, urlQuery, urlService, urlSeverity]);
 
   function updateUrl(state: SearchState) {
     const nextParams = new URLSearchParams(searchParams.toString());
@@ -136,6 +203,7 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
     });
 
     const serialized = nextParams.toString();
+
     router.replace(serialized ? `${pathname}?${serialized}` : pathname, {
       scroll: false,
     });
@@ -143,6 +211,7 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
     updateUrl({
       query: query.trim(),
       host: host.trim(),
@@ -215,11 +284,7 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
             <Button type="submit" className="h-10 px-4">
               Search
             </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={handleReset}
-            >
+            <Button type="button" variant="ghost" onClick={handleReset}>
               Reset filters
             </Button>
           </div>
@@ -231,8 +296,8 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
       {!loading && !error ? (
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,0.95fr)]">
-          <Card>
-            <div className="space-y-3">
+          <Card className="min-h-0">
+            <div className="flex h-full min-h-0 flex-col space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-[color:var(--foreground)]">
                   Log history
@@ -242,44 +307,58 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 </p>
               </div>
 
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Timestamp</TableHead>
-                    <TableHead>Host</TableHead>
-                    <TableHead>Agent</TableHead>
-                    <TableHead>Service</TableHead>
-                    <TableHead>Severity</TableHead>
-                    <TableHead>Message</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.length === 0 ? (
+              <div className="min-h-0 flex-1 overflow-auto rounded-md border border-[color:var(--border)]">
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-[color:var(--background)]">
                     <TableRow>
-                      <TableCell colSpan={6}>
-                        <EmptyState
-                          variant="flush"
-                          title="No matching logs"
-                          description="Adjust the filters or ingest new events."
-                        />
-                      </TableCell>
+                      <TableHead>Timestamp</TableHead>
+                      <TableHead>Host</TableHead>
+                      <TableHead>Agent</TableHead>
+                      <TableHead>Service</TableHead>
+                      <TableHead>Severity</TableHead>
+                      <TableHead>Message</TableHead>
                     </TableRow>
-                  ) : (
-                    items.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>{item.timestamp}</TableCell>
-                        <TableCell>{item.host}</TableCell>
-                        <TableCell>{item.agent_id || "n/a"}</TableCell>
-                        <TableCell>{item.service}</TableCell>
-                        <TableCell>{item.severity}</TableCell>
-                        <TableCell className="max-w-[420px] truncate">
-                          {item.message}
+                  </TableHeader>
+                  <TableBody>
+                    {items.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6}>
+                          <EmptyState
+                            variant="flush"
+                            title="No matching logs"
+                            description="Adjust the filters or ingest new events."
+                          />
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                    ) : (
+                      items.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell className="whitespace-nowrap text-xs text-[color:var(--muted-foreground)]">
+                            {item.timestamp}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap font-medium">
+                            {item.host}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-[color:var(--muted-foreground)]">
+                            {item.agent_id || "n/a"}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {item.service}
+                          </TableCell>
+                          <TableCell>
+                            <SeverityBadge severity={item.severity} />
+                          </TableCell>
+                          <TableCell className="max-w-[460px]">
+                            <div className="line-clamp-2 text-sm text-[color:var(--foreground)]">
+                              {item.message}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </Card>
 
@@ -288,6 +367,7 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
               <h2 className="text-base font-semibold text-[color:var(--foreground)]">
                 Anomaly markers
               </h2>
+
               {anomalies.length === 0 ? (
                 <EmptyState
                   variant="flush"
@@ -298,17 +378,27 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 anomalies.map((item) => (
                   <div
                     key={item.alert_instance_id}
-                    className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-3"
+                    className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-4"
                   >
-                    <p className="text-sm font-medium text-[color:var(--foreground)]">
-                      {item.title}
-                    </p>
-                    <p className="mt-1 text-sm text-[color:var(--muted-foreground)]">
-                      {item.host} / {item.service} / {item.severity}
-                    </p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-                      {item.status} / {item.triggered_at}
-                    </p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[color:var(--foreground)]">
+                          {item.title}
+                        </p>
+                        <p className="mt-1 text-sm text-[color:var(--muted-foreground)]">
+                          {item.host} / {item.service}
+                        </p>
+                      </div>
+
+                      <SeverityBadge severity={item.severity} />
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <StatusBadge status={item.status} />
+                      <span className="text-xs uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
+                        triggered at {item.triggered_at}
+                      </span>
+                    </div>
                   </div>
                 ))
               )}
