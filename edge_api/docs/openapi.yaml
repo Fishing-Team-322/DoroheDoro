@@ -1773,6 +1773,182 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ErrorEnvelope"
+  "/api/v1/hosts/{id}/agent-status":
+    "get":
+      "security":
+        - "SessionCookie":
+            []
+      "tags":
+        - "agents"
+      "summary": "Get aggregated agent lifecycle status for a host"
+      "parameters":
+        - "name": "id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+          "description": "Host ID."
+      "responses":
+        "200":
+          "description": "Aggregated host agent status."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/HostAgentStatusView"
+        "400":
+          "description": "Invalid request payload or parameters."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "401":
+          "description": "Authentication is required or the session is missing."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "403":
+          "description": "CSRF or permission validation failed."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "404":
+          "description": "Requested resource was not found."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "502":
+          "description": "Invalid upstream response or bridge decode failure."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "503":
+          "description": "Upstream runtime or NATS bridge is unavailable."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "504":
+          "description": "Upstream request timed out."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+  "/api/v1/hosts/{id}/agent-diagnostics":
+    "get":
+      "security":
+        - "SessionCookie":
+            []
+      "tags":
+        - "agents"
+      "summary": "Get normalized diagnostics detail for a host agent"
+      "parameters":
+        - "name": "id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+          "description": "Host ID."
+      "responses":
+        "200":
+          "description": "Normalized diagnostics detail."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/HostAgentDiagnosticsView"
+        "400":
+          "description": "Invalid request payload or parameters."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "401":
+          "description": "Authentication is required or the session is missing."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "403":
+          "description": "CSRF or permission validation failed."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "404":
+          "description": "Requested resource was not found."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "502":
+          "description": "Invalid upstream response or bridge decode failure."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "503":
+          "description": "Upstream runtime or NATS bridge is unavailable."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "504":
+          "description": "Upstream request timed out."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
   "/api/v1/host-groups":
     "get":
       "security":
@@ -3255,6 +3431,94 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ErrorEnvelope"
+  "/api/v1/deployments/jobs/{id}/timeline":
+    "get":
+      "security":
+        - "SessionCookie":
+            []
+      "tags":
+        - "deployments"
+      "summary": "Get normalized deployment timeline for one job"
+      "parameters":
+        - "name": "id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+          "description": "Deployment job ID."
+      "responses":
+        "200":
+          "description": "Normalized deployment timeline."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/DeploymentTimelineView"
+        "400":
+          "description": "Invalid request payload or parameters."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "401":
+          "description": "Authentication is required or the session is missing."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "403":
+          "description": "CSRF or permission validation failed."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "404":
+          "description": "Requested resource was not found."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "502":
+          "description": "Invalid upstream response or bridge decode failure."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "503":
+          "description": "Upstream runtime or NATS bridge is unavailable."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "504":
+          "description": "Upstream request timed out."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
   "/api/v1/deployments/{id}/retry":
     "post":
       "security":
@@ -3818,6 +4082,94 @@
                     "type": "string"
                 "required":
                   - "request_id"
+        "400":
+          "description": "Invalid request payload or parameters."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "401":
+          "description": "Authentication is required or the session is missing."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "403":
+          "description": "CSRF or permission validation failed."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "404":
+          "description": "Requested resource was not found."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "502":
+          "description": "Invalid upstream response or bridge decode failure."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "503":
+          "description": "Upstream runtime or NATS bridge is unavailable."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+        "504":
+          "description": "Upstream request timed out."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
+  "/api/v1/clusters/{id}/agents/overview":
+    "get":
+      "security":
+        - "SessionCookie":
+            []
+      "tags":
+        - "clusters"
+      "summary": "Get aggregated agent connectivity overview for a cluster"
+      "parameters":
+        - "name": "id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+          "description": "Cluster ID."
+      "responses":
+        "200":
+          "description": "Aggregated cluster agents overview."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ClusterAgentsOverviewView"
         "400":
           "description": "Invalid request payload or parameters."
           "headers":
@@ -8982,6 +9334,35 @@
             "application/json":
               "schema":
                 "$ref": "#/components/schemas/ErrorEnvelope"
+  "/api/v1/stream/agent-events":
+    "get":
+      "security":
+        - "SessionCookie":
+            []
+      "tags":
+        - "stream"
+      "summary": "Agent lifecycle SSE stream"
+      "description": "Fan-out stream that normalizes ui.stream.agents and deployments.jobs.step into agent lifecycle events for WEB."
+      "responses":
+        "200":
+          "description": "Server-sent events stream."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "text/event-stream":
+              "schema":
+                "type": "string"
+                "format": "binary"
+        "401":
+          "description": "Authentication is required or the session is missing."
+          "headers":
+            "X-Request-ID":
+              "$ref": "#/components/headers/RequestId"
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ErrorEnvelope"
 "components":
   "securitySchemes":
     "SessionCookie":
@@ -9332,6 +9713,456 @@
       "required":
         - "agent_id"
         - "created_at"
+    "AgentIssue":
+      "type": "object"
+      "properties":
+        "code":
+          "type": "string"
+        "severity":
+          "type": "string"
+        "domain":
+          "type": "string"
+        "source":
+          "type": "string"
+        "message":
+          "type": "string"
+      "required":
+        - "code"
+        - "severity"
+        - "domain"
+        - "message"
+    "AgentDiagnosticsCheck":
+      "type": "object"
+      "properties":
+        "check_id":
+          "type": "string"
+        "name":
+          "type": "string"
+        "status":
+          "type": "string"
+        "severity":
+          "type": "string"
+        "domain":
+          "type": "string"
+        "message":
+          "type": "string"
+        "hint":
+          "type": "string"
+      "required":
+        - "check_id"
+        - "name"
+        - "status"
+        - "severity"
+        - "domain"
+        - "message"
+    "AgentDataFreshnessSection":
+      "type": "object"
+      "properties":
+        "status":
+          "type": "string"
+        "observed_at":
+          "type": "string"
+          "format": "date-time"
+        "age_sec":
+          "type": "integer"
+          "minimum": 0
+        "note":
+          "type": "string"
+      "required":
+        - "status"
+    "AgentDataFreshness":
+      "type": "object"
+      "properties":
+        "generated_at":
+          "type": "string"
+          "format": "date-time"
+        "sections":
+          "type": "object"
+          "additionalProperties":
+            "$ref": "#/components/schemas/AgentDataFreshnessSection"
+      "required":
+        - "generated_at"
+    "HostAgentDiagnosticsSummary":
+      "type": "object"
+      "properties":
+        "doctor_status":
+          "type": "string"
+        "warning_count":
+          "type": "integer"
+        "failure_count":
+          "type": "integer"
+        "spool_status":
+          "type": "string"
+        "transport_status":
+          "type": "string"
+        "tls_status":
+          "type": "string"
+        "source_status":
+          "type": "string"
+        "top_issues":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/AgentIssue"
+      "required":
+        - "doctor_status"
+        - "warning_count"
+        - "failure_count"
+        - "spool_status"
+        - "transport_status"
+        - "tls_status"
+        - "source_status"
+        - "top_issues"
+    "AgentDegradedMode":
+      "type": "object"
+      "properties":
+        "active":
+          "type": "boolean"
+        "reason":
+          "type": "string"
+      "required":
+        - "active"
+    "HostAgentStatusView":
+      "type": "object"
+      "properties":
+        "host_id":
+          "type": "string"
+        "hostname":
+          "type": "string"
+        "cluster_id":
+          "type": "string"
+        "cluster_name":
+          "type": "string"
+        "service_name":
+          "type": "string"
+        "environment":
+          "type": "string"
+        "deployment_job_id":
+          "type": "string"
+        "deployment_status":
+          "type": "string"
+        "deployment_current_phase":
+          "type": "string"
+        "last_successful_deploy_at":
+          "type": "string"
+          "format": "date-time"
+        "last_failed_deploy_at":
+          "type": "string"
+          "format": "date-time"
+        "executor_kind":
+          "type": "string"
+        "install_mode":
+          "type": "string"
+        "artifact_ref":
+          "type": "string"
+        "agent_id":
+          "type": "string"
+        "enrollment_status":
+          "type": "string"
+        "enrolled_at":
+          "type": "string"
+          "format": "date-time"
+        "edge_connected":
+          "type": "boolean"
+        "last_heartbeat_at":
+          "type": "string"
+          "format": "date-time"
+        "heartbeat_status":
+          "type": "string"
+        "last_diagnostics_at":
+          "type": "string"
+          "format": "date-time"
+        "doctor_status":
+          "type": "string"
+        "warning_count":
+          "type": "integer"
+        "failure_count":
+          "type": "integer"
+        "top_issues":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/AgentIssue"
+        "spool_status":
+          "type": "string"
+        "transport_status":
+          "type": "string"
+        "tls_status":
+          "type": "string"
+        "source_status":
+          "type": "string"
+        "last_log_seen_at":
+          "type": "string"
+          "format": "date-time"
+        "last_batch_sent_at":
+          "type": "string"
+          "format": "date-time"
+        "recent_logs_per_minute":
+          "type": "integer"
+          "minimum": 0
+        "recent_errors_per_minute":
+          "type": "integer"
+          "minimum": 0
+        "last_known_errors":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/AgentIssue"
+        "last_known_warnings":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/AgentIssue"
+        "primary_failure_domain":
+          "type": "string"
+        "human_hint":
+          "type": "string"
+        "suggested_next_step":
+          "type": "string"
+        "missing_sections":
+          "type": "array"
+          "items":
+            "type": "string"
+        "data_freshness":
+          "$ref": "#/components/schemas/AgentDataFreshness"
+      "required":
+        - "host_id"
+        - "hostname"
+        - "deployment_status"
+        - "enrollment_status"
+        - "edge_connected"
+        - "heartbeat_status"
+        - "doctor_status"
+        - "warning_count"
+        - "failure_count"
+        - "top_issues"
+        - "spool_status"
+        - "transport_status"
+        - "tls_status"
+        - "source_status"
+        - "recent_logs_per_minute"
+        - "recent_errors_per_minute"
+        - "primary_failure_domain"
+        - "human_hint"
+        - "suggested_next_step"
+        - "data_freshness"
+    "HostAgentDiagnosticsView":
+      "type": "object"
+      "properties":
+        "host_id":
+          "type": "string"
+        "hostname":
+          "type": "string"
+        "agent_id":
+          "type": "string"
+        "collected_at":
+          "type": "string"
+          "format": "date-time"
+        "snapshot_json":
+          "type": "object"
+          "additionalProperties": true
+        "summary":
+          "$ref": "#/components/schemas/HostAgentDiagnosticsSummary"
+        "checks":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/AgentDiagnosticsCheck"
+        "degraded_mode":
+          "$ref": "#/components/schemas/AgentDegradedMode"
+        "runtime_errors":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/AgentIssue"
+        "transport_errors":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/AgentIssue"
+        "spool_warnings":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/AgentIssue"
+        "missing_sections":
+          "type": "array"
+          "items":
+            "type": "string"
+        "data_freshness":
+          "$ref": "#/components/schemas/AgentDataFreshness"
+      "required":
+        - "host_id"
+        - "hostname"
+        - "summary"
+        - "checks"
+        - "degraded_mode"
+        - "runtime_errors"
+        - "transport_errors"
+        - "spool_warnings"
+        - "data_freshness"
+    "ClusterAgentHostSummary":
+      "type": "object"
+      "properties":
+        "host_id":
+          "type": "string"
+        "hostname":
+          "type": "string"
+        "cluster_id":
+          "type": "string"
+        "agent_id":
+          "type": "string"
+        "deployment_status":
+          "type": "string"
+        "enrollment_status":
+          "type": "string"
+        "heartbeat_status":
+          "type": "string"
+        "doctor_status":
+          "type": "string"
+        "last_heartbeat_at":
+          "type": "string"
+          "format": "date-time"
+        "last_diagnostics_at":
+          "type": "string"
+          "format": "date-time"
+        "last_log_seen_at":
+          "type": "string"
+          "format": "date-time"
+        "primary_failure_domain":
+          "type": "string"
+        "human_hint":
+          "type": "string"
+      "required":
+        - "host_id"
+        - "hostname"
+        - "deployment_status"
+        - "enrollment_status"
+        - "heartbeat_status"
+        - "doctor_status"
+        - "primary_failure_domain"
+        - "human_hint"
+    "ClusterAgentsOverviewView":
+      "type": "object"
+      "properties":
+        "cluster_id":
+          "type": "string"
+        "cluster_name":
+          "type": "string"
+        "no_logs_window_min":
+          "type": "integer"
+        "total_hosts":
+          "type": "integer"
+        "deployed_agents":
+          "type": "integer"
+        "healthy_agents":
+          "type": "integer"
+        "stale_heartbeat":
+          "type": "integer"
+        "never_enrolled":
+          "type": "integer"
+        "deployment_failed":
+          "type": "integer"
+        "diagnostics_warn":
+          "type": "integer"
+        "diagnostics_fail":
+          "type": "integer"
+        "no_logs_in_last_n_min":
+          "type": "integer"
+        "hosts":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/ClusterAgentHostSummary"
+        "missing_sections":
+          "type": "array"
+          "items":
+            "type": "string"
+        "data_freshness":
+          "$ref": "#/components/schemas/AgentDataFreshness"
+      "required":
+        - "cluster_id"
+        - "no_logs_window_min"
+        - "total_hosts"
+        - "deployed_agents"
+        - "healthy_agents"
+        - "stale_heartbeat"
+        - "never_enrolled"
+        - "deployment_failed"
+        - "diagnostics_warn"
+        - "diagnostics_fail"
+        - "no_logs_in_last_n_min"
+        - "hosts"
+        - "data_freshness"
+    "DeploymentTimelineItem":
+      "type": "object"
+      "properties":
+        "phase_type":
+          "type": "string"
+        "status":
+          "type": "string"
+        "occurred_at":
+          "type": "string"
+          "format": "date-time"
+        "deployment_attempt_id":
+          "type": "string"
+        "deployment_target_id":
+          "type": "string"
+        "attempt_no":
+          "type": "integer"
+          "minimum": 0
+        "host_id":
+          "type": "string"
+        "hostname":
+          "type": "string"
+        "raw_step_name":
+          "type": "string"
+        "message":
+          "type": "string"
+        "payload_json":
+          "type": "object"
+          "additionalProperties": true
+      "required":
+        - "phase_type"
+        - "status"
+        - "occurred_at"
+    "DeploymentTimelineView":
+      "type": "object"
+      "properties":
+        "job_id":
+          "type": "string"
+        "status":
+          "type": "string"
+        "current_phase":
+          "type": "string"
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/DeploymentTimelineItem"
+        "missing_sections":
+          "type": "array"
+          "items":
+            "type": "string"
+        "data_freshness":
+          "$ref": "#/components/schemas/AgentDataFreshness"
+      "required":
+        - "job_id"
+        - "status"
+        - "items"
+        - "data_freshness"
+    "AgentRuntimeEvent":
+      "type": "object"
+      "properties":
+        "event_type":
+          "type": "string"
+        "host_id":
+          "type": "string"
+        "cluster_id":
+          "type": "string"
+        "severity":
+          "type": "string"
+        "occurred_at":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "type": "object"
+          "additionalProperties": true
+      "required":
+        - "event_type"
+        - "severity"
+        - "occurred_at"
+        - "payload"
     "DeploymentJobItem":
       "type": "object"
       "properties":

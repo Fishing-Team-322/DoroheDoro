@@ -23,6 +23,8 @@ Current boundary snapshot for the integrated stack in this repository.
 | `POST /api/v1/hosts` | request/reply -> `control.hosts.create` | live | inventory create |
 | `GET /api/v1/hosts/{id}` | request/reply -> `control.hosts.get` | live | inventory detail |
 | `PATCH /api/v1/hosts/{id}` | request/reply -> `control.hosts.update` | live | inventory update |
+| `GET /api/v1/hosts/{id}/agent-status` | aggregated read model | live | host-level deployment + enrollment + heartbeat + diagnostics + traffic summary |
+| `GET /api/v1/hosts/{id}/agent-diagnostics` | aggregated read model | live | normalized doctor snapshot with checks, degraded mode and partial-data markers |
 | `GET /api/v1/host-groups` | request/reply -> `control.host-groups.list` | live | host-group list |
 | `POST /api/v1/host-groups` | request/reply -> `control.host-groups.create` | live | host-group create |
 | `GET /api/v1/host-groups/{id}` | request/reply -> `control.host-groups.get` | live | host-group detail |
@@ -34,6 +36,7 @@ Current boundary snapshot for the integrated stack in this repository.
 | `GET /api/v1/credentials/{id}` | request/reply -> `control.credentials.get` | live | metadata detail |
 | `GET /api/v1/clusters` | request/reply -> `control.clusters.list` | live | cluster list |
 | `GET /api/v1/clusters/{id}` | request/reply -> `control.clusters.get` | live | cluster detail |
+| `GET /api/v1/clusters/{id}/agents/overview` | aggregated read model | live | cluster-wide agent health/connectivity rollup with host shortlist |
 | `POST /api/v1/clusters` | request/reply -> `control.clusters.create` | live | cluster create |
 | `PATCH /api/v1/clusters/{id}` | request/reply -> `control.clusters.update` | live | cluster update |
 | `POST /api/v1/clusters/{id}/hosts` | request/reply -> `control.clusters.add-host` | live | bind host to cluster |
@@ -73,12 +76,14 @@ Current boundary snapshot for the integrated stack in this repository.
 | `GET /api/v1/deployments/{id}` | request/reply -> `deployments.jobs.get` | live | deployment detail |
 | `GET /api/v1/deployments/{id}/steps` | request/reply -> `deployments.jobs.step` | live | step read-side |
 | `GET /api/v1/deployments/{id}/targets` | request/reply -> `deployments.jobs.status` | live | target/status read-side |
+| `GET /api/v1/deployments/jobs/{id}/timeline` | aggregated read model | live | normalized phase timeline for operator UI |
 | `POST /api/v1/deployments/{id}/retry` | request/reply -> `deployments.jobs.retry` | live | retry |
 | `POST /api/v1/deployments/{id}/cancel` | request/reply -> `deployments.jobs.cancel` | live | cancel |
 | `GET /api/v1/stream/logs` | subscribe -> `ui.stream.logs` | live gateway | future runtime publisher |
 | `GET /api/v1/stream/deployments` | subscribe -> `deployments.jobs.status` + `deployments.jobs.step` | live | deployment SSE fanout |
 | `GET /api/v1/stream/alerts` | subscribe -> `ui.stream.alerts` | live gateway | future runtime publisher |
 | `GET /api/v1/stream/agents` | subscribe -> `ui.stream.agents` | live gateway | future runtime publisher |
+| `GET /api/v1/stream/agent-events` | subscribe -> `ui.stream.agents` + `deployments.jobs.step` | live | normalized lifecycle SSE for WEB host/cluster pages |
 
 ## Live gRPC ingress
 
@@ -96,6 +101,7 @@ The stable boundary now ships only the SSE routes that have a live runtime publi
 
 - `GET /api/v1/stream/deployments`
 - `GET /api/v1/stream/agents`
+- `GET /api/v1/stream/agent-events`
 - `GET /api/v1/stream/logs`
 - `GET /api/v1/stream/alerts`
 

@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 
 	edgev1 "github.com/example/dorohedoro/contracts/proto"
+	"github.com/example/dorohedoro/internal/app/agentstatus"
 	"github.com/example/dorohedoro/internal/auth"
 	"github.com/example/dorohedoro/internal/config"
 	"github.com/example/dorohedoro/internal/grpcapi"
@@ -53,13 +54,23 @@ func New(ctx context.Context) (*App, error) {
 
 	authHooks := auth.Hooks{}
 	streamGateway := stream.NewGateway(bridge, cfg.Stream)
+	agentStatusService := agentstatus.New(agentstatus.Dependencies{
+		Bridge:   bridge,
+		Logger:   logger,
+		Subjects: cfg.NATS.Subjects,
+		Settings: agentstatus.Settings{
+			CacheTTL:       10 * time.Second,
+			RequestTimeout: cfg.NATS.RequestTimeout,
+		},
+	})
 	httpHandler := httpapi.NewRouter(httpapi.RouterDeps{
-		Config:  cfg,
-		Bridge:  bridge,
-		Stream:  streamGateway,
-		Logger:  logger,
-		Auth:    authHooks,
-		ReadyFn: bridge.Ready,
+		Config:      cfg,
+		Bridge:      bridge,
+		Stream:      streamGateway,
+		Logger:      logger,
+		Auth:        authHooks,
+		ReadyFn:     bridge.Ready,
+		AgentStatus: agentStatusService,
 	})
 	httpServer := &http.Server{
 		Addr:              cfg.HTTP.ListenAddr,
