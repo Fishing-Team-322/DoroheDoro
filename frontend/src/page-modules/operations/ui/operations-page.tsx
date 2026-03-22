@@ -7,7 +7,25 @@ import { DeploymentsPage } from "@/src/page-modules/deployments";
 import { LogsPage } from "@/src/page-modules/logs";
 import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
 import { Button, Card } from "@/src/shared/ui";
-import { PageHeader } from "@/src/widgets/dashboard-layout";
+
+const copyByLocale = {
+  en: {
+    tabs: {
+      deployments: "Deployments",
+      logs: "Logs",
+    },
+    title: "Operations workspace",
+    liveLogs: "Open Live Logs",
+  },
+  ru: {
+    tabs: {
+      deployments: "Раскатки",
+      logs: "Логи",
+    },
+    title: "операции/логи",
+    liveLogs: "Открыть live-логи",
+  },
+} as const;
 
 type OperationsTab = "deployments" | "logs";
 
@@ -21,6 +39,7 @@ function getActiveTab(value: string | null): OperationsTab {
 
 export function OperationsPage() {
   const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const searchParams = useSearchParams();
   const activeTab = getActiveTab(searchParams.get("tab"));
 
@@ -28,16 +47,16 @@ export function OperationsPage() {
     () => [
       {
         id: "deployments" as const,
-        label: "Deployments",
+        label: copy.tabs.deployments,
         href: withLocalePath(locale, "/operations?tab=deployments"),
       },
       {
         id: "logs" as const,
-        label: "Logs",
+        label: copy.tabs.logs,
         href: withLocalePath(locale, "/operations?tab=logs"),
       },
     ],
-    [locale]
+    [copy.tabs.deployments, copy.tabs.logs, locale]
   );
 
   return (
@@ -47,7 +66,7 @@ export function OperationsPage() {
           <div className="flex flex-col gap-4 border-b border-[color:var(--border)] pb-6 xl:flex-row xl:items-center xl:justify-between">
             <div className="space-y-2">
               <h2 className="text-5xl font-semibold text-[color:var(--foreground)]">
-                operations workspace
+                {copy.title}
               </h2>
             </div>
 
@@ -55,7 +74,7 @@ export function OperationsPage() {
               {activeTab === "logs" ? (
                 <Link href={withLocalePath(locale, "/logs/live")}>
                   <Button variant="outline" size="sm" className="h-9 px-4">
-                    Open Live Logs
+                    {copy.liveLogs}
                   </Button>
                 </Link>
               ) : null}

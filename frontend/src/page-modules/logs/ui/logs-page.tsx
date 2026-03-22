@@ -3,7 +3,8 @@
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useI18n } from "@/src/shared/lib/i18n";
+import { translateValueLabel, useI18n } from "@/src/shared/lib/i18n";
+import { formatDateTime } from "@/src/features/operations/ui/operations-ui";
 import {
   listLogAnomalies,
   searchLogs,
@@ -26,14 +27,90 @@ import {
 import { PageHeader } from "@/src/widgets/dashboard-layout";
 import { ErrorCard, LoadingCard } from "@/src/page-modules/common/ui/runtime-state";
 
-const severityOptions = [
-  { value: "", label: "Any severity" },
-  { value: "debug", label: "debug" },
-  { value: "info", label: "info" },
-  { value: "warn", label: "warn" },
-  { value: "error", label: "error" },
-  { value: "fatal", label: "fatal" },
-];
+const copyByLocale = {
+  en: {
+    title: "Logs",
+    description:
+      "Historical log search with quick host, service, agent, and severity filters plus anomaly markers.",
+    filters: {
+      query: "Search query",
+      queryPlaceholder: "service:error OR host:web-1",
+      host: "Host",
+      hostPlaceholder: "web-1",
+      service: "Service",
+      servicePlaceholder: "api",
+      agent: "Agent",
+      agentPlaceholder: "agent-123",
+      search: "Search",
+      reset: "Reset filters",
+      severityAny: "Any severity",
+    },
+    loading: "Searching logs...",
+    error: "Failed to search logs",
+    history: {
+      title: "Log history",
+      countSuffix: "event(s)",
+      columns: {
+        timestamp: "Timestamp",
+        host: "Host",
+        agent: "Agent",
+        service: "Service",
+        severity: "Severity",
+        message: "Message",
+      },
+      emptyTitle: "No matching logs",
+      emptyDescription: "Adjust the filters or ingest new events.",
+    },
+    anomalies: {
+      title: "Anomaly markers",
+      emptyTitle: "No anomaly markers",
+      emptyDescription:
+        "Triggered log-origin anomalies matching the current filters will appear here.",
+      triggeredAt: "triggered at",
+    },
+  },
+  ru: {
+    title: "Логи",
+    description:
+      "Исторический поиск по логам с быстрыми фильтрами по host, service, agent и severity, плюс маркеры аномалий.",
+    filters: {
+      query: "Поисковый запрос",
+      queryPlaceholder: "service:error OR host:web-1",
+      host: "Хост",
+      hostPlaceholder: "web-1",
+      service: "Сервис",
+      servicePlaceholder: "api",
+      agent: "Агент",
+      agentPlaceholder: "agent-123",
+      search: "Искать",
+      reset: "Сбросить фильтры",
+      severityAny: "Любая severity",
+    },
+    loading: "Поиск логов...",
+    error: "Не удалось выполнить поиск по логам",
+    history: {
+      title: "История логов",
+      countSuffix: "событ.",
+      columns: {
+        timestamp: "Время",
+        host: "Хост",
+        agent: "Агент",
+        service: "Сервис",
+        severity: "Severity",
+        message: "Сообщение",
+      },
+      emptyTitle: "Подходящих логов нет",
+      emptyDescription: "Ослабьте фильтры или дождитесь новых событий.",
+    },
+    anomalies: {
+      title: "Маркеры аномалий",
+      emptyTitle: "Маркеров аномалий нет",
+      emptyDescription:
+        "Здесь появятся логовые аномалии, совпадающие с текущими фильтрами.",
+      triggeredAt: "сработало в",
+    },
+  },
+} as const;
 
 type SearchState = {
   query: string;
@@ -74,8 +151,10 @@ function getStatusClasses(status: LogAnomalyItem["status"]) {
 }
 
 function SeverityBadge({
+  locale,
   severity,
 }: {
+  locale: "ru" | "en";
   severity: LogEventItem["severity"] | LogAnomalyItem["severity"];
 }) {
   return (
@@ -85,12 +164,18 @@ function SeverityBadge({
         getSeverityClasses(severity),
       ].join(" ")}
     >
-      {severity}
+      {translateValueLabel(severity, locale)}
     </span>
   );
 }
 
-function StatusBadge({ status }: { status: LogAnomalyItem["status"] }) {
+function StatusBadge({
+  locale,
+  status,
+}: {
+  locale: "ru" | "en";
+  status: LogAnomalyItem["status"];
+}) {
   return (
     <span
       className={[
@@ -98,13 +183,14 @@ function StatusBadge({ status }: { status: LogAnomalyItem["status"] }) {
         getStatusClasses(status),
       ].join(" ")}
     >
-      {status}
+      {translateValueLabel(status, locale)}
     </span>
   );
 }
 
 export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
-  const { dictionary } = useI18n();
+  const { dictionary, locale } = useI18n();
+  const copy = copyByLocale[locale];
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -125,6 +211,17 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [anomalies, setAnomalies] = useState<LogAnomalyItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const severityOptions = useMemo(
+    () => [
+      { value: "", label: copy.filters.severityAny },
+      { value: "debug", label: "debug" },
+      { value: "info", label: "info" },
+      { value: "warn", label: "warn" },
+      { value: "error", label: "error" },
+      { value: "fatal", label: "fatal" },
+    ],
+    [copy.filters.severityAny]
+  );
 
   const currentState = useMemo<SearchState>(
     () => ({
@@ -164,7 +261,7 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
       setItems(logsResponse.items);
       setAnomalies(anomaliesResponse.items);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to search logs");
+      setError(loadError instanceof Error ? loadError.message : copy.error);
     } finally {
       setLoading(false);
     }
@@ -178,7 +275,7 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
     setSeverity(urlSeverity);
 
     void runSearch(currentState);
-  }, [currentState, urlAgentId, urlHost, urlQuery, urlService, urlSeverity]);
+  }, [copy.error, currentState, urlAgentId, urlHost, urlQuery, urlService, urlSeverity]);
 
   function updateUrl(state: SearchState) {
     const nextParams = new URLSearchParams(searchParams.toString());
@@ -235,11 +332,11 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
     <div className={embedded ? "space-y-4" : "space-y-6"}>
       {!embedded ? (
         <PageHeader
-          title="Logs"
-          description="Historical log search with quick host, service, agent, and severity filters plus anomaly markers."
+          title={copy.title}
+          description={copy.description}
           breadcrumbs={[
             { label: dictionary.common.dashboard, href: "#" },
-            { label: "Logs" },
+            { label: copy.title },
           ]}
         />
       ) : null}
@@ -250,26 +347,26 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              label="Search query"
-              placeholder="service:error OR host:web-1"
+              label={copy.filters.query}
+              placeholder={copy.filters.queryPlaceholder}
             />
             <Input
               value={host}
               onChange={(event) => setHost(event.target.value)}
-              label="Host"
-              placeholder="web-1"
+              label={copy.filters.host}
+              placeholder={copy.filters.hostPlaceholder}
             />
             <Input
               value={service}
               onChange={(event) => setService(event.target.value)}
-              label="Service"
-              placeholder="api"
+              label={copy.filters.service}
+              placeholder={copy.filters.servicePlaceholder}
             />
             <Input
               value={agentId}
               onChange={(event) => setAgentId(event.target.value)}
-              label="Agent"
-              placeholder="agent-123"
+              label={copy.filters.agent}
+              placeholder={copy.filters.agentPlaceholder}
             />
             <div className="space-y-2">
               <Select
@@ -282,16 +379,16 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
           <div className="flex flex-wrap gap-3">
             <Button type="submit" className="h-10 px-4">
-              Search
+              {copy.filters.search}
             </Button>
             <Button type="button" variant="ghost" onClick={handleReset}>
-              Reset filters
+              {copy.filters.reset}
             </Button>
           </div>
         </form>
       </Card>
 
-      {loading ? <LoadingCard label="Searching logs..." /> : null}
+      {loading ? <LoadingCard label={copy.loading} /> : null}
       {!loading && error ? <ErrorCard message={error} /> : null}
 
       {!loading && !error ? (
@@ -300,10 +397,10 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="flex h-full min-h-0 flex-col space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                  Log history
+                  {copy.history.title}
                 </h2>
                 <p className="text-sm text-[color:var(--muted-foreground)]">
-                  {items.length} event(s)
+                  {items.length} {copy.history.countSuffix}
                 </p>
               </div>
 
@@ -311,12 +408,12 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 <Table>
                   <TableHeader className="sticky top-0 z-10 bg-[color:var(--background)]">
                     <TableRow>
-                      <TableHead>Timestamp</TableHead>
-                      <TableHead>Host</TableHead>
-                      <TableHead>Agent</TableHead>
-                      <TableHead>Service</TableHead>
-                      <TableHead>Severity</TableHead>
-                      <TableHead>Message</TableHead>
+                      <TableHead>{copy.history.columns.timestamp}</TableHead>
+                      <TableHead>{copy.history.columns.host}</TableHead>
+                      <TableHead>{copy.history.columns.agent}</TableHead>
+                      <TableHead>{copy.history.columns.service}</TableHead>
+                      <TableHead>{copy.history.columns.severity}</TableHead>
+                      <TableHead>{copy.history.columns.message}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -325,8 +422,8 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
                         <TableCell colSpan={6}>
                           <EmptyState
                             variant="flush"
-                            title="No matching logs"
-                            description="Adjust the filters or ingest new events."
+                            title={copy.history.emptyTitle}
+                            description={copy.history.emptyDescription}
                           />
                         </TableCell>
                       </TableRow>
@@ -334,7 +431,7 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
                       items.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell className="whitespace-nowrap text-xs text-[color:var(--muted-foreground)]">
-                            {item.timestamp}
+                            {formatDateTime(item.timestamp, locale)}
                           </TableCell>
                           <TableCell className="whitespace-nowrap font-medium">
                             {item.host}
@@ -346,7 +443,7 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
                             {item.service}
                           </TableCell>
                           <TableCell>
-                            <SeverityBadge severity={item.severity} />
+                            <SeverityBadge locale={locale} severity={item.severity} />
                           </TableCell>
                           <TableCell className="max-w-[460px]">
                             <div className="line-clamp-2 text-sm text-[color:var(--foreground)]">
@@ -365,14 +462,14 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
           <Card>
             <div className="space-y-3">
               <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                Anomaly markers
+                {copy.anomalies.title}
               </h2>
 
               {anomalies.length === 0 ? (
                 <EmptyState
                   variant="flush"
-                  title="No anomaly markers"
-                  description="Triggered log-origin anomalies matching the current filters will appear here."
+                  title={copy.anomalies.emptyTitle}
+                  description={copy.anomalies.emptyDescription}
                 />
               ) : (
                 anomalies.map((item) => (
@@ -390,13 +487,14 @@ export function LogsPage({ embedded = false }: { embedded?: boolean } = {}) {
                         </p>
                       </div>
 
-                      <SeverityBadge severity={item.severity} />
+                      <SeverityBadge locale={locale} severity={item.severity} />
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <StatusBadge status={item.status} />
+                      <StatusBadge locale={locale} status={item.status} />
                       <span className="text-xs uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-                        triggered at {item.triggered_at}
+                        {copy.anomalies.triggeredAt}{" "}
+                        {formatDateTime(item.triggered_at, locale)}
                       </span>
                     </div>
                   </div>

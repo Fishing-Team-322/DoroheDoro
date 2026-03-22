@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useI18n } from "@/src/shared/lib/i18n";
+import { translateValueLabel, useI18n } from "@/src/shared/lib/i18n";
 import {
   getDashboardOverview,
   listAgents,
@@ -14,11 +14,115 @@ import {
   type DeploymentJobItem,
   type LogAnomalyItem,
 } from "@/src/shared/lib/runtime-api";
+import { formatDateTime } from "@/src/features/operations/ui/operations-ui";
 import { Badge, Card, EmptyState } from "@/src/shared/ui";
 import {
   ErrorCard,
   LoadingCard,
 } from "@/src/page-modules/common/ui/runtime-state";
+
+const copyByLocale = {
+  en: {
+    loadError: "Failed to load overview",
+    pageTitle: "Overview workspace",
+    loading: "Loading overview...",
+    metrics: {
+      openAlerts: { label: "Open alerts", hint: "Security pressure right now" },
+      anomalies: {
+        label: "Recent anomalies",
+        hint: "Latest correlated detections",
+      },
+      deployments: { label: "Deployments", hint: "Known rollout jobs" },
+      agentHealth: { label: "Agent health", hint: "Healthy coverage" },
+      ingestedEvents: { label: "Ingested events", hintPrefix: "Active hosts:" },
+    },
+    criticalAlerts: {
+      title: "Critical alerts",
+      description:
+        "Open high-severity signals that usually need the fastest response.",
+      emptyTitle: "No critical alerts",
+      emptyDescription:
+        "High-severity open alerts are not currently piling up.",
+    },
+    sections: {
+      anomalies: {
+        title: "Anomalies summary",
+        description: "Recent anomaly instances and their current state.",
+        emptyTitle: "No anomalies",
+        emptyDescription: "No recent anomaly instances were returned.",
+      },
+      deployments: {
+        title: "Deployments summary",
+        description: "Latest rollout jobs and their current phases.",
+        emptyTitle: "No deployments",
+        emptyDescription: "No deployment jobs were returned.",
+        phaseFallback: "phase:n/a",
+        descriptionPrefix: "Targets",
+        descriptionSeparator: "Executor",
+      },
+      agents: {
+        title: "Agent health",
+        description:
+          "Degraded or stale agents that may reduce visibility.",
+        emptyTitle: "Agent fleet looks healthy",
+        emptyDescription:
+          "No degraded agents were detected in the latest registry snapshot.",
+        versionFallback: "unknown",
+        lastSeenPrefix: "Last seen",
+      },
+    },
+  },
+  ru: {
+    loadError: "Не удалось загрузить обзор",
+    pageTitle: "обзор",
+    loading: "Загрузка обзора...",
+    metrics: {
+      openAlerts: { label: "Открытые алерты", hint: "Текущее давление по безопасности" },
+      anomalies: {
+        label: "Недавние аномалии",
+        hint: "Последние коррелированные детекты",
+      },
+      deployments: { label: "Раскатки", hint: "Известные задачи выката" },
+      agentHealth: { label: "Состояние агентов", hint: "Покрытие healthy-агентами" },
+      ingestedEvents: { label: "Ингестированные события", hintPrefix: "Активные хосты:" },
+    },
+    criticalAlerts: {
+      title: "Критичные алерты",
+      description:
+        "Открытые high-severity сигналы, которым обычно нужен самый быстрый ответ.",
+      emptyTitle: "Нет критичных алертов",
+      emptyDescription:
+        "Открытые high-severity алерты сейчас не накапливаются.",
+    },
+    sections: {
+      anomalies: {
+        title: "Сводка по аномалиям",
+        description: "Недавние аномалии и их текущее состояние.",
+        emptyTitle: "Нет аномалий",
+        emptyDescription: "Недавние аномалии не были возвращены.",
+      },
+      deployments: {
+        title: "Сводка по раскаткам",
+        description: "Последние rollout-задачи и их текущие фазы.",
+        emptyTitle: "Нет раскаток",
+        emptyDescription: "Задачи deployment не были возвращены.",
+        phaseFallback: "фаза:н/д",
+        descriptionPrefix: "Таргеты",
+        descriptionSeparator: "Исполнитель",
+      },
+      agents: {
+        title: "Состояние агентов",
+        description:
+          "Деградированные или давно не выходившие на связь агенты, которые могут снижать видимость.",
+        emptyTitle: "Флот агентов выглядит здоровым",
+        emptyDescription:
+          "В последнем снимке реестра не найдено деградированных агентов.",
+        versionFallback: "неизвестно",
+        lastSeenPrefix: "Последний сигнал",
+      },
+    },
+  },
+} as const;
 
 type OverviewState = {
   dashboard: DashboardOverviewResponse;
@@ -65,7 +169,8 @@ function toBadgeVariant(value?: string) {
 }
 
 export function OverviewPage() {
-  useI18n();
+  const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const [data, setData] = useState<OverviewState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -106,7 +211,7 @@ export function OverviewPage() {
           setError(
             loadError instanceof Error
               ? loadError.message
-              : "Failed to load overview"
+              : copy.loadError
           );
         }
       } finally {
@@ -121,7 +226,7 @@ export function OverviewPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [copy.loadError]);
 
   const openAlerts =
     data?.alerts.filter((item) => isOpenAlertStatus(item.status)) ?? [];
@@ -143,60 +248,59 @@ export function OverviewPage() {
       <Card className="overflow-hidden">
         <div className="space-y-6">
           <div className="border-b border-[color:var(--border)] pb-6">
-            <h2 className="text-5xl font-semibold text-[color:var(--foreground)]">
-              overview workspace
-            </h2>
-          </div>
+              <h2 className="text-5xl font-semibold text-[color:var(--foreground)]">
+                {copy.pageTitle}
+              </h2>
+            </div>
 
-          {loading ? <LoadingCard label="Loading overview..." /> : null}
+          {loading ? <LoadingCard label={copy.loading} /> : null}
           {!loading && error ? <ErrorCard message={error} /> : null}
 
           {!loading && !error && data ? (
             <>
               <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <OverviewMetricCard
-                  label="Open alerts"
+                  label={copy.metrics.openAlerts.label}
                   value={String(openAlerts.length)}
-                  hint="Security pressure right now"
+                  hint={copy.metrics.openAlerts.hint}
                 />
                 <OverviewMetricCard
-                  label="Recent anomalies"
+                  label={copy.metrics.anomalies.label}
                   value={String(data.anomalies.length)}
-                  hint="Latest correlated detections"
+                  hint={copy.metrics.anomalies.hint}
                 />
                 <OverviewMetricCard
-                  label="Deployments"
+                  label={copy.metrics.deployments.label}
                   value={String(data.deployments.length)}
-                  hint="Known rollout jobs"
+                  hint={copy.metrics.deployments.hint}
                 />
                 <OverviewMetricCard
-                  label="Agent health"
+                  label={copy.metrics.agentHealth.label}
                   value={`${healthyAgents.length}/${data.agents.length}`}
-                  hint="Healthy coverage"
+                  hint={copy.metrics.agentHealth.hint}
                 />
                 <OverviewMetricCard
-                  label="Ingested events"
+                  label={copy.metrics.ingestedEvents.label}
                   value={String(data.dashboard.ingested_events)}
-                  hint={`Active hosts: ${data.dashboard.active_hosts}`}
+                  hint={`${copy.metrics.ingestedEvents.hintPrefix} ${data.dashboard.active_hosts}`}
                 />
               </section>
 
               <section className="space-y-4 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
                 <div className="space-y-1">
                   <h2 className="text-xl font-semibold text-[color:var(--foreground)]">
-                    Critical alerts
+                    {copy.criticalAlerts.title}
                   </h2>
                   <p className="text-base text-[color:var(--muted-foreground)]">
-                    Open high-severity signals that usually need the fastest
-                    response.
+                    {copy.criticalAlerts.description}
                   </p>
                 </div>
 
                 {criticalAlerts.length === 0 ? (
                   <EmptyState
                     variant="flush"
-                    title="No critical alerts"
-                    description="High-severity open alerts are not currently piling up."
+                    title={copy.criticalAlerts.emptyTitle}
+                    description={copy.criticalAlerts.emptyDescription}
                   />
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -207,9 +311,9 @@ export function OverviewPage() {
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={toBadgeVariant(alert.severity)}>
-                            {alert.severity}
+                            {translateValueLabel(alert.severity, locale)}
                           </Badge>
-                          <Badge>{alert.status}</Badge>
+                          <Badge>{translateValueLabel(alert.status, locale)}</Badge>
                         </div>
 
                         <p className="mt-3 text-base font-semibold text-[color:var(--foreground)]">
@@ -218,7 +322,7 @@ export function OverviewPage() {
 
                         <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
                           {alert.host || "n/a"} / {alert.service || "n/a"} /{" "}
-                          {alert.triggered_at}
+                          {formatDateTime(alert.triggered_at, locale)}
                         </p>
                       </div>
                     ))}
@@ -228,10 +332,10 @@ export function OverviewPage() {
 
               <section className="grid gap-4 xl:grid-cols-3">
                 <SummaryPanel
-                  title="Anomalies summary"
-                  description="Recent anomaly instances and their current state."
-                  emptyTitle="No anomalies"
-                  emptyDescription="No recent anomaly instances were returned."
+                  title={copy.sections.anomalies.title}
+                  description={copy.sections.anomalies.description}
+                  emptyTitle={copy.sections.anomalies.emptyTitle}
+                  emptyDescription={copy.sections.anomalies.emptyDescription}
                 >
                   {data.anomalies.length === 0 ? null : (
                     <div className="space-y-3">
@@ -240,10 +344,10 @@ export function OverviewPage() {
                           key={item.alert_instance_id}
                           badges={[
                             {
-                              label: item.severity,
+                              label: translateValueLabel(item.severity, locale),
                               variant: toBadgeVariant(item.severity),
                             },
-                            { label: item.status },
+                            { label: translateValueLabel(item.status, locale) },
                           ]}
                           title={item.title}
                           description={`${item.host} / ${item.service}`}
@@ -254,10 +358,10 @@ export function OverviewPage() {
                 </SummaryPanel>
 
                 <SummaryPanel
-                  title="Deployments summary"
-                  description="Latest rollout jobs and their current phases."
-                  emptyTitle="No deployments"
-                  emptyDescription="No deployment jobs were returned."
+                  title={copy.sections.deployments.title}
+                  description={copy.sections.deployments.description}
+                  emptyTitle={copy.sections.deployments.emptyTitle}
+                  emptyDescription={copy.sections.deployments.emptyDescription}
                 >
                   {data.deployments.length === 0 ? null : (
                     <div className="space-y-3">
@@ -266,13 +370,16 @@ export function OverviewPage() {
                           key={job.job_id}
                           badges={[
                             {
-                              label: job.status,
+                              label: translateValueLabel(job.status, locale),
                               variant: toBadgeVariant(job.status),
                             },
-                            { label: job.current_phase || "phase:n/a" },
+                            {
+                              label:
+                                job.current_phase || copy.sections.deployments.phaseFallback,
+                            },
                           ]}
                           title={job.job_type}
-                          description={`Targets: ${job.total_targets} / Executor: ${job.executor_kind}`}
+                          description={`${copy.sections.deployments.descriptionPrefix}: ${job.total_targets} / ${copy.sections.deployments.descriptionSeparator}: ${job.executor_kind}`}
                         />
                       ))}
                     </div>
@@ -280,10 +387,10 @@ export function OverviewPage() {
                 </SummaryPanel>
 
                 <SummaryPanel
-                  title="Agent health"
-                  description="Degraded or stale agents that may reduce visibility."
-                  emptyTitle="Agent fleet looks healthy"
-                  emptyDescription="No degraded agents were detected in the latest registry snapshot."
+                  title={copy.sections.agents.title}
+                  description={copy.sections.agents.description}
+                  emptyTitle={copy.sections.agents.emptyTitle}
+                  emptyDescription={copy.sections.agents.emptyDescription}
                 >
                   {degradedAgents.length === 0 ? null : (
                     <div className="space-y-3">
@@ -292,13 +399,19 @@ export function OverviewPage() {
                           key={agent.agent_id}
                           badges={[
                             {
-                              label: agent.status,
+                              label: translateValueLabel(agent.status, locale),
                               variant: toBadgeVariant(agent.status),
                             },
-                            { label: agent.version || "unknown" },
+                            {
+                              label:
+                                agent.version || copy.sections.agents.versionFallback,
+                            },
                           ]}
                           title={agent.hostname}
-                          description={`Last seen ${agent.last_seen_at}`}
+                          description={`${copy.sections.agents.lastSeenPrefix} ${formatDateTime(
+                            agent.last_seen_at,
+                            locale
+                          )}`}
                         />
                       ))}
                     </div>

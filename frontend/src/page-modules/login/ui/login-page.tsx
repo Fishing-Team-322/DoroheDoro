@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { FormEvent } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { locales, type Locale } from "@/src/shared/config";
+import { type Locale } from "@/src/shared/config";
 import {
   getDefaultAuthenticatedPath,
   normalizeRedirectPath,
 } from "@/src/shared/lib/auth";
+import { cn } from "@/src/shared/lib/cn";
 import { replacePathLocale, useI18n } from "@/src/shared/lib/i18n";
-import { Button, Input, Select, Spinner } from "@/src/shared/ui";
+import { Button, Input, Spinner } from "@/src/shared/ui";
 import { useAuth } from "@/src/features/auth";
 
 type LoginPageProps = {
@@ -47,6 +49,13 @@ const stepVariants = {
   },
 };
 
+const BUTTON_SIZE = 36;
+const TRACK_GAP = 2;
+const TRACK_PADDING = 4;
+const TRACK_HEIGHT = BUTTON_SIZE + TRACK_PADDING * 2;
+const TRACK_WIDTH = BUTTON_SIZE * 2 + TRACK_GAP + TRACK_PADDING * 2;
+const FLAG_SIZE = 20;
+
 export function LoginPage({ locale }: LoginPageProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -63,13 +72,14 @@ export function LoginPage({ locale }: LoginPageProps) {
   const [identifierReadonly, setIdentifierReadonly] = useState(true);
   const [passwordReadonly, setPasswordReadonly] = useState(true);
 
+  const [isLocalePending, startLocaleTransition] = useTransition();
+
   const redirectTo = useMemo(
     () =>
       normalizeRedirectPath(searchParams.get("next"), locale) ??
-      getDefaultAuthenticatedPath(locale),
+      `/${locale}/overview`,
     [searchParams, locale]
   );
-
   useEffect(() => {
     if (status === "authenticated") {
       router.replace(redirectTo);
@@ -134,11 +144,6 @@ export function LoginPage({ locale }: LoginPageProps) {
   const isIdentifierEmpty = !identifier.trim();
   const isPasswordEmpty = !password.trim();
 
-  const localeOptions = locales.map((option) => ({
-    value: option,
-    label: dictionary.auth.login.localeOptions[option],
-  }));
-
   const handleLocaleChange = (nextLocale: Locale) => {
     if (nextLocale === locale) {
       return;
@@ -156,7 +161,9 @@ export function LoginPage({ locale }: LoginPageProps) {
     const nextPath = replacePathLocale(pathname, nextLocale);
     const query = params.toString();
 
-    router.replace(query ? `${nextPath}?${query}` : nextPath);
+    startLocaleTransition(() => {
+      router.replace(query ? `${nextPath}?${query}` : nextPath);
+    });
   };
 
   return (
@@ -358,22 +365,130 @@ export function LoginPage({ locale }: LoginPageProps) {
             </p>
 
             <div className="mt-4 flex justify-center">
-              <div className="w-[132px] shrink-0">
-                <Select
-                  id="login-locale"
-                  value={locale}
-                  onChange={(event) =>
-                    handleLocaleChange(event.target.value as Locale)
-                  }
-                  options={localeOptions}
-                  selectSize="sm"
-                  aria-label={dictionary.auth.login.localeLabel}
-                />
-              </div>
+              <LoginLanguageSwitch
+                locale={locale}
+                disabled={isLocalePending}
+                onChange={handleLocaleChange}
+                ariaLabel={dictionary.auth.login.localeLabel}
+                russianAlt="Русский"
+                englishAlt="English"
+              />
             </div>
           </div>
         </motion.div>
       </div>
     </main>
+  );
+}
+
+type LoginLanguageSwitchProps = {
+  locale: Locale;
+  disabled?: boolean;
+  onChange: (locale: Locale) => void;
+  ariaLabel: string;
+  russianAlt: string;
+  englishAlt: string;
+};
+
+function LoginLanguageSwitch({
+  locale,
+  disabled,
+  onChange,
+  ariaLabel,
+  russianAlt,
+  englishAlt,
+}: LoginLanguageSwitchProps) {
+  const normalizedLocale = String(locale).toLowerCase();
+  const value = normalizedLocale === "en" ? "en" : "ru";
+  const activeIndex = value === "ru" ? 0 : 1;
+
+  return (
+    <div
+      role="tablist"
+      aria-label={ariaLabel}
+      className={cn(
+        "relative inline-flex items-center rounded-[16px] border border-white/8 bg-[rgba(255,255,255,0.04)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+        disabled && "pointer-events-none opacity-60"
+      )}
+      style={{
+        width: `${TRACK_WIDTH}px`,
+        height: `${TRACK_HEIGHT}px`,
+        padding: `${TRACK_PADDING}px`,
+        gap: `${TRACK_GAP}px`,
+      }}
+    >
+      <div
+        aria-hidden="true"
+        className="absolute top-1/2 rounded-[12px] border border-white/10 bg-[rgba(255,255,255,0.14)] shadow-[0_6px_18px_rgba(0,0,0,0.24)] transition-transform duration-250 ease-[cubic-bezier(0.22,1,0.36,1)]"
+        style={{
+          width: `${BUTTON_SIZE}px`,
+          height: `${BUTTON_SIZE}px`,
+          left: `${TRACK_PADDING}px`,
+          transform: `translate(${activeIndex * (BUTTON_SIZE + TRACK_GAP)}px, -50%)`,
+        }}
+      />
+
+      <LanguageFlagButton
+        active={value === "ru"}
+        disabled={disabled}
+        imageSrc="/img/ru.png"
+        imageAlt={russianAlt}
+        onClick={() => onChange("ru" as Locale)}
+      />
+
+      <LanguageFlagButton
+        active={value === "en"}
+        disabled={disabled}
+        imageSrc="/img/en.png"
+        imageAlt={englishAlt}
+        onClick={() => onChange("en" as Locale)}
+      />
+    </div>
+  );
+}
+
+type LanguageFlagButtonProps = {
+  active: boolean;
+  disabled?: boolean;
+  imageSrc: string;
+  imageAlt: string;
+  onClick: () => void;
+};
+
+function LanguageFlagButton({
+  active,
+  disabled,
+  imageSrc,
+  imageAlt,
+  onClick,
+}: LanguageFlagButtonProps) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "relative z-[1] inline-flex shrink-0 items-center justify-center rounded-[12px] transition-all duration-200",
+        active ? "opacity-100" : "opacity-55 hover:opacity-85"
+      )}
+      style={{
+        width: `${BUTTON_SIZE}px`,
+        height: `${BUTTON_SIZE}px`,
+      }}
+    >
+      <Image
+        src={imageSrc}
+        alt={imageAlt}
+        width={FLAG_SIZE}
+        height={FLAG_SIZE}
+        className="rounded-full object-cover"
+        style={{
+          width: `${FLAG_SIZE}px`,
+          height: `${FLAG_SIZE}px`,
+        }}
+      />
+    </button>
   );
 }

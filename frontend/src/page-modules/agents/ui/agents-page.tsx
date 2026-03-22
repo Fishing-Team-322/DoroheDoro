@@ -20,7 +20,11 @@ import {
   formatNumber,
   formatParamsSummary,
 } from "@/src/features/operations/ui/operations-ui";
-import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
+import {
+  translateValueLabel,
+  useI18n,
+  withLocalePath,
+} from "@/src/shared/lib/i18n";
 import {
   canCancelDeployment,
   canRetryDeployment,
@@ -51,8 +55,408 @@ import {
 import { PageHeader } from "@/src/widgets/dashboard-layout";
 import { AgentEnrollmentDialog } from "./agent-enrollment-dialog";
 
+const copyByLocale = {
+  en: {
+    common: {
+      na: "n/a",
+      loading: "...",
+    },
+    header: {
+      title: "Agents",
+      description:
+        "Operator-facing agent workspace wired only to confirmed public Edge API endpoints. Policy selection and deployments work today; registry, diagnostics, and enrollment still await Edge bridges.",
+    },
+    toasts: {
+      planLoadedTitle: "Plan preview loaded",
+      planLoadedDescription:
+        "The deployment plan preview was returned by the public Edge API.",
+      deploymentCreatedTitle: "Deployment created",
+      deploymentCreatedDescription: (jobId: string) =>
+        `Job ${jobId} was accepted by the public Edge API.`,
+      retryRequestedTitle: "Retry requested",
+      retryRequestedDescription: (deploymentId: string) =>
+        `Deployment ${deploymentId} was sent to the retry endpoint.`,
+      cancelRequestedTitle: "Cancellation requested",
+      cancelRequestedDescription: (deploymentId: string) =>
+        `Deployment ${deploymentId} was sent to the cancel endpoint.`,
+    },
+    notice: {
+      title: "Public Edge API scope",
+      description:
+        "This workspace uses only confirmed HTTP endpoints for policies and deployments. Agent registry, diagnostics, and bootstrap token issuance remain disabled until the missing public Edge bridges are exposed.",
+    },
+    metrics: {
+      policies: {
+        label: "Policies",
+        hint: "Public `GET /api/v1/policies`",
+      },
+      activePolicies: {
+        label: "Active policies",
+        hint: "Policies marked active by Edge",
+      },
+      inflightJobs: {
+        label: "Jobs in flight",
+        hint: "Accepted, queued, or running",
+      },
+      retryableJobs: {
+        label: "Retryable jobs",
+        hint: "Failed, partial success, or cancelled",
+      },
+    },
+    registry: {
+      title: "Agent Registry",
+      description:
+        "The current public Edge API does not expose `/api/v1/agents` or diagnostics endpoints to WEB, so this table stays honest instead of mirroring internal gRPC or NATS state.",
+      createAgent: "Create Agent",
+      columns: {
+        host: "Host",
+        status: "Status",
+        policy: "Policy",
+        lastSeen: "Last seen",
+      },
+      emptyTitle: "Agent registry bridge is not available yet",
+      emptyDescription:
+        "Use the policy and deployment controls below today. Real agent list and diagnostics can be connected once Edge exposes public HTTP endpoints for them.",
+    },
+    enrollment: {
+      title: "Enrollment Bridge",
+      description:
+        "Frontend structure is ready for future enrollment work, but bootstrap issuance remains disabled until Edge exposes the missing bridge.",
+      registryApi: "Registry API",
+      diagnosticsApi: "Diagn. API",
+      missingBridge: "Missing bridge",
+      issueBootstrapToken: "Issue Bootstrap Token",
+      openInventory: "Open Inventory",
+    },
+    policies: {
+      title: "Policies",
+      description:
+        "Confirmed public sources: `GET /api/v1/policies` and `GET /api/v1/policies/{id}`.",
+      loading: "Loading policies...",
+      columns: {
+        name: "Name",
+        status: "Status",
+        revision: "Revision",
+        updated: "Updated",
+      },
+      emptyTitle: "No policies were returned",
+      emptyDescription:
+        "Create policies through WEB or the public API before building deployments from this workspace.",
+    },
+    builder: {
+      title: "Deployment Builder",
+      description:
+        "Preview and create deployments using only confirmed HTTP fields: `policy_id`, optional `agent_ids`, and optional `params`.",
+      previewPlan: "Preview Plan",
+      createDeployment: "Create Deployment",
+      loadingSelectedPolicy: "Loading selected policy...",
+      policyDetailsFailed: "Policy details request failed",
+      noPolicySelectedTitle: "No policy selected",
+      noPolicySelectedDescription:
+        "Pick a policy from the table to preview or create deployments.",
+      fields: {
+        policy: "Policy",
+        policyId: "Policy ID",
+        status: "Status",
+        revision: "Revision",
+        updated: "Updated",
+        description: "Description",
+        executor: "Executor",
+        targets: "Targets",
+        bootstrapPreviews: "Bootstrap previews",
+        warnings: "Warnings",
+      },
+      policyJsonEmpty:
+        "The selected policy response does not include a materialized JSON body.",
+      agentIdsLabel: "Explicit agent IDs (optional)",
+      agentIdsHelp:
+        "Paste agent IDs only if you already know them. There is no public agent registry endpoint to populate this field automatically yet.",
+      paramsLabel: "Params JSON (optional)",
+      paramsHelp:
+        "Provide a flat JSON object. Values are serialized to strings to match the currently confirmed public HTTP shape.",
+      planPreviewTitle: "Plan preview",
+      planPreviewDescription:
+        "The preview stays empty until the public `POST /api/v1/deployments/plan` endpoint is called.",
+      loadingPlan: "Loading plan preview...",
+      previewTargets: "Preview targets",
+      unnamedTarget: "Unnamed target",
+      ipUnavailable: "IP unavailable",
+      viaUser: (user: string) => ` via ${user}`,
+      noPlanTitle: "No plan preview yet",
+      noPlanDescription:
+        "Select a policy and run Preview Plan to inspect the deployment result available from the public Edge API.",
+    },
+    jobs: {
+      title: "Deployment Jobs",
+      description:
+        "Confirmed public sources: `GET /api/v1/deployments`, `POST /api/v1/deployments/{id}/retry`, and `POST /api/v1/deployments/{id}/cancel`.",
+      loading: "Loading deployment jobs...",
+      columns: {
+        job: "Job",
+        status: "Status",
+        policy: "Policy",
+        targets: "Targets",
+        updated: "Updated",
+      },
+      emptyTitle: "No deployment jobs were returned",
+      emptyDescription:
+        "Create a deployment from the builder above or through WEB to populate this list.",
+    },
+    jobDetails: {
+      title: "Job Details",
+      description: "Confirmed public source: `GET /api/v1/deployments/{id}`.",
+      retry: "Retry",
+      cancel: "Cancel",
+      openFullDetails: "Open Full Details",
+      noJobSelectedTitle: "No job selected",
+      noJobSelectedDescription:
+        "Choose a deployment job from the table to inspect its public details.",
+      loading: "Loading deployment details...",
+      fields: {
+        deploymentId: "Deployment ID",
+        status: "Status",
+        policyId: "Policy ID",
+        jobType: "Job type",
+        currentPhase: "Current phase",
+        updated: "Updated",
+        attempts: "Attempts",
+        targets: "Targets",
+        params: "Params",
+      },
+      attemptsTitle: "Attempts",
+      noAttemptsTitle: "No attempts were returned",
+      noAttemptsDescription:
+        "Attempts will appear after the deployment enters execution.",
+      attemptLabel: (attemptNo: string) => `Attempt ${attemptNo}`,
+      attemptMeta: (triggeredBy: string, createdAt: string) =>
+        `Triggered by ${triggeredBy} at ${createdAt}`,
+      targetsTitle: "Targets",
+      noTargetsTitle: "No targets were returned",
+      noTargetsDescription:
+        "Targets will appear once the deployment has been planned or started.",
+      latestStepPayloadTitle: "Latest step payload",
+      latestStepUpdated: (updatedAt: string) => `Updated ${updatedAt}`,
+      noStepsTitle: "No steps were returned",
+      noStepsDescription:
+        "Step payloads will appear once the job starts executing.",
+    },
+    validation: {
+      policyRequired:
+        "Select a policy before previewing or creating a deployment.",
+      paramsMustBeObject: "Params must be a JSON object.",
+      paramsMustBeJson: "Params must be valid JSON.",
+      createFailed: "Failed to create deployment.",
+    },
+  },
+  ru: {
+    common: {
+      na: "н/д",
+      loading: "...",
+    },
+    header: {
+      title: "Агенты",
+      description:
+        "Операторское рабочее пространство агентов, подключенное только к подтвержденным публичным endpoint'ам Edge API. Выбор политик и раскатки уже работают, а реестр, диагностика и enrollment пока ждут мосты со стороны Edge.",
+    },
+    toasts: {
+      planLoadedTitle: "Предпросмотр плана загружен",
+      planLoadedDescription:
+        "Публичный Edge API вернул предпросмотр плана раскатки.",
+      deploymentCreatedTitle: "Раскатка создана",
+      deploymentCreatedDescription: (jobId: string) =>
+        `Задача ${jobId} была принята публичным Edge API.`,
+      retryRequestedTitle: "Повтор запрошен",
+      retryRequestedDescription: (deploymentId: string) =>
+        `Раскатка ${deploymentId} была отправлена на endpoint повтора.`,
+      cancelRequestedTitle: "Отмена запрошена",
+      cancelRequestedDescription: (deploymentId: string) =>
+        `Раскатка ${deploymentId} была отправлена на endpoint отмены.`,
+    },
+    notice: {
+      title: "Покрытие публичного Edge API",
+      description:
+        "Это рабочее пространство использует только подтвержденные HTTP endpoint'ы для политик и раскаток. Реестр агентов, диагностика и выдача bootstrap-токенов остаются отключенными, пока не появятся недостающие публичные мосты Edge.",
+    },
+    metrics: {
+      policies: {
+        label: "Политики",
+        hint: "Публичный `GET /api/v1/policies`",
+      },
+      activePolicies: {
+        label: "Активные политики",
+        hint: "Политики, помеченные Edge как активные",
+      },
+      inflightJobs: {
+        label: "Задачи в работе",
+        hint: "Принятые, в очереди или выполняющиеся",
+      },
+      retryableJobs: {
+        label: "Задачи для повтора",
+        hint: "Ошибка, частичный успех или отмена",
+      },
+    },
+    registry: {
+      title: "Реестр агентов",
+      description:
+        "Текущий публичный Edge API не отдает `/api/v1/agents` и endpoint'ы диагностики в WEB, поэтому эта таблица честно остается пустой и не притворяется зеркалом внутреннего gRPC или NATS-состояния.",
+      createAgent: "Создать агента",
+      columns: {
+        host: "Хост",
+        status: "Статус",
+        policy: "Политика",
+        lastSeen: "Последняя активность",
+      },
+      emptyTitle: "Мост к реестру агентов пока недоступен",
+      emptyDescription:
+        "Пока можно использовать блоки политик и раскаток ниже. Реальный список агентов и диагностика появятся, когда Edge откроет для них публичные HTTP endpoint'ы.",
+    },
+    enrollment: {
+      title: "Мост enrollment",
+      description:
+        "Структура фронтенда уже готова к будущему enrollment-сценарию, но выдача bootstrap пока отключена, пока Edge не откроет недостающий мост.",
+      registryApi: "API реестра",
+      diagnosticsApi: "API диагностик",
+      missingBridge: "Недостающий мост",
+      issueBootstrapToken: "Выдать bootstrap-токен",
+      openInventory: "Открыть inventory",
+    },
+    policies: {
+      title: "Политики",
+      description:
+        "Подтвержденные публичные источники: `GET /api/v1/policies` и `GET /api/v1/policies/{id}`.",
+      loading: "Загружаем политики...",
+      columns: {
+        name: "Название",
+        status: "Статус",
+        revision: "Ревизия",
+        updated: "Обновлено",
+      },
+      emptyTitle: "Политики не были возвращены",
+      emptyDescription:
+        "Создайте политики через WEB или публичный API, прежде чем собирать раскатки из этого рабочего пространства.",
+    },
+    builder: {
+      title: "Конструктор раскаток",
+      description:
+        "Предпросмотр и создание раскаток только по подтвержденным HTTP-полям: `policy_id`, опциональным `agent_ids` и опциональным `params`.",
+      previewPlan: "Предпросмотр плана",
+      createDeployment: "Создать раскатку",
+      loadingSelectedPolicy: "Загружаем выбранную политику...",
+      policyDetailsFailed: "Не удалось загрузить детали политики",
+      noPolicySelectedTitle: "Политика не выбрана",
+      noPolicySelectedDescription:
+        "Выберите политику в таблице, чтобы посмотреть предпросмотр или создать раскатку.",
+      fields: {
+        policy: "Политика",
+        policyId: "ID политики",
+        status: "Статус",
+        revision: "Ревизия",
+        updated: "Обновлено",
+        description: "Описание",
+        executor: "Исполнитель",
+        targets: "Цели",
+        bootstrapPreviews: "Bootstrap-превью",
+        warnings: "Предупреждения",
+      },
+      policyJsonEmpty:
+        "Ответ по выбранной политике не содержит materialized JSON body.",
+      agentIdsLabel: "Явные ID агентов (опционально)",
+      agentIdsHelp:
+        "Вставляйте ID агентов, только если уже знаете их заранее. Публичного endpoint'а реестра агентов, чтобы заполнить это поле автоматически, пока нет.",
+      paramsLabel: "Params JSON (опционально)",
+      paramsHelp:
+        "Передайте плоский JSON-объект. Значения будут сериализованы в строки, чтобы соответствовать текущей подтвержденной публичной HTTP-схеме.",
+      planPreviewTitle: "Предпросмотр плана",
+      planPreviewDescription:
+        "Этот блок остается пустым, пока не будет вызван публичный endpoint `POST /api/v1/deployments/plan`.",
+      loadingPlan: "Загружаем предпросмотр плана...",
+      previewTargets: "Цели предпросмотра",
+      unnamedTarget: "Цель без имени",
+      ipUnavailable: "IP недоступен",
+      viaUser: (user: string) => ` через ${user}`,
+      noPlanTitle: "Предпросмотра плана пока нет",
+      noPlanDescription:
+        "Выберите политику и запустите предпросмотр плана, чтобы изучить результат раскатки из публичного Edge API.",
+    },
+    jobs: {
+      title: "Задачи раскаток",
+      description:
+        "Подтвержденные публичные источники: `GET /api/v1/deployments`, `POST /api/v1/deployments/{id}/retry` и `POST /api/v1/deployments/{id}/cancel`.",
+      loading: "Загружаем задачи раскаток...",
+      columns: {
+        job: "Задача",
+        status: "Статус",
+        policy: "Политика",
+        targets: "Цели",
+        updated: "Обновлено",
+      },
+      emptyTitle: "Задачи раскаток не были возвращены",
+      emptyDescription:
+        "Создайте раскатку в конструкторе выше или через WEB, чтобы заполнить этот список.",
+    },
+    jobDetails: {
+      title: "Детали задачи",
+      description:
+        "Подтвержденный публичный источник: `GET /api/v1/deployments/{id}`.",
+      retry: "Повторить",
+      cancel: "Отменить",
+      openFullDetails: "Открыть полные детали",
+      noJobSelectedTitle: "Задача не выбрана",
+      noJobSelectedDescription:
+        "Выберите задачу раскатки в таблице, чтобы посмотреть ее публичные детали.",
+      loading: "Загружаем детали раскатки...",
+      fields: {
+        deploymentId: "ID раскатки",
+        status: "Статус",
+        policyId: "ID политики",
+        jobType: "Тип задачи",
+        currentPhase: "Текущая фаза",
+        updated: "Обновлено",
+        attempts: "Попытки",
+        targets: "Цели",
+        params: "Параметры",
+      },
+      attemptsTitle: "Попытки",
+      noAttemptsTitle: "Попытки не были возвращены",
+      noAttemptsDescription:
+        "Попытки появятся после того, как раскатка перейдет к выполнению.",
+      attemptLabel: (attemptNo: string) => `Попытка ${attemptNo}`,
+      attemptMeta: (triggeredBy: string, createdAt: string) =>
+        `Запущено пользователем ${triggeredBy} в ${createdAt}`,
+      targetsTitle: "Цели",
+      noTargetsTitle: "Цели не были возвращены",
+      noTargetsDescription:
+        "Цели появятся после того, как раскатка будет спланирована или запущена.",
+      latestStepPayloadTitle: "Payload последнего шага",
+      latestStepUpdated: (updatedAt: string) => `Обновлено ${updatedAt}`,
+      noStepsTitle: "Шаги не были возвращены",
+      noStepsDescription:
+        "Payload шагов появятся после того, как задача начнет выполняться.",
+    },
+    validation: {
+      policyRequired:
+        "Сначала выберите политику, прежде чем смотреть предпросмотр или создавать раскатку.",
+      paramsMustBeObject: "Параметры должны быть JSON-объектом.",
+      paramsMustBeJson: "Параметры должны быть валидным JSON.",
+      createFailed: "Не удалось создать раскатку.",
+    },
+  },
+} as const;
+
+function formatTranslatedValue(
+  value: string | null | undefined,
+  locale: "ru" | "en"
+) {
+  if (!value) {
+    return formatMaybeValue(value, locale);
+  }
+
+  return translateValueLabel(value, locale);
+}
+
 export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { dictionary, locale } = useI18n();
+  const copy = copyByLocale[locale];
   const { showToast } = useToast();
 
   const [createAgentDialogOpen, setCreateAgentDialogOpen] = useState(false);
@@ -162,6 +566,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
       policyId: selectedPolicyId ?? "",
       agentIdsText,
       paramsText,
+      locale,
     });
 
     if (parsedPayload.error) {
@@ -182,9 +587,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
       setPlanResult(response.data);
       setPlanMeta(response.meta);
       showToast({
-        title: "Plan preview loaded",
-        description:
-          "The deployment plan preview was returned by the public Edge API.",
+        title: copy.toasts.planLoadedTitle,
+        description: copy.toasts.planLoadedDescription,
       });
     } catch (caughtError) {
       setPlanError(caughtError);
@@ -201,6 +605,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
       policyId: selectedPolicyId ?? "",
       agentIdsText,
       paramsText,
+      locale,
     });
 
     if (parsedPayload.error) {
@@ -220,8 +625,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
       const response = await createDeployment(parsedPayload.payload);
       setSelectedDeploymentId(response.data.id);
       showToast({
-        title: "Deployment created",
-        description: `Job ${response.data.id} was accepted by the public Edge API.`,
+        title: copy.toasts.deploymentCreatedTitle,
+        description: copy.toasts.deploymentCreatedDescription(response.data.id),
         variant: "success",
       });
       await deploymentsQuery.refetch({ silent: true });
@@ -229,7 +634,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
       setFormError(
         caughtError instanceof Error
           ? caughtError.message
-          : "Failed to create deployment."
+          : copy.validation.createFailed
       );
     } finally {
       setCreateLoading(false);
@@ -248,15 +653,17 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
       if (action === "retry") {
         await retryDeployment(selectedDeployment.id);
         showToast({
-          title: "Retry requested",
-          description: `Deployment ${selectedDeployment.id} was sent to the retry endpoint.`,
+          title: copy.toasts.retryRequestedTitle,
+          description: copy.toasts.retryRequestedDescription(selectedDeployment.id),
           variant: "success",
         });
       } else {
         await cancelDeployment(selectedDeployment.id);
         showToast({
-          title: "Cancellation requested",
-          description: `Deployment ${selectedDeployment.id} was sent to the cancel endpoint.`,
+          title: copy.toasts.cancelRequestedTitle,
+          description: copy.toasts.cancelRequestedDescription(
+            selectedDeployment.id
+          ),
           variant: "success",
         });
       }
@@ -275,72 +682,76 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const content = (
     <div className="space-y-6">
       <NoticeBanner
-        title="Public Edge API scope"
-        description="This workspace uses only confirmed HTTP endpoints for policies and deployments. Agent registry, diagnostics, and bootstrap token issuance remain disabled until the missing public Edge bridges are exposed."
+        title={copy.notice.title}
+        description={copy.notice.description}
       />
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
-          label="Policies"
+          label={copy.metrics.policies.label}
           value={
             policiesQuery.data
-              ? formatNumber(policiesQuery.data.items.length)
+              ? formatNumber(policiesQuery.data.items.length, locale)
               : policiesQuery.error
-                ? "n/a"
-                : "..."
+                ? copy.common.na
+                : copy.common.loading
           }
-          hint="Public `GET /api/v1/policies`"
+          hint={copy.metrics.policies.hint}
         />
         <MetricCard
-          label="Active policies"
-          value={policiesQuery.data ? formatNumber(activePoliciesCount) : "..."}
-          hint="Policies marked active by Edge"
+          label={copy.metrics.activePolicies.label}
+          value={
+            policiesQuery.data
+              ? formatNumber(activePoliciesCount, locale)
+              : copy.common.loading
+          }
+          hint={copy.metrics.activePolicies.hint}
         />
         <MetricCard
-          label="Jobs in flight"
+          label={copy.metrics.inflightJobs.label}
           value={
             deploymentsQuery.data
-              ? formatNumber(inflightDeploymentsCount)
+              ? formatNumber(inflightDeploymentsCount, locale)
               : deploymentsQuery.error
-                ? "n/a"
-                : "..."
+                ? copy.common.na
+                : copy.common.loading
           }
-          hint="Accepted, queued, or running"
+          hint={copy.metrics.inflightJobs.hint}
         />
         <MetricCard
-          label="Retryable jobs"
+          label={copy.metrics.retryableJobs.label}
           value={
             deploymentsQuery.data
-              ? formatNumber(retryableDeploymentsCount)
+              ? formatNumber(retryableDeploymentsCount, locale)
               : deploymentsQuery.error
-                ? "n/a"
-                : "..."
+                ? copy.common.na
+                : copy.common.loading
           }
-          hint="Failed, partial success, or cancelled"
+          hint={copy.metrics.retryableJobs.hint}
         />
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
         <SectionCard
-          title="Agent Registry"
-          description="The current public Edge API does not expose `/api/v1/agents` or diagnostics endpoints to WEB, so this table stays honest instead of mirroring internal gRPC or NATS state."
+          title={copy.registry.title}
+          description={copy.registry.description}
           action={
             <Button
               size="sm"
               className="h-10 px-4"
               onClick={() => setCreateAgentDialogOpen(true)}
             >
-              Create Agent
+              {copy.registry.createAgent}
             </Button>
           }
         >
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Host</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Policy</TableHead>
-                <TableHead>Last seen</TableHead>
+                <TableHead>{copy.registry.columns.host}</TableHead>
+                <TableHead>{copy.registry.columns.status}</TableHead>
+                <TableHead>{copy.registry.columns.policy}</TableHead>
+                <TableHead>{copy.registry.columns.lastSeen}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -348,8 +759,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 <TableCell colSpan={4}>
                   <EmptyState
                     variant="flush"
-                    title="Agent registry bridge is not available yet"
-                    description="Use the policy and deployment controls below today. Real agent list and diagnostics can be connected once Edge exposes public HTTP endpoints for them."
+                    title={copy.registry.emptyTitle}
+                    description={copy.registry.emptyDescription}
                   />
                 </TableCell>
               </TableRow>
@@ -358,22 +769,22 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
         </SectionCard>
 
         <SectionCard
-          title="Enrollment Bridge"
-          description="Frontend structure is ready for future enrollment work, but bootstrap issuance remains disabled until Edge exposes the missing bridge."
+          title={copy.enrollment.title}
+          description={copy.enrollment.description}
         >
           <div className="space-y-4">
             <DetailGrid
               items={[
                 {
-                  label: "Registry API",
+                  label: copy.enrollment.registryApi,
                   value: <StatusBadge value="unavailable" />,
                 },
                 {
-                  label: "Diagn. API",
+                  label: copy.enrollment.diagnosticsApi,
                   value: <StatusBadge value="unavailable" />,
                 },
                 {
-                  label: "Missing bridge",
+                  label: copy.enrollment.missingBridge,
                   value: "agents.bootstrap-token.issue",
                 },
               ]}
@@ -386,13 +797,13 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 className="h-10 px-4"
                 disabled
               >
-                Issue Bootstrap Token
+                {copy.enrollment.issueBootstrapToken}
               </Button>
               <Link
                 href={withLocalePath(locale, "/infrastructure?tab=resources")}
               >
                 <Button variant="outline" size="sm" className="h-10 px-4">
-                  Open Inventory
+                  {copy.enrollment.openInventory}
                 </Button>
               </Link>
             </div>
@@ -402,11 +813,11 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
       <section className="space-y-6">
         <SectionCard
-          title="Policies"
-          description="Confirmed public sources: `GET /api/v1/policies` and `GET /api/v1/policies/{id}`."
+          title={copy.policies.title}
+          description={copy.policies.description}
         >
           {policiesQuery.isLoading && !policiesQuery.data ? (
-            <LoadingState label="Loading policies..." />
+            <LoadingState label={copy.policies.loading} />
           ) : policiesQuery.error && !policiesQuery.data ? (
             <ErrorState
               error={policiesQuery.error}
@@ -417,10 +828,10 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Revision</TableHead>
-                    <TableHead>Updated</TableHead>
+                    <TableHead>{copy.policies.columns.name}</TableHead>
+                    <TableHead>{copy.policies.columns.status}</TableHead>
+                    <TableHead>{copy.policies.columns.revision}</TableHead>
+                    <TableHead>{copy.policies.columns.updated}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -429,8 +840,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                       <TableCell colSpan={4}>
                         <EmptyState
                           variant="flush"
-                          title="No policies were returned"
-                          description="Create policies through WEB or the public API before building deployments from this workspace."
+                          title={copy.policies.emptyTitle}
+                          description={copy.policies.emptyDescription}
                         />
                       </TableCell>
                     </TableRow>
@@ -456,10 +867,10 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                           />
                         </TableCell>
                         <TableCell>
-                          {formatMaybeValue(policy.revision)}
+                          {formatMaybeValue(policy.revision, locale)}
                         </TableCell>
                         <TableCell>
-                          {formatDateTime(policy.updatedAt)}
+                          {formatDateTime(policy.updatedAt, locale)}
                         </TableCell>
                       </TableRow>
                     ))
@@ -472,8 +883,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
         </SectionCard>
 
         <SectionCard
-          title="Deployment Builder"
-          description="Preview and create deployments using only confirmed HTTP fields: `policy_id`, optional `agent_ids`, and optional `params`."
+          title={copy.builder.title}
+          description={copy.builder.description}
           action={
             <div className="flex flex-wrap gap-2">
               <Button
@@ -484,7 +895,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 disabled={!selectedPolicyId || createLoading}
                 onClick={() => void handlePlan()}
               >
-                Preview Plan
+                {copy.builder.previewPlan}
               </Button>
               <Button
                 size="sm"
@@ -493,7 +904,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 disabled={!selectedPolicyId || planLoading}
                 onClick={() => void handleCreate()}
               >
-                Create Deployment
+                {copy.builder.createDeployment}
               </Button>
             </div>
           }
@@ -501,10 +912,10 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="space-y-5">
             {selectedPolicyId ? (
               policyDetailsQuery.isLoading && !policyDetailsQuery.data ? (
-                <LoadingState compact label="Loading selected policy..." />
+                <LoadingState compact label={copy.builder.loadingSelectedPolicy} />
               ) : policyDetailsQuery.error && !policyDetailsQuery.data ? (
                 <ErrorState
-                  title="Policy details request failed"
+                  title={copy.builder.policyDetailsFailed}
                   error={policyDetailsQuery.error}
                   retry={() => void policyDetailsQuery.refetch()}
                 />
@@ -513,15 +924,15 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                   <DetailGrid
                     items={[
                       {
-                        label: "Policy",
+                        label: copy.builder.fields.policy,
                         value: policyDetailsQuery.data.name,
                       },
                       {
-                        label: "Policy ID",
+                        label: copy.builder.fields.policyId,
                         value: policyDetailsQuery.data.id,
                       },
                       {
-                        label: "Status",
+                        label: copy.builder.fields.status,
                         value: (
                           <StatusBadge
                             value={
@@ -533,28 +944,31 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                         ),
                       },
                       {
-                        label: "Revision",
+                        label: copy.builder.fields.revision,
                         value: formatMaybeValue(
-                          policyDetailsQuery.data.revision
+                          policyDetailsQuery.data.revision,
+                          locale
                         ),
                       },
                       {
-                        label: "Updated",
+                        label: copy.builder.fields.updated,
                         value: formatDateTime(
-                          policyDetailsQuery.data.updatedAt
+                          policyDetailsQuery.data.updatedAt,
+                          locale
                         ),
                       },
                       {
-                        label: "Description",
+                        label: copy.builder.fields.description,
                         value: formatMaybeValue(
-                          policyDetailsQuery.data.description
+                          policyDetailsQuery.data.description,
+                          locale
                         ),
                       },
                     ]}
                   />
                   <JsonPreview
                     value={policyDetailsQuery.data.body}
-                    emptyLabel="The selected policy response does not include a materialized JSON body."
+                    emptyLabel={copy.builder.policyJsonEmpty}
                   />
                   <RequestMetaLine meta={policyDetailsQuery.meta} />
                 </div>
@@ -562,15 +976,15 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
             ) : (
               <EmptyState
                 variant="flush"
-                title="No policy selected"
-                description="Pick a policy from the table to preview or create deployments."
+                title={copy.builder.noPolicySelectedTitle}
+                description={copy.builder.noPolicySelectedDescription}
               />
             )}
 
             <TextAreaField
               id="agent_ids"
-              label="Explicit agent IDs (optional)"
-              helperText="Paste agent IDs only if you already know them. There is no public agent registry endpoint to populate this field automatically yet."
+              label={copy.builder.agentIdsLabel}
+              helperText={copy.builder.agentIdsHelp}
               value={agentIdsText}
               onChange={(event) => setAgentIdsText(event.target.value)}
               placeholder={"agent-01\nagent-02"}
@@ -578,8 +992,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
             <TextAreaField
               id="params_json"
-              label="Params JSON (optional)"
-              helperText="Provide a flat JSON object. Values are serialized to strings to match the currently confirmed public HTTP shape."
+              label={copy.builder.paramsLabel}
+              helperText={copy.builder.paramsHelp}
               value={paramsText}
               onChange={(event) => setParamsText(event.target.value)}
               placeholder='{"rollout":"canary","window":"15m"}'
@@ -596,16 +1010,15 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
               <div className="space-y-4">
                 <div>
                   <p className="text-sm font-semibold text-[color:var(--foreground)]">
-                    Plan preview
+                    {copy.builder.planPreviewTitle}
                   </p>
                   <p className="mt-1 text-sm leading-6 text-[color:var(--muted-foreground)]">
-                    The preview stays empty until the public `POST
-                    /api/v1/deployments/plan` endpoint is called.
+                    {copy.builder.planPreviewDescription}
                   </p>
                 </div>
 
                 {planLoading ? (
-                  <LoadingState compact label="Loading plan preview..." />
+                  <LoadingState compact label={copy.builder.loadingPlan} />
                 ) : planError ? (
                   <ErrorState error={planError as never} />
                 ) : planResult ? (
@@ -613,30 +1026,37 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                     <DetailGrid
                       items={[
                         {
-                          label: "Policy ID",
-                          value: formatMaybeValue(planResult.policyId),
+                          label: copy.builder.fields.policyId,
+                          value: formatMaybeValue(planResult.policyId, locale),
                         },
                         {
-                          label: "Revision",
-                          value: formatMaybeValue(planResult.policyRevision),
-                        },
-                        {
-                          label: "Executor",
-                          value: formatMaybeValue(planResult.executorKind),
-                        },
-                        {
-                          label: "Targets",
-                          value: formatNumber(planResult.targets.length),
-                        },
-                        {
-                          label: "Bootstrap previews",
-                          value: formatNumber(
-                            planResult.bootstrapPreviews.length
+                          label: copy.builder.fields.revision,
+                          value: formatMaybeValue(
+                            planResult.policyRevision,
+                            locale
                           ),
                         },
                         {
-                          label: "Warnings",
-                          value: formatNumber(planResult.warnings.length),
+                          label: copy.builder.fields.executor,
+                          value: formatTranslatedValue(
+                            planResult.executorKind,
+                            locale
+                          ),
+                        },
+                        {
+                          label: copy.builder.fields.targets,
+                          value: formatNumber(planResult.targets.length, locale),
+                        },
+                        {
+                          label: copy.builder.fields.bootstrapPreviews,
+                          value: formatNumber(
+                            planResult.bootstrapPreviews.length,
+                            locale
+                          ),
+                        },
+                        {
+                          label: copy.builder.fields.warnings,
+                          value: formatNumber(planResult.warnings.length, locale),
                         },
                       ]}
                     />
@@ -660,7 +1080,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                     {planResult.targets.length > 0 ? (
                       <div className="space-y-2">
                         <p className="text-sm font-semibold text-[color:var(--foreground)]">
-                          Preview targets
+                          {copy.builder.previewTargets}
                         </p>
                         {planResult.targets.slice(0, 6).map((target, index) => (
                           <div
@@ -670,12 +1090,12 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                             <p className="font-medium text-[color:var(--foreground)]">
                               {target.hostname ??
                                 target.hostId ??
-                                "Unnamed target"}
+                                copy.builder.unnamedTarget}
                             </p>
                             <p className="mt-1 text-[color:var(--muted-foreground)]">
-                              {target.ip ? `${target.ip}` : "IP unavailable"}
+                              {target.ip ?? copy.builder.ipUnavailable}
                               {target.remoteUser
-                                ? ` via ${target.remoteUser}`
+                                ? copy.builder.viaUser(target.remoteUser)
                                 : ""}
                             </p>
                           </div>
@@ -688,8 +1108,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 ) : (
                   <EmptyState
                     variant="flush"
-                    title="No plan preview yet"
-                    description="Select a policy and run Preview Plan to inspect the deployment result available from the public Edge API."
+                    title={copy.builder.noPlanTitle}
+                    description={copy.builder.noPlanDescription}
                   />
                 )}
               </div>
@@ -700,11 +1120,11 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <SectionCard
-          title="Deployment Jobs"
-          description="Confirmed public sources: `GET /api/v1/deployments`, `POST /api/v1/deployments/{id}/retry`, and `POST /api/v1/deployments/{id}/cancel`."
+          title={copy.jobs.title}
+          description={copy.jobs.description}
         >
           {deploymentsQuery.isLoading && !deploymentsQuery.data ? (
-            <LoadingState label="Loading deployment jobs..." />
+            <LoadingState label={copy.jobs.loading} />
           ) : deploymentsQuery.error && !deploymentsQuery.data ? (
             <ErrorState
               error={deploymentsQuery.error}
@@ -715,11 +1135,11 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Job</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Policy</TableHead>
-                    <TableHead>Targets</TableHead>
-                    <TableHead>Updated</TableHead>
+                    <TableHead>{copy.jobs.columns.job}</TableHead>
+                    <TableHead>{copy.jobs.columns.status}</TableHead>
+                    <TableHead>{copy.jobs.columns.policy}</TableHead>
+                    <TableHead>{copy.jobs.columns.targets}</TableHead>
+                    <TableHead>{copy.jobs.columns.updated}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -728,8 +1148,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                       <TableCell colSpan={5}>
                         <EmptyState
                           variant="flush"
-                          title="No deployment jobs were returned"
-                          description="Create a deployment from the builder above or through WEB to populate this list."
+                          title={copy.jobs.emptyTitle}
+                          description={copy.jobs.emptyDescription}
                         />
                       </TableCell>
                     </TableRow>
@@ -745,7 +1165,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                         onClick={() => setSelectedDeploymentId(job.id)}
                       >
                         <TableCell className="font-medium text-[color:var(--foreground)]">
-                          <div>{formatMaybeValue(job.jobType)}</div>
+                          <div>{formatTranslatedValue(job.jobType, locale)}</div>
                           <div className="mt-1 text-xs text-[color:var(--muted-foreground)]">
                             {job.id}
                           </div>
@@ -753,9 +1173,9 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                         <TableCell>
                           <StatusBadge value={job.status} />
                         </TableCell>
-                        <TableCell>{formatMaybeValue(job.policyId)}</TableCell>
-                        <TableCell>{formatNumber(job.totalTargets)}</TableCell>
-                        <TableCell>{formatDateTime(job.updatedAt)}</TableCell>
+                        <TableCell>{formatMaybeValue(job.policyId, locale)}</TableCell>
+                        <TableCell>{formatNumber(job.totalTargets, locale)}</TableCell>
+                        <TableCell>{formatDateTime(job.updatedAt, locale)}</TableCell>
                       </TableRow>
                     ))
                   )}
@@ -767,8 +1187,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
         </SectionCard>
 
         <SectionCard
-          title="Job Details"
-          description="Confirmed public source: `GET /api/v1/deployments/{id}`."
+          title={copy.jobDetails.title}
+          description={copy.jobDetails.description}
           action={
             selectedDeployment ? (
               <div className="flex flex-wrap gap-2">
@@ -783,7 +1203,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                   loading={actionLoading === "retry"}
                   onClick={() => void handleDeploymentAction("retry")}
                 >
-                  Retry
+                  {copy.jobDetails.retry}
                 </Button>
                 <Button
                   variant="danger"
@@ -796,7 +1216,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                   loading={actionLoading === "cancel"}
                   onClick={() => void handleDeploymentAction("cancel")}
                 >
-                  Cancel
+                  {copy.jobDetails.cancel}
                 </Button>
                 <Link
                   href={withLocalePath(
@@ -805,7 +1225,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                   )}
                 >
                   <Button variant="outline" size="sm" className="h-10 px-4">
-                    Open Full Details
+                    {copy.jobDetails.openFullDetails}
                   </Button>
                 </Link>
               </div>
@@ -815,12 +1235,12 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
           {!selectedDeploymentId ? (
             <EmptyState
               variant="flush"
-              title="No job selected"
-              description="Choose a deployment job from the table to inspect its public details."
+              title={copy.jobDetails.noJobSelectedTitle}
+              description={copy.jobDetails.noJobSelectedDescription}
             />
           ) : deploymentDetailsQuery.isLoading &&
             !deploymentDetailsQuery.data ? (
-            <LoadingState label="Loading deployment details..." />
+            <LoadingState label={copy.jobDetails.loading} />
           ) : deploymentDetailsQuery.error && !deploymentDetailsQuery.data ? (
             <ErrorState
               error={deploymentDetailsQuery.error}
@@ -833,11 +1253,11 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
               <DetailGrid
                 items={[
                   {
-                    label: "Deployment ID",
+                    label: copy.jobDetails.fields.deploymentId,
                     value: deploymentDetailsQuery.data.summary.id,
                   },
                   {
-                    label: "Status",
+                    label: copy.jobDetails.fields.status,
                     value: (
                       <StatusBadge
                         value={deploymentDetailsQuery.data.summary.status}
@@ -845,45 +1265,52 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                     ),
                   },
                   {
-                    label: "Policy ID",
+                    label: copy.jobDetails.fields.policyId,
                     value: formatMaybeValue(
-                      deploymentDetailsQuery.data.summary.policyId
+                      deploymentDetailsQuery.data.summary.policyId,
+                      locale
                     ),
                   },
                   {
-                    label: "Job type",
-                    value: formatMaybeValue(
-                      deploymentDetailsQuery.data.summary.jobType
+                    label: copy.jobDetails.fields.jobType,
+                    value: formatTranslatedValue(
+                      deploymentDetailsQuery.data.summary.jobType,
+                      locale
                     ),
                   },
                   {
-                    label: "Current phase",
-                    value: formatMaybeValue(
-                      deploymentDetailsQuery.data.summary.currentPhase
+                    label: copy.jobDetails.fields.currentPhase,
+                    value: formatTranslatedValue(
+                      deploymentDetailsQuery.data.summary.currentPhase,
+                      locale
                     ),
                   },
                   {
-                    label: "Updated",
+                    label: copy.jobDetails.fields.updated,
                     value: formatDateTime(
-                      deploymentDetailsQuery.data.summary.updatedAt
+                      deploymentDetailsQuery.data.summary.updatedAt,
+                      locale
                     ),
                   },
                   {
-                    label: "Attempts",
+                    label: copy.jobDetails.fields.attempts,
                     value: formatNumber(
-                      deploymentDetailsQuery.data.summary.attemptCount
+                      deploymentDetailsQuery.data.summary.attemptCount,
+                      locale
                     ),
                   },
                   {
-                    label: "Targets",
+                    label: copy.jobDetails.fields.targets,
                     value: formatNumber(
-                      deploymentDetailsQuery.data.summary.totalTargets
+                      deploymentDetailsQuery.data.summary.totalTargets,
+                      locale
                     ),
                   },
                   {
-                    label: "Params",
+                    label: copy.jobDetails.fields.params,
                     value: formatParamsSummary(
-                      deploymentDetailsQuery.data.summary.params
+                      deploymentDetailsQuery.data.summary.params,
+                      locale
                     ),
                   },
                 ]}
@@ -891,13 +1318,13 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-[color:var(--foreground)]">
-                  Attempts
+                  {copy.jobDetails.attemptsTitle}
                 </p>
                 {deploymentDetailsQuery.data.attempts.length === 0 ? (
                   <EmptyState
                     variant="flush"
-                    title="No attempts were returned"
-                    description="Attempts will appear after the deployment enters execution."
+                    title={copy.jobDetails.noAttemptsTitle}
+                    description={copy.jobDetails.noAttemptsDescription}
                   />
                 ) : (
                   deploymentDetailsQuery.data.attempts.map((attempt) => (
@@ -907,13 +1334,17 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <span className="font-medium text-[color:var(--foreground)]">
-                          Attempt {formatMaybeValue(attempt.attemptNo)}
+                          {copy.jobDetails.attemptLabel(
+                            formatMaybeValue(attempt.attemptNo, locale)
+                          )}
                         </span>
                         <StatusBadge value={attempt.status} />
                       </div>
                       <p className="mt-2 text-[color:var(--muted-foreground)]">
-                        Triggered by {formatMaybeValue(attempt.triggeredBy)} at{" "}
-                        {formatDateTime(attempt.createdAt)}
+                        {copy.jobDetails.attemptMeta(
+                          formatTranslatedValue(attempt.triggeredBy, locale),
+                          formatDateTime(attempt.createdAt, locale)
+                        )}
                       </p>
                     </div>
                   ))
@@ -922,13 +1353,13 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-[color:var(--foreground)]">
-                  Targets
+                  {copy.jobDetails.targetsTitle}
                 </p>
                 {deploymentDetailsQuery.data.targets.length === 0 ? (
                   <EmptyState
                     variant="flush"
-                    title="No targets were returned"
-                    description="Targets will appear once the deployment has been planned or started."
+                    title={copy.jobDetails.noTargetsTitle}
+                    description={copy.jobDetails.noTargetsDescription}
                   />
                 ) : (
                   deploymentDetailsQuery.data.targets
@@ -956,7 +1387,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
 
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-[color:var(--foreground)]">
-                  Latest step payload
+                  {copy.jobDetails.latestStepPayloadTitle}
                 </p>
                 {deploymentDetailsQuery.data.steps[0] ? (
                   <div className="space-y-3">
@@ -964,7 +1395,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <span className="font-medium text-[color:var(--foreground)]">
                           {formatMaybeValue(
-                            deploymentDetailsQuery.data.steps[0].name
+                            deploymentDetailsQuery.data.steps[0].name,
+                            locale
                           )}
                         </span>
                         <StatusBadge
@@ -972,9 +1404,11 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                         />
                       </div>
                       <p className="mt-2 text-[color:var(--muted-foreground)]">
-                        Updated{" "}
-                        {formatDateTime(
-                          deploymentDetailsQuery.data.steps[0].updatedAt
+                        {copy.jobDetails.latestStepUpdated(
+                          formatDateTime(
+                            deploymentDetailsQuery.data.steps[0].updatedAt,
+                            locale
+                          )
                         )}
                       </p>
                     </div>
@@ -985,8 +1419,8 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
                 ) : (
                   <EmptyState
                     variant="flush"
-                    title="No steps were returned"
-                    description="Step payloads will appear once the job starts executing."
+                    title={copy.jobDetails.noStepsTitle}
+                    description={copy.jobDetails.noStepsDescription}
                   />
                 )}
               </div>
@@ -1003,11 +1437,11 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
     <div className={embedded ? "space-y-4" : "space-y-6"}>
       {!embedded ? (
         <PageHeader
-          title="Agents"
-          description="Operator-facing agent workspace wired only to confirmed public Edge API endpoints. Policy selection and deployments work today; registry, diagnostics, and enrollment still await Edge bridges."
+          title={copy.header.title}
+          description={copy.header.description}
           breadcrumbs={[
             { label: dictionary.common.dashboard, href: "#" },
-            { label: "Agents" },
+            { label: copy.header.title },
           ]}
         />
       ) : null}
@@ -1020,6 +1454,7 @@ export function AgentsPage({ embedded = false }: { embedded?: boolean } = {}) {
           onClose={() => setCreateAgentDialogOpen(false)}
           policies={policiesQuery.data?.items ?? []}
           initialPolicyId={selectedPolicyId}
+          locale={locale}
         />
       ) : null}
     </div>
@@ -1030,14 +1465,16 @@ function parseDraftPayload(input: {
   policyId: string;
   agentIdsText: string;
   paramsText: string;
+  locale: "ru" | "en";
 }):
   | { payload: DeploymentMutationPayload; error?: undefined; field?: undefined }
   | { payload?: undefined; error: string; field?: "policy" | "params" } {
+  const copy = copyByLocale[input.locale];
   const policyId = input.policyId.trim();
 
   if (!policyId) {
     return {
-      error: "Select a policy before previewing or creating a deployment.",
+      error: copy.validation.policyRequired,
       field: "policy",
     };
   }
@@ -1059,7 +1496,7 @@ function parseDraftPayload(input: {
         Array.isArray(parsed)
       ) {
         return {
-          error: "Params must be a JSON object.",
+          error: copy.validation.paramsMustBeObject,
           field: "params",
         };
       }
@@ -1069,7 +1506,7 @@ function parseDraftPayload(input: {
       );
     } catch {
       return {
-        error: "Params must be valid JSON.",
+        error: copy.validation.paramsMustBeJson,
         field: "params",
       };
     }

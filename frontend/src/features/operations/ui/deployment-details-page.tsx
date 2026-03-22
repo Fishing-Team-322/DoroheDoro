@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
+import {
+  translateValueLabel,
+  useI18n,
+  withLocalePath,
+} from "@/src/shared/lib/i18n";
 import { Button, TableCell, TableRow, useToast } from "@/src/shared/ui";
 import { PageHeader } from "@/src/widgets/dashboard-layout";
 import {
@@ -29,8 +33,152 @@ import {
   formatParamsSummary,
 } from "./operations-ui";
 
+const copyByLocale = {
+  en: {
+    retryRequested: {
+      title: "Retry requested",
+      description: (id: string) =>
+        `Deployment ${id} was sent to the retry endpoint.`,
+    },
+    cancelRequested: {
+      title: "Cancellation requested",
+      description: (id: string) =>
+        `Deployment ${id} was sent to the cancel endpoint.`,
+    },
+    page: {
+      title: "Deployment Details",
+      description:
+        "Inspect job summary, current status, attempts, targets, and steps. When there is no live deployment stream endpoint, this page polls the public details endpoint.",
+      breadcrumbs: "Deployments",
+      retry: "Retry",
+      cancel: "Cancel",
+    },
+    loading: "Loading deployment details...",
+    summary: {
+      title: "Summary",
+      description: "`GET /api/v1/deployments/{id}`",
+      fields: {
+        deploymentId: "Deployment ID",
+        status: "Status",
+        policyId: "Policy ID",
+        jobType: "Job Type",
+        createdAt: "Created At",
+        currentPhase: "Current Phase",
+        attempts: "Attempts",
+        targets: "Targets",
+        params: "Params",
+      },
+      counters: {
+        pending: "Pending",
+        running: "Running",
+        succeeded: "Succeeded",
+        failed: "Failed",
+        cancelled: "Cancelled",
+        cadence: "Refetch cadence",
+        terminal: "manual + 5s polling fallback",
+        polling: "5s polling",
+      },
+    },
+    attempts: {
+      title: "Attempts",
+      description:
+        "Current attempt history returned by the details endpoint.",
+      columns: ["Attempt", "Status", "Triggered by", "Reason", "Started", "Finished"],
+      empty: "No attempts were returned.",
+    },
+    targets: {
+      title: "Targets",
+      description: "Target state for the current or latest attempt.",
+      columns: ["Host", "Host ID", "Status", "Started", "Finished", "Error"],
+      empty: "No targets were returned.",
+    },
+    steps: {
+      title: "Steps",
+      description:
+        "Execution steps exposed by the deployment details endpoint.",
+      columns: ["Step", "Status", "Target ID", "Updated", "Message"],
+      empty: "No steps were returned.",
+    },
+    raw: {
+      title: "Raw Details",
+      description: "Shows the exact payload for contract debugging.",
+    },
+  },
+  ru: {
+    retryRequested: {
+      title: "Повтор запрошен",
+      description: (id: string) =>
+        `Раскатка ${id} отправлена в retry endpoint.`,
+    },
+    cancelRequested: {
+      title: "Отмена запрошена",
+      description: (id: string) =>
+        `Раскатка ${id} отправлена в cancel endpoint.`,
+    },
+    page: {
+      title: "Детали раскатки",
+      description:
+        "Посмотрите сводку задачи, текущий статус, попытки, таргеты и шаги. Если live deployment stream endpoint отсутствует, страница опрашивает публичный endpoint деталей.",
+      breadcrumbs: "Раскатки",
+      retry: "Повторить",
+      cancel: "Отменить",
+    },
+    loading: "Загрузка деталей раскатки...",
+    summary: {
+      title: "Сводка",
+      description: "`GET /api/v1/deployments/{id}`",
+      fields: {
+        deploymentId: "ID раскатки",
+        status: "Статус",
+        policyId: "ID политики",
+        jobType: "Тип задачи",
+        createdAt: "Создано",
+        currentPhase: "Текущая фаза",
+        attempts: "Попытки",
+        targets: "Таргеты",
+        params: "Параметры",
+      },
+      counters: {
+        pending: "Ожидают",
+        running: "Выполняются",
+        succeeded: "Успешно",
+        failed: "Ошибки",
+        cancelled: "Отменено",
+        cadence: "Интервал обновления",
+        terminal: "вручную + fallback polling каждые 5с",
+        polling: "polling каждые 5с",
+      },
+    },
+    attempts: {
+      title: "Попытки",
+      description:
+        "История попыток, которую вернул endpoint деталей.",
+      columns: ["Попытка", "Статус", "Кем запущено", "Причина", "Старт", "Финиш"],
+      empty: "Попытки не были возвращены.",
+    },
+    targets: {
+      title: "Таргеты",
+      description: "Состояние таргетов для текущей или последней попытки.",
+      columns: ["Хост", "ID хоста", "Статус", "Старт", "Финиш", "Ошибка"],
+      empty: "Таргеты не были возвращены.",
+    },
+    steps: {
+      title: "Шаги",
+      description:
+        "Шаги выполнения, которые вернул endpoint деталей раскатки.",
+      columns: ["Шаг", "Статус", "ID таргета", "Обновлено", "Сообщение"],
+      empty: "Шаги не были возвращены.",
+    },
+    raw: {
+      title: "Сырые детали",
+      description: "Показывает точный payload для отладки контракта.",
+    },
+  },
+} as const;
+
 export function DeploymentDetailsPage({ id }: { id: string }) {
   const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const { showToast } = useToast();
   const [actionError, setActionError] = useState<unknown>();
   const [actionLoading, setActionLoading] = useState<"retry" | "cancel" | null>(
@@ -59,15 +207,15 @@ export function DeploymentDetailsPage({ id }: { id: string }) {
       if (action === "retry") {
         await retryDeployment(summary.id);
         showToast({
-          title: "Retry requested",
-          description: `Deployment ${summary.id} was sent to the retry endpoint.`,
+          title: copy.retryRequested.title,
+          description: copy.retryRequested.description(summary.id),
           variant: "success",
         });
       } else {
         await cancelDeployment(summary.id);
         showToast({
-          title: "Cancellation requested",
-          description: `Deployment ${summary.id} was sent to the cancel endpoint.`,
+          title: copy.cancelRequested.title,
+          description: copy.cancelRequested.description(summary.id),
           variant: "success",
         });
       }
@@ -83,10 +231,13 @@ export function DeploymentDetailsPage({ id }: { id: string }) {
   return (
     <PageStack>
       <PageHeader
-        title="Deployment Details"
-        description="Inspect job summary, current status, attempts, targets, and steps. When there is no live deployment stream endpoint, this page polls the public details endpoint."
+        title={copy.page.title}
+        description={copy.page.description}
         breadcrumbs={[
-          { label: "Deployments", href: withLocalePath(locale, "/deployments") },
+          {
+            label: copy.page.breadcrumbs,
+            href: withLocalePath(locale, "/deployments"),
+          },
           { label: id },
         ]}
         action={
@@ -99,7 +250,7 @@ export function DeploymentDetailsPage({ id }: { id: string }) {
               loading={actionLoading === "retry"}
               onClick={() => void handleAction("retry")}
             >
-              Retry
+              {copy.page.retry}
             </Button>
             <Button
               variant="danger"
@@ -109,161 +260,188 @@ export function DeploymentDetailsPage({ id }: { id: string }) {
               loading={actionLoading === "cancel"}
               onClick={() => void handleAction("cancel")}
             >
-              Cancel
+              {copy.page.cancel}
             </Button>
           </div>
         }
       />
 
       {deploymentQuery.isLoading && !deploymentQuery.data ? (
-        <LoadingState label="Loading deployment details..." />
+        <LoadingState label={copy.loading} />
       ) : deploymentQuery.error && !deploymentQuery.data ? (
         <ErrorState error={deploymentQuery.error} retry={() => void deploymentQuery.refetch()} />
       ) : (
         <PageStack>
           {actionError ? <ErrorState error={actionError as never} /> : null}
 
-          <SectionCard title="Summary" description="`GET /api/v1/deployments/{id}`">
+          <SectionCard
+            title={copy.summary.title}
+            description={copy.summary.description}
+          >
             <div className="space-y-4">
               <DetailGrid
                 items={[
-                  { label: "Deployment ID", value: formatMaybeValue(summary?.id) },
                   {
-                    label: "Status",
+                    label: copy.summary.fields.deploymentId,
+                    value: formatMaybeValue(summary?.id, locale),
+                  },
+                  {
+                    label: copy.summary.fields.status,
                     value: <StatusBadge value={summary?.status} />,
                   },
                   {
-                    label: "Policy ID",
-                    value: formatMaybeValue(summary?.policyId),
+                    label: copy.summary.fields.policyId,
+                    value: formatMaybeValue(summary?.policyId, locale),
                   },
                   {
-                    label: "Job Type",
-                    value: formatMaybeValue(summary?.jobType),
+                    label: copy.summary.fields.jobType,
+                    value: translateValueLabel(summary?.jobType, locale),
                   },
                   {
-                    label: "Created At",
-                    value: formatDateTime(summary?.createdAt),
+                    label: copy.summary.fields.createdAt,
+                    value: formatDateTime(summary?.createdAt, locale),
                   },
                   {
-                    label: "Current Phase",
-                    value: formatMaybeValue(summary?.currentPhase),
+                    label: copy.summary.fields.currentPhase,
+                    value: translateValueLabel(summary?.currentPhase, locale),
                   },
                   {
-                    label: "Attempts",
-                    value: formatNumber(summary?.attemptCount),
+                    label: copy.summary.fields.attempts,
+                    value: formatNumber(summary?.attemptCount, locale),
                   },
                   {
-                    label: "Targets",
+                    label: copy.summary.fields.targets,
                     value: formatNumber(
-                      summary?.totalTargets ?? summary?.agentIds.length
+                      summary?.totalTargets ?? summary?.agentIds.length,
+                      locale
                     ),
                   },
                   {
-                    label: "Params",
-                    value: formatParamsSummary(summary?.params),
+                    label: copy.summary.fields.params,
+                    value: formatParamsSummary(summary?.params, locale),
                   },
                 ]}
               />
               <div className="flex flex-wrap gap-2 text-xs text-[color:var(--muted-foreground)]">
                 {summary?.pendingTargets != null ? (
-                  <span>Pending: {formatNumber(summary.pendingTargets)}</span>
+                  <span>
+                    {copy.summary.counters.pending}:{" "}
+                    {formatNumber(summary.pendingTargets, locale)}
+                  </span>
                 ) : null}
                 {summary?.runningTargets != null ? (
-                  <span>Running: {formatNumber(summary.runningTargets)}</span>
+                  <span>
+                    {copy.summary.counters.running}:{" "}
+                    {formatNumber(summary.runningTargets, locale)}
+                  </span>
                 ) : null}
                 {summary?.succeededTargets != null ? (
-                  <span>Succeeded: {formatNumber(summary.succeededTargets)}</span>
+                  <span>
+                    {copy.summary.counters.succeeded}:{" "}
+                    {formatNumber(summary.succeededTargets, locale)}
+                  </span>
                 ) : null}
                 {summary?.failedTargets != null ? (
-                  <span>Failed: {formatNumber(summary.failedTargets)}</span>
+                  <span>
+                    {copy.summary.counters.failed}:{" "}
+                    {formatNumber(summary.failedTargets, locale)}
+                  </span>
                 ) : null}
                 {summary?.cancelledTargets != null ? (
-                  <span>Cancelled: {formatNumber(summary.cancelledTargets)}</span>
+                  <span>
+                    {copy.summary.counters.cancelled}:{" "}
+                    {formatNumber(summary.cancelledTargets, locale)}
+                  </span>
                 ) : null}
                 <span>
-                  Refetch cadence:{" "}
+                  {copy.summary.counters.cadence}:{" "}
                   {isTerminalDeploymentStatus(summary?.status)
-                    ? "manual + 5s polling fallback"
-                    : "5s polling"}
+                    ? copy.summary.counters.terminal
+                    : copy.summary.counters.polling}
                 </span>
               </div>
               <RequestMetaLine meta={deploymentQuery.meta} />
             </div>
           </SectionCard>
 
-          <SectionCard title="Attempts" description="Current attempt history returned by the details endpoint.">
+          <SectionCard
+            title={copy.attempts.title}
+            description={copy.attempts.description}
+          >
             <DataTable
-              columns={[
-                "Attempt",
-                "Status",
-                "Triggered by",
-                "Reason",
-                "Started",
-                "Finished",
-              ]}
+              columns={[...copy.attempts.columns]}
               isEmpty={(deploymentQuery.data?.attempts.length ?? 0) === 0}
               rows={(deploymentQuery.data?.attempts ?? []).map((attempt) => (
                 <TableRow key={attempt.id}>
-                  <TableCell>{formatMaybeValue(attempt.attemptNo)}</TableCell>
+                  <TableCell>{formatMaybeValue(attempt.attemptNo, locale)}</TableCell>
                   <TableCell>
                     <StatusBadge value={attempt.status} />
                   </TableCell>
-                  <TableCell>{formatMaybeValue(attempt.triggeredBy)}</TableCell>
-                  <TableCell>{formatMaybeValue(attempt.reason)}</TableCell>
-                  <TableCell>{formatDateTime(attempt.startedAt)}</TableCell>
-                  <TableCell>{formatDateTime(attempt.finishedAt)}</TableCell>
+                  <TableCell>{translateValueLabel(attempt.triggeredBy, locale)}</TableCell>
+                  <TableCell>{formatMaybeValue(attempt.reason, locale)}</TableCell>
+                  <TableCell>{formatDateTime(attempt.startedAt, locale)}</TableCell>
+                  <TableCell>{formatDateTime(attempt.finishedAt, locale)}</TableCell>
                 </TableRow>
               ))}
-              emptyTitle="No attempts were returned."
+              emptyTitle={copy.attempts.empty}
             />
           </SectionCard>
 
-          <SectionCard title="Targets" description="Target state for the current or latest attempt.">
+          <SectionCard
+            title={copy.targets.title}
+            description={copy.targets.description}
+          >
             <DataTable
-              columns={["Host", "Host ID", "Status", "Started", "Finished", "Error"]}
+              columns={[...copy.targets.columns]}
               isEmpty={(deploymentQuery.data?.targets.length ?? 0) === 0}
               rows={(deploymentQuery.data?.targets ?? []).map((target) => (
                 <TableRow key={target.id}>
-                  <TableCell>{formatMaybeValue(target.hostname)}</TableCell>
+                  <TableCell>{formatMaybeValue(target.hostname, locale)}</TableCell>
                   <TableCell className="font-mono text-xs text-[color:var(--muted-foreground)]">
-                    {formatMaybeValue(target.hostId)}
+                    {formatMaybeValue(target.hostId, locale)}
                   </TableCell>
                   <TableCell>
                     <StatusBadge value={target.status} />
                   </TableCell>
-                  <TableCell>{formatDateTime(target.startedAt)}</TableCell>
-                  <TableCell>{formatDateTime(target.finishedAt)}</TableCell>
-                  <TableCell>{formatMaybeValue(target.errorMessage)}</TableCell>
+                  <TableCell>{formatDateTime(target.startedAt, locale)}</TableCell>
+                  <TableCell>{formatDateTime(target.finishedAt, locale)}</TableCell>
+                  <TableCell>{formatMaybeValue(target.errorMessage, locale)}</TableCell>
                 </TableRow>
               ))}
-              emptyTitle="No targets were returned."
+              emptyTitle={copy.targets.empty}
             />
           </SectionCard>
 
-          <SectionCard title="Steps" description="Execution steps exposed by the deployment details endpoint.">
+          <SectionCard
+            title={copy.steps.title}
+            description={copy.steps.description}
+          >
             <DataTable
-              columns={["Step", "Status", "Target ID", "Updated", "Message"]}
+              columns={[...copy.steps.columns]}
               isEmpty={(deploymentQuery.data?.steps.length ?? 0) === 0}
               rows={(deploymentQuery.data?.steps ?? []).map((step) => (
                 <TableRow key={step.id}>
                   <TableCell className="font-medium text-[color:var(--foreground)]">
-                    {formatMaybeValue(step.name)}
+                    {formatMaybeValue(step.name, locale)}
                   </TableCell>
                   <TableCell>
                     <StatusBadge value={step.status} />
                   </TableCell>
                   <TableCell className="font-mono text-xs text-[color:var(--muted-foreground)]">
-                    {formatMaybeValue(step.targetId)}
+                    {formatMaybeValue(step.targetId, locale)}
                   </TableCell>
-                  <TableCell>{formatDateTime(step.updatedAt)}</TableCell>
-                  <TableCell>{formatMaybeValue(step.message)}</TableCell>
+                  <TableCell>{formatDateTime(step.updatedAt, locale)}</TableCell>
+                  <TableCell>{formatMaybeValue(step.message, locale)}</TableCell>
                 </TableRow>
               ))}
-              emptyTitle="No steps were returned."
+              emptyTitle={copy.steps.empty}
             />
           </SectionCard>
 
-          <SectionCard title="Raw Details" description="Shows the exact payload for contract debugging.">
+          <SectionCard
+            title={copy.raw.title}
+            description={copy.raw.description}
+          >
             <JsonPreview value={deploymentQuery.data?.raw} />
           </SectionCard>
         </PageStack>

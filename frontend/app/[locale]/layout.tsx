@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { AuthProvider } from "@/src/features/auth";
@@ -14,6 +15,21 @@ export const dynamicParams = false;
 
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const resolvedLocale = isLocale(locale) ? locale : locales[0];
+  const dictionary = getDictionary(resolvedLocale);
+
+  return {
+    title: dictionary.app.metadata.title,
+    description: dictionary.app.metadata.description,
+  };
 }
 
 export default async function LocaleLayout({

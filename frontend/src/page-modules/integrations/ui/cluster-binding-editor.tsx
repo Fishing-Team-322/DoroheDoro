@@ -1,5 +1,6 @@
 "use client";
 
+import { useI18n } from "@/src/shared/lib/i18n";
 import { Button, Card, Input, Select, Switch } from "@/src/shared/ui";
 import {
   createEmptyBinding,
@@ -7,27 +8,57 @@ import {
   type TelegramSeverityLevel,
 } from "@/src/shared/lib/telegram-integrations-store";
 
-const SEVERITY_PRESETS: Array<{
-  value: string;
-  label: string;
-  severities: TelegramSeverityLevel[];
-}> = [
-  { value: "critical-only", label: "Critical only", severities: ["critical"] },
-  {
-    value: "warning-plus",
-    label: "Warning + Critical",
-    severities: ["warning", "critical"],
+const copyByLocale = {
+  en: {
+    presets: {
+      criticalOnly: "Critical only",
+      warningPlus: "Warning + Critical",
+      full: "Info + Warning + Critical",
+    },
+    bindingPrefix: "Binding",
+    bindingDescription:
+      "Route one Telegram instance to a cluster/operator scope.",
+    enabled: "Enabled",
+    paused: "Paused",
+    remove: "Remove",
+    cluster: "Cluster",
+    clusterPlaceholder: "core / edge / security",
+    routeLabel: "Route label",
+    routeLabelPlaceholder: "core-oncall",
+    chatId: "Chat ID",
+    chatIdPlaceholder: "-10025001001",
+    severityProfileAria: "severity profile",
+    add: "Add binding",
   },
-  {
-    value: "full",
-    label: "Info + Warning + Critical",
-    severities: ["info", "warning", "critical"],
+  ru: {
+    presets: {
+      criticalOnly: "Только critical",
+      warningPlus: "Warning + Critical",
+      full: "Info + Warning + Critical",
+    },
+    bindingPrefix: "Привязка",
+    bindingDescription:
+      "Направьте один Telegram-инстанс в cluster/operator scope.",
+    enabled: "Включено",
+    paused: "Пауза",
+    remove: "Удалить",
+    cluster: "Кластер",
+    clusterPlaceholder: "core / edge / security",
+    routeLabel: "Метка маршрута",
+    routeLabelPlaceholder: "core-oncall",
+    chatId: "Chat ID",
+    chatIdPlaceholder: "-10025001001",
+    severityProfileAria: "профиль severity",
+    add: "Добавить привязку",
   },
-];
+} as const;
 
-function getPresetValue(severities: TelegramSeverityLevel[]) {
+function getPresetValue(
+  severities: TelegramSeverityLevel[],
+  presets: Array<{ value: string; severities: TelegramSeverityLevel[] }>
+) {
   return (
-    SEVERITY_PRESETS.find(
+    presets.find(
       (item) => item.severities.join("|") === severities.join("|")
     )?.value ?? "warning-plus"
   );
@@ -40,6 +71,29 @@ export function ClusterBindingEditor({
   value: TelegramClusterBinding[];
   onChange: (value: TelegramClusterBinding[]) => void;
 }) {
+  const { locale } = useI18n();
+  const copy = copyByLocale[locale];
+  const severityPresets: Array<{
+    value: string;
+    label: string;
+    severities: TelegramSeverityLevel[];
+  }> = [
+    {
+      value: "critical-only",
+      label: copy.presets.criticalOnly,
+      severities: ["critical"],
+    },
+    {
+      value: "warning-plus",
+      label: copy.presets.warningPlus,
+      severities: ["warning", "critical"],
+    },
+    {
+      value: "full",
+      label: copy.presets.full,
+      severities: ["info", "warning", "critical"],
+    },
+  ];
   const bindings = value.length > 0 ? value : [createEmptyBinding()];
 
   const updateBinding = (
@@ -56,10 +110,10 @@ export function ClusterBindingEditor({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-[color:var(--foreground)]">
-                Binding {index + 1}
+                {copy.bindingPrefix} {index + 1}
               </p>
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                Route one Telegram instance to a cluster/operator scope.
+                {copy.bindingDescription}
               </p>
             </div>
 
@@ -72,7 +126,7 @@ export function ClusterBindingEditor({
                     enabled: checked,
                   }))
                 }
-                switchLabel={binding.enabled ? "Enabled" : "Paused"}
+                switchLabel={binding.enabled ? copy.enabled : copy.paused}
               />
               <Button
                 variant="ghost"
@@ -86,14 +140,14 @@ export function ClusterBindingEditor({
                   )
                 }
               >
-                Remove
+                {copy.remove}
               </Button>
             </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <Input
-              label="Cluster"
+              label={copy.cluster}
               value={binding.cluster}
               onChange={(event) =>
                 updateBinding(binding.id, (current) => ({
@@ -101,10 +155,10 @@ export function ClusterBindingEditor({
                   cluster: event.target.value,
                 }))
               }
-              placeholder="core / edge / security"
+              placeholder={copy.clusterPlaceholder}
             />
             <Input
-              label="Route label"
+              label={copy.routeLabel}
               value={binding.routeLabel}
               onChange={(event) =>
                 updateBinding(binding.id, (current) => ({
@@ -112,13 +166,13 @@ export function ClusterBindingEditor({
                   routeLabel: event.target.value,
                 }))
               }
-              placeholder="core-oncall"
+              placeholder={copy.routeLabelPlaceholder}
             />
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
             <Input
-              label="Chat ID"
+              label={copy.chatId}
               value={binding.chatId}
               onChange={(event) =>
                 updateBinding(binding.id, (current) => ({
@@ -126,26 +180,26 @@ export function ClusterBindingEditor({
                   chatId: event.target.value,
                 }))
               }
-              placeholder="-10025001001"
+              placeholder={copy.chatIdPlaceholder}
             />
 
             <Select
-              value={getPresetValue(binding.severities)}
+              value={getPresetValue(binding.severities, severityPresets)}
               onChange={(event) => {
                 const preset =
-                  SEVERITY_PRESETS.find((item) => item.value === event.target.value) ??
-                  SEVERITY_PRESETS[1];
+                  severityPresets.find((item) => item.value === event.target.value) ??
+                  severityPresets[1];
                 updateBinding(binding.id, (current) => ({
                   ...current,
                   severities: preset.severities,
                 }));
               }}
-              options={SEVERITY_PRESETS.map((item) => ({
+              options={severityPresets.map((item) => ({
                 value: item.value,
                 label: item.label,
               }))}
               selectSize="lg"
-              aria-label={`Binding ${index + 1} severity profile`}
+              aria-label={`${copy.bindingPrefix} ${index + 1} ${copy.severityProfileAria}`}
             />
           </div>
         </Card>
@@ -157,7 +211,7 @@ export function ClusterBindingEditor({
         className="h-10 px-4"
         onClick={() => onChange([...bindings, createEmptyBinding()])}
       >
-        Add binding
+        {copy.add}
       </Button>
     </div>
   );

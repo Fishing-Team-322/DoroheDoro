@@ -22,8 +22,86 @@ import {
 import { PageHeader } from "@/src/widgets/dashboard-layout";
 import { ErrorCard, JsonValue, LoadingCard } from "@/src/page-modules/common/ui/runtime-state";
 
+const copyByLocale = {
+  en: {
+    loadError: "Failed to load inventory",
+    title: "Inventory",
+    description: "Live host inventory and host groups from control-plane.",
+    loading: "Loading inventory...",
+    hosts: {
+      title: "Hosts",
+      columns: {
+        hostname: "Hostname",
+        ip: "IP",
+        remoteUser: "Remote user",
+        updated: "Updated",
+      },
+      emptyTitle: "No hosts",
+      emptyDescription:
+        "Create hosts through WEB or the API to populate inventory.",
+    },
+    groups: {
+      title: "Host groups",
+      columns: {
+        name: "Name",
+        description: "Description",
+        members: "Members",
+        updated: "Updated",
+      },
+      emptyTitle: "No host groups",
+      emptyDescription:
+        "Create host groups to target deployments by inventory slice.",
+    },
+    inspector: {
+      title: "Host inspector",
+      createdPrefix: "Created",
+      emptyTitle: "No host selected",
+      emptyDescription:
+        "Pick a host from the table to inspect its labels and access metadata.",
+    },
+  },
+  ru: {
+    loadError: "Не удалось загрузить inventory",
+    title: "Инвентарь",
+    description: "Живой инвентарь хостов и групп хостов из control-plane.",
+    loading: "Загрузка инвентаря...",
+    hosts: {
+      title: "Хосты",
+      columns: {
+        hostname: "Hostname",
+        ip: "IP",
+        remoteUser: "Пользователь",
+        updated: "Обновлено",
+      },
+      emptyTitle: "Хостов нет",
+      emptyDescription:
+        "Создайте хосты через WEB или API, чтобы заполнить инвентарь.",
+    },
+    groups: {
+      title: "Группы хостов",
+      columns: {
+        name: "Имя",
+        description: "Описание",
+        members: "Участники",
+        updated: "Обновлено",
+      },
+      emptyTitle: "Групп хостов нет",
+      emptyDescription:
+        "Создайте группы хостов, чтобы таргетировать раскатки по срезам инвентаря.",
+    },
+    inspector: {
+      title: "Инспектор хоста",
+      createdPrefix: "Создан",
+      emptyTitle: "Хост не выбран",
+      emptyDescription:
+        "Выберите хост в таблице, чтобы посмотреть его labels и access metadata.",
+    },
+  },
+} as const;
+
 export function InventoryPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { dictionary, locale } = useI18n();
+  const copy = copyByLocale[locale];
   const [hosts, setHosts] = useState<HostItem[]>([]);
   const [hostGroups, setHostGroups] = useState<HostGroupItem[]>([]);
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null);
@@ -50,7 +128,7 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
       } catch (loadError) {
         if (!cancelled) {
           setError(
-            loadError instanceof Error ? loadError.message : "Failed to load inventory"
+            loadError instanceof Error ? loadError.message : copy.loadError
           );
         }
       } finally {
@@ -64,7 +142,7 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [copy.loadError]);
 
   const selectedHost = hosts.find((item) => item.host_id === selectedHostId) ?? null;
 
@@ -72,16 +150,16 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
     <div className={embedded ? "space-y-4" : "space-y-6"}>
       {!embedded ? (
         <PageHeader
-          title="Inventory"
-          description="Live host inventory and host groups from control-plane."
+          title={copy.title}
+          description={copy.description}
           breadcrumbs={[
             { label: dictionary.common.dashboard, href: "#" },
-            { label: "Inventory" },
+            { label: copy.title },
           ]}
         />
       ) : null}
 
-      {loading ? <LoadingCard label="Loading inventory..." /> : null}
+      {loading ? <LoadingCard label={copy.loading} /> : null}
       {!loading && error ? <ErrorCard message={error} /> : null}
 
       {!loading && !error ? (
@@ -90,15 +168,15 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
             <Card>
               <div className="space-y-3">
                 <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                  Hosts
+                  {copy.hosts.title}
                 </h2>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Hostname</TableHead>
-                      <TableHead>IP</TableHead>
-                      <TableHead>Remote user</TableHead>
-                      <TableHead>Updated</TableHead>
+                      <TableHead>{copy.hosts.columns.hostname}</TableHead>
+                      <TableHead>{copy.hosts.columns.ip}</TableHead>
+                      <TableHead>{copy.hosts.columns.remoteUser}</TableHead>
+                      <TableHead>{copy.hosts.columns.updated}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -107,8 +185,8 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
                         <TableCell colSpan={4}>
                           <EmptyState
                             variant="flush"
-                            title="No hosts"
-                            description="Create hosts through WEB or the API to populate inventory."
+                            title={copy.hosts.emptyTitle}
+                            description={copy.hosts.emptyDescription}
                           />
                         </TableCell>
                       </TableRow>
@@ -140,15 +218,15 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
             <Card>
               <div className="space-y-3">
                 <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                  Host groups
+                  {copy.groups.title}
                 </h2>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Members</TableHead>
-                      <TableHead>Updated</TableHead>
+                      <TableHead>{copy.groups.columns.name}</TableHead>
+                      <TableHead>{copy.groups.columns.description}</TableHead>
+                      <TableHead>{copy.groups.columns.members}</TableHead>
+                      <TableHead>{copy.groups.columns.updated}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -157,8 +235,8 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
                         <TableCell colSpan={4}>
                           <EmptyState
                             variant="flush"
-                            title="No host groups"
-                            description="Create host groups to target deployments by inventory slice."
+                            title={copy.groups.emptyTitle}
+                            description={copy.groups.emptyDescription}
                           />
                         </TableCell>
                       </TableRow>
@@ -182,9 +260,9 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
 
           <Card>
             <div className="space-y-3">
-              <h2 className="text-base font-semibold text-[color:var(--foreground)]">
-                Host inspector
-              </h2>
+                <h2 className="text-base font-semibold text-[color:var(--foreground)]">
+                  {copy.inspector.title}
+                </h2>
               {selectedHost ? (
                 <>
                   <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface)] p-3">
@@ -195,7 +273,8 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
                       {selectedHost.ip}:{selectedHost.ssh_port} via {selectedHost.remote_user}
                     </p>
                     <p className="mt-2 text-xs uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-                      Created {formatRelativeLabel(selectedHost.created_at, locale)}
+                      {copy.inspector.createdPrefix}{" "}
+                      {formatRelativeLabel(selectedHost.created_at, locale)}
                     </p>
                   </div>
                   <JsonValue value={selectedHost.labels} />
@@ -203,8 +282,8 @@ export function InventoryPage({ embedded = false }: { embedded?: boolean } = {})
               ) : (
                 <EmptyState
                   variant="flush"
-                  title="No host selected"
-                  description="Pick a host from the table to inspect its labels and access metadata."
+                  title={copy.inspector.emptyTitle}
+                  description={copy.inspector.emptyDescription}
                 />
               )}
             </div>

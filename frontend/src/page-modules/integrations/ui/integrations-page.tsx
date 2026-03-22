@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { PageHeader } from "@/src/widgets/dashboard-layout";
-import { useI18n } from "@/src/shared/lib/i18n";
+import { translateValueLabel, useI18n } from "@/src/shared/lib/i18n";
 import {
   NoticeBanner,
   SectionCard,
@@ -21,6 +20,127 @@ import {
 } from "@/src/shared/lib/telegram-integrations-store";
 import { Badge, Button, Card, EmptyState, useToast } from "@/src/shared/ui";
 import { TelegramInstanceForm } from "./telegram-instance-form";
+
+const copyByLocale = {
+  en: {
+    validation: {
+      nameRequired: "Instance name is required.",
+      tokenRequired: "Bot token is required.",
+      chatRequired: "Default chat id is required.",
+      bindingRequired:
+        "At least one enabled binding with cluster, route label, and chat id is required.",
+    },
+    toasts: {
+      savedTitle: "Telegram instance saved",
+      savedDescription:
+        "The frontend-only integration adapter stored your changes for demo and manual validation flows.",
+      testSuccess: "Connection test succeeded",
+      testFailed: "Connection test failed",
+    },
+    title: "Integrations workspace",
+    newInstance: "New instance",
+    notice: {
+      title: "Frontend-only fallback for Telegram",
+      description:
+        "No backend Telegram integration contract was found in the current frontend runtime layer. This page stores data locally in the browser so demos and manual operator walkthroughs stay usable without leaving frontend scope.",
+    },
+    metrics: {
+      instances: "Instances",
+      enabled: "Enabled instances",
+      bindings: "Cluster bindings",
+    },
+    list: {
+      title: "Telegram instances",
+      description:
+        "Pick an instance to edit it, or create a new one for a demo/manual routing setup.",
+      emptyTitle: "No integration instances",
+      emptyDescription:
+        "Create the first Telegram instance to start mapping cluster routes.",
+      bindingsSuffix: "binding(s), last test",
+      notRun: "not run",
+    },
+    form: {
+      editTitle: "Edit instance",
+      createTitle: "Create instance",
+      description:
+        "Usable for both quick demos and manual operator data entry. Changes stay inside frontend local storage.",
+      saveChanges: "Save changes",
+      createInstance: "Create instance",
+    },
+    details: {
+      title: "Selected instance detail",
+      description:
+        "Compact operator snapshot of the current instance status, routing coverage, and last test result.",
+      name: "Name",
+      lastTest: "Last test",
+      bindings: "Bindings",
+      testStatus: "Test status",
+      notRun: "Not run",
+      unknown: "Unknown",
+      emptyTitle: "No instance selected",
+      emptyDescription: "Select an existing instance or create a new one.",
+    },
+  },
+  ru: {
+    validation: {
+      nameRequired: "Укажите имя инстанса.",
+      tokenRequired: "Укажите токен бота.",
+      chatRequired: "Укажите chat id по умолчанию.",
+      bindingRequired:
+        "Нужна хотя бы одна включенная привязка с кластером, route label и chat id.",
+    },
+    toasts: {
+      savedTitle: "Telegram-инстанс сохранен",
+      savedDescription:
+        "Фронтенд-адаптер без backend сохранил изменения для demo и ручных сценариев проверки.",
+      testSuccess: "Проверка подключения успешна",
+      testFailed: "Проверка подключения завершилась ошибкой",
+    },
+    title: "Рабочее пространство интеграций",
+    newInstance: "Новый инстанс",
+    notice: {
+      title: "Фронтенд-only fallback для Telegram",
+      description:
+        "В текущем frontend runtime слое не найден backend-контракт интеграции Telegram. Эта страница хранит данные локально в браузере, чтобы demo и ручные walkthrough-сценарии оставались рабочими без выхода за frontend scope.",
+    },
+    metrics: {
+      instances: "Инстансы",
+      enabled: "Включенные инстансы",
+      bindings: "Привязки кластеров",
+    },
+    list: {
+      title: "Telegram-инстансы",
+      description:
+        "Выберите инстанс для редактирования или создайте новый для demo/manual-маршрутизации.",
+      emptyTitle: "Инстансов интеграции нет",
+      emptyDescription:
+        "Создайте первый Telegram-инстанс, чтобы начать маршрутизацию по кластерам.",
+      bindingsSuffix: "привязок, последний тест",
+      notRun: "не запускался",
+    },
+    form: {
+      editTitle: "Редактировать инстанс",
+      createTitle: "Создать инстанс",
+      description:
+        "Подходит и для быстрых демо, и для ручного ввода операторских данных. Изменения остаются в frontend local storage.",
+      saveChanges: "Сохранить изменения",
+      createInstance: "Создать инстанс",
+    },
+    details: {
+      title: "Детали выбранного инстанса",
+      description:
+        "Компактная операторская сводка по текущему статусу инстанса, покрытию маршрутизации и последнему тесту.",
+      name: "Имя",
+      lastTest: "Последний тест",
+      bindings: "Привязки",
+      testStatus: "Статус теста",
+      notRun: "Не запускался",
+      unknown: "Неизвестно",
+      emptyTitle: "Инстанс не выбран",
+      emptyDescription: "Выберите существующий инстанс или создайте новый.",
+    },
+  },
+} as const;
 
 function toDraft(instance: TelegramInstance): TelegramInstanceDraft {
   return {
@@ -48,15 +168,17 @@ function toBadgeVariant(status: TelegramInstance["status"]) {
   return "success";
 }
 
-function validateDraft(draft: TelegramInstanceDraft) {
+function validateDraft(draft: TelegramInstanceDraft, locale: "ru" | "en") {
+  const copy = copyByLocale[locale];
+
   if (!draft.name.trim()) {
-    return "Instance name is required.";
+    return copy.validation.nameRequired;
   }
   if (!draft.botToken.trim()) {
-    return "Bot token is required.";
+    return copy.validation.tokenRequired;
   }
   if (!draft.defaultChatId.trim()) {
-    return "Default chat id is required.";
+    return copy.validation.chatRequired;
   }
   if (
     !draft.bindings.some(
@@ -67,14 +189,15 @@ function validateDraft(draft: TelegramInstanceDraft) {
         binding.chatId.trim()
     )
   ) {
-    return "At least one enabled binding with cluster, route label, and chat id is required.";
+    return copy.validation.bindingRequired;
   }
 
   return null;
 }
 
 export function IntegrationsPage() {
-  const { dictionary } = useI18n();
+  const { locale } = useI18n();
+  const copy = copyByLocale[locale];
   const { showToast } = useToast();
   const [instances, setInstances] = useState<TelegramInstance[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -118,7 +241,7 @@ export function IntegrationsPage() {
   };
 
   const handleSave = () => {
-    const error = validateDraft(draft);
+    const error = validateDraft(draft, locale);
     if (error) {
       setFormError(error);
       return;
@@ -144,9 +267,8 @@ export function IntegrationsPage() {
 
       setFormError(undefined);
       showToast({
-        title: "Telegram instance saved",
-        description:
-          "The frontend-only integration adapter stored your changes for demo and manual validation flows.",
+        title: copy.toasts.savedTitle,
+        description: copy.toasts.savedDescription,
         variant: "success",
       });
     } finally {
@@ -176,7 +298,7 @@ export function IntegrationsPage() {
   };
 
   const handleTestConnection = async () => {
-    const error = validateDraft(draft);
+    const error = validateDraft(draft, locale);
     if (error) {
       setFormError(error);
       return;
@@ -198,8 +320,8 @@ export function IntegrationsPage() {
       showToast({
         title:
           result.status === "success"
-            ? "Connection test succeeded"
-            : "Connection test failed",
+            ? copy.toasts.testSuccess
+            : copy.toasts.testFailed,
         description: result.message,
         variant: result.status === "success" ? "success" : "danger",
       });
@@ -216,7 +338,7 @@ export function IntegrationsPage() {
           <div className="flex flex-col gap-4 border-b border-[color:var(--border)] pb-6 xl:flex-row xl:items-center xl:justify-between">
             <div className="space-y-2">
               <h2 className="text-5xl font-semibold text-[color:var(--foreground)]">
-                integrations workspace
+                {copy.title}
               </h2>
             </div>
 
@@ -227,20 +349,20 @@ export function IntegrationsPage() {
                 className="h-10 px-4"
                 onClick={handleCreateNew}
               >
-                New instance
+                {copy.newInstance}
               </Button>
             </div>
           </div>
 
           <NoticeBanner
-            title="Frontend-only fallback for Telegram"
-            description="No backend Telegram integration contract was found in the current frontend runtime layer. This page stores data locally in the browser so demos and manual operator walkthroughs stay usable without leaving frontend scope."
+            title={copy.notice.title}
+            description={copy.notice.description}
           />
 
           <section className="grid gap-4 md:grid-cols-3">
             <section className="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                Instances
+                {copy.metrics.instances}
               </p>
               <p className="text-3xl font-semibold text-[color:var(--foreground)]">
                 {instances.length}
@@ -249,7 +371,7 @@ export function IntegrationsPage() {
 
             <section className="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                Enabled instances
+                {copy.metrics.enabled}
               </p>
               <p className="text-3xl font-semibold text-[color:var(--foreground)]">
                 {activeInstances}
@@ -258,7 +380,7 @@ export function IntegrationsPage() {
 
             <section className="space-y-2 rounded-2xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                Cluster bindings
+                {copy.metrics.bindings}
               </p>
               <p className="text-3xl font-semibold text-[color:var(--foreground)]">
                 {totalBindings}
@@ -268,14 +390,14 @@ export function IntegrationsPage() {
 
           <section className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
             <SectionCard
-              title="Telegram instances"
-              description="Pick an instance to edit it, or create a new one for a demo/manual routing setup."
+              title={copy.list.title}
+              description={copy.list.description}
             >
               {instances.length === 0 ? (
                 <EmptyState
                   variant="flush"
-                  title="No integration instances"
-                  description="Create the first Telegram instance to start mapping cluster routes."
+                  title={copy.list.emptyTitle}
+                  description={copy.list.emptyDescription}
                 />
               ) : (
                 <div className="space-y-3">
@@ -295,9 +417,14 @@ export function IntegrationsPage() {
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant={toBadgeVariant(item.status)}>
-                            {item.status}
+                            {translateValueLabel(item.status, locale)}
                           </Badge>
-                          <Badge>{item.enabled ? "enabled" : "paused"}</Badge>
+                          <Badge>
+                            {translateValueLabel(
+                              item.enabled ? "enabled" : "paused",
+                              locale
+                            )}
+                          </Badge>
                         </div>
 
                         <p className="mt-3 text-base font-semibold text-[color:var(--foreground)]">
@@ -307,10 +434,10 @@ export function IntegrationsPage() {
                           {maskTelegramToken(item.botToken)} / {item.defaultChatId}
                         </p>
                         <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
-                          {item.bindings.length} binding(s), last test{" "}
+                          {item.bindings.length} {copy.list.bindingsSuffix}{" "}
                           {item.lastTestAt
-                            ? formatDateTime(item.lastTestAt)
-                            : "not run"}
+                            ? formatDateTime(item.lastTestAt, locale)
+                            : copy.list.notRun}
                         </p>
                       </button>
                     );
@@ -320,8 +447,8 @@ export function IntegrationsPage() {
             </SectionCard>
 
             <SectionCard
-              title={draft.id ? "Edit instance" : "Create instance"}
-              description="Usable for both quick demos and manual operator data entry. Changes stay inside frontend local storage."
+              title={draft.id ? copy.form.editTitle : copy.form.createTitle}
+              description={copy.form.description}
             >
               <TelegramInstanceForm
                 draft={draft}
@@ -330,7 +457,7 @@ export function IntegrationsPage() {
                 onTestConnection={() => void handleTestConnection()}
                 onDelete={handleDelete}
                 formError={formError}
-                saveLabel={draft.id ? "Save changes" : "Create instance"}
+                saveLabel={draft.id ? copy.form.saveChanges : copy.form.createInstance}
                 testing={testing}
                 saving={saving}
                 deletable={Boolean(draft.id)}
@@ -339,14 +466,14 @@ export function IntegrationsPage() {
           </section>
 
           <SectionCard
-            title="Selected instance detail"
-            description="Compact operator snapshot of the current instance status, routing coverage, and last test result."
+            title={copy.details.title}
+            description={copy.details.description}
           >
             {selectedInstance ? (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 <Card className="space-y-2 p-4">
                   <p className="text-sm text-[color:var(--muted-foreground)]">
-                    Name
+                    {copy.details.name}
                   </p>
                   <p className="text-base font-semibold text-[color:var(--foreground)]">
                     {selectedInstance.name}
@@ -355,18 +482,18 @@ export function IntegrationsPage() {
 
                 <Card className="space-y-2 p-4">
                   <p className="text-sm text-[color:var(--muted-foreground)]">
-                    Last test
+                    {copy.details.lastTest}
                   </p>
                   <p className="text-base font-semibold text-[color:var(--foreground)]">
                     {selectedInstance.lastTestAt
-                      ? formatDateTime(selectedInstance.lastTestAt)
-                      : "Not run"}
+                      ? formatDateTime(selectedInstance.lastTestAt, locale)
+                      : copy.details.notRun}
                   </p>
                 </Card>
 
                 <Card className="space-y-2 p-4">
                   <p className="text-sm text-[color:var(--muted-foreground)]">
-                    Bindings
+                    {copy.details.bindings}
                   </p>
                   <p className="text-base font-semibold text-[color:var(--foreground)]">
                     {selectedInstance.bindings.length}
@@ -375,18 +502,20 @@ export function IntegrationsPage() {
 
                 <Card className="space-y-2 p-4">
                   <p className="text-sm text-[color:var(--muted-foreground)]">
-                    Test status
+                    {copy.details.testStatus}
                   </p>
                   <p className="text-base font-semibold text-[color:var(--foreground)]">
-                    {selectedInstance.lastTestStatus ?? "unknown"}
+                    {selectedInstance.lastTestStatus
+                      ? translateValueLabel(selectedInstance.lastTestStatus, locale)
+                      : copy.details.unknown}
                   </p>
                 </Card>
               </div>
             ) : (
               <EmptyState
                 variant="flush"
-                title="No instance selected"
-                description="Select an existing instance or create a new one."
+                title={copy.details.emptyTitle}
+                description={copy.details.emptyDescription}
               />
             )}
           </SectionCard>

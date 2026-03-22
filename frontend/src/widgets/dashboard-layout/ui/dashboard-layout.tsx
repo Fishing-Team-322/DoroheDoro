@@ -13,7 +13,7 @@ import {
 import { useAuth } from "@/src/features/auth/model/use-auth";
 import type { Locale } from "@/src/shared/config";
 import { cn } from "@/src/shared/lib/cn";
-import { useI18n, withLocalePath } from "@/src/shared/lib/i18n";
+import { getSiteCopy, useI18n, withLocalePath } from "@/src/shared/lib/i18n";
 import { ConsolePage } from "@/src/shared/ui";
 import { DashboardSidebarLanguageSwitch } from "@/src/shared/ui/lang-switch";
 import {
@@ -109,6 +109,7 @@ export function DashboardSidebar({
 }: DashboardSidebarProps) {
   const pathname = usePathname();
   const { dictionary } = useI18n();
+  const uiCopy = getSiteCopy(locale);
   const { user } = useAuth();
 
   const items = useMemo<NavItem[]>(
@@ -196,12 +197,16 @@ export function DashboardSidebar({
                       { label?: string; description?: string } | undefined
                     >
                   )[item.key] ?? {};
+                const fallbackLabel =
+                  uiCopy.navigation[
+                    item.key as keyof typeof uiCopy.navigation
+                  ] ?? item.fallbackLabel;
 
                 return (
                   <SidebarNavItem
                     key={item.href}
                     href={href}
-                    label={navItem.label ?? item.fallbackLabel}
+                    label={navItem.label ?? fallbackLabel}
                     Icon={Icon}
                     isActive={isActive}
                     collapsed={collapsed}
@@ -354,10 +359,13 @@ export function PageHeader({
   action?: ReactNode;
   breadcrumbs?: Array<{ label: string; href?: string }>;
 }) {
+  const { locale } = useI18n();
+  const uiCopy = getSiteCopy(locale);
+
   return (
     <header className="space-y-4">
       {breadcrumbs && breadcrumbs.length > 0 ? (
-        <nav aria-label="Breadcrumb">
+        <nav aria-label={uiCopy.navigation.breadcrumb}>
           <ol className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-[0.16em] text-[color:var(--muted-foreground)]">
             {breadcrumbs.map((item, index) => (
               <li

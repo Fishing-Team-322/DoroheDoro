@@ -3,7 +3,10 @@
 import Link from "next/link";
 import type { Locale } from "@/src/shared/config";
 import { Badge, Button, Card, EmptyState } from "@/src/shared/ui";
-import { withLocalePath } from "@/src/shared/lib/i18n";
+import {
+  translateValueLabel,
+  withLocalePath,
+} from "@/src/shared/lib/i18n";
 import {
   JsonPreview,
   SectionCard,
@@ -13,6 +16,45 @@ import {
   getSeverityTone,
   type AlertDetailModel,
 } from "@/src/shared/lib/operations-workbench";
+
+const copyByLocale = {
+  en: {
+    emptyTitle: "No alert selected",
+    emptyDescription:
+      "Choose an alert instance to inspect explanation, source signals, cluster bindings, and delivery status.",
+    title: "Alert detail",
+    description:
+      "Unifies anomaly context, security posture, cluster binding, and projected delivery status in one operator panel.",
+    triggeredPrefix: "Triggered",
+    sourceSignals: "Source signals",
+    correlation: "Correlation",
+    linkedAnomalyPrefix: "Linked anomaly at",
+    noAnomaly:
+      "No correlated anomaly item was returned for this alert.",
+    clusterBindings: "Cluster bindings",
+    noClusterBindings: "No cluster binding matched this alert.",
+    deliveryStatus: "Delivery status",
+    rawPayload: "Raw payload",
+  },
+  ru: {
+    emptyTitle: "Алерт не выбран",
+    emptyDescription:
+      "Выберите alert-инстанс, чтобы посмотреть объяснение, source signals, cluster bindings и статус доставки.",
+    title: "Детали алерта",
+    description:
+      "Объединяет контекст аномалии, security posture, cluster binding и прогнозируемый статус доставки в одной панели оператора.",
+    triggeredPrefix: "Сработал",
+    sourceSignals: "Исходные сигналы",
+    correlation: "Корреляция",
+    linkedAnomalyPrefix: "Связанная аномалия в",
+    noAnomaly:
+      "Для этого алерта не вернулся связанный anomaly-item.",
+    clusterBindings: "Привязки кластеров",
+    noClusterBindings: "Для этого алерта не нашлось подходящей cluster binding.",
+    deliveryStatus: "Статус доставки",
+    rawPayload: "Сырой payload",
+  },
+} as const;
 
 function toBadgeVariant(value?: string) {
   const normalized = value?.trim().toLowerCase() ?? "";
@@ -45,13 +87,14 @@ export function AlertExplanationDrawer({
   alert: AlertDetailModel | null;
   locale: Locale;
 }) {
+  const copy = copyByLocale[locale];
   if (!alert) {
     return (
       <Card>
         <EmptyState
           variant="flush"
-          title="No alert selected"
-          description="Choose an alert instance to inspect explanation, source signals, cluster bindings, and delivery status."
+          title={copy.emptyTitle}
+          description={copy.emptyDescription}
         />
       </Card>
     );
@@ -59,8 +102,8 @@ export function AlertExplanationDrawer({
 
   return (
     <SectionCard
-      title="Alert detail"
-      description="Unifies anomaly context, security posture, cluster binding, and projected delivery status in one operator panel."
+      title={copy.title}
+      description={copy.description}
       action={
         alert.securityFinding?.relatedRoute ? (
           <Link href={withLocalePath(locale, alert.securityFinding.relatedRoute.href)}>
@@ -74,8 +117,10 @@ export function AlertExplanationDrawer({
       <div className="space-y-5">
         <Card className="space-y-3 p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={toBadgeVariant(alert.severity)}>{alert.severity}</Badge>
-            <Badge>{alert.status}</Badge>
+            <Badge variant={toBadgeVariant(alert.severity)}>
+              {translateValueLabel(alert.severity, locale)}
+            </Badge>
+            <Badge>{translateValueLabel(alert.status, locale)}</Badge>
           </div>
           <p className="text-xl font-semibold text-[color:var(--foreground)]">
             {alert.title}
@@ -84,14 +129,14 @@ export function AlertExplanationDrawer({
             {alert.explanation}
           </p>
           <p className="text-xs uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-            Triggered {formatDateTime(alert.triggeredAt)}
+            {copy.triggeredPrefix} {formatDateTime(alert.triggeredAt, locale)}
           </p>
         </Card>
 
         <div className="grid gap-4 md:grid-cols-2">
           <Card className="space-y-3 p-4">
             <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-              Source signals
+              {copy.sourceSignals}
             </h3>
             <div className="space-y-2">
               {alert.sourceSignals.map((item) => (
@@ -112,25 +157,26 @@ export function AlertExplanationDrawer({
 
           <Card className="space-y-3 p-4">
             <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-              Correlation
+              {copy.correlation}
             </h3>
             {alert.anomaly ? (
               <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-subtle)] p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={toBadgeVariant(alert.anomaly.severity)}>
-                    {alert.anomaly.severity}
+                    {translateValueLabel(alert.anomaly.severity, locale)}
                   </Badge>
                   <span className="text-sm font-medium text-[color:var(--foreground)]">
                     {alert.anomaly.title}
                   </span>
                 </div>
                 <p className="mt-2 text-sm text-[color:var(--muted-foreground)]">
-                  Linked anomaly at {formatDateTime(alert.anomaly.triggeredAt)}
+                  {copy.linkedAnomalyPrefix}{" "}
+                  {formatDateTime(alert.anomaly.triggeredAt, locale)}
                 </p>
               </div>
             ) : (
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                No correlated anomaly item was returned for this alert.
+                {copy.noAnomaly}
               </p>
             )}
 
@@ -138,7 +184,7 @@ export function AlertExplanationDrawer({
               <div className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-subtle)] p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={toBadgeVariant(alert.securityFinding.severity)}>
-                    {alert.securityFinding.severity}
+                    {translateValueLabel(alert.securityFinding.severity, locale)}
                   </Badge>
                   <span className="text-sm font-medium text-[color:var(--foreground)]">
                     {alert.securityFinding.title}
@@ -155,11 +201,11 @@ export function AlertExplanationDrawer({
         <div className="grid gap-4 md:grid-cols-2">
           <Card className="space-y-3 p-4">
             <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-              Cluster bindings
+              {copy.clusterBindings}
             </h3>
             {alert.clusterBindings.length === 0 ? (
               <p className="text-sm text-[color:var(--muted-foreground)]">
-                No cluster binding matched this alert.
+                {copy.noClusterBindings}
               </p>
             ) : (
               <div className="space-y-2">
@@ -182,7 +228,7 @@ export function AlertExplanationDrawer({
 
           <Card className="space-y-3 p-4">
             <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-              Delivery status
+              {copy.deliveryStatus}
             </h3>
             <div className="space-y-2">
               {alert.deliveryStatus.map((delivery) => (
@@ -191,7 +237,9 @@ export function AlertExplanationDrawer({
                   className="rounded-lg border border-[color:var(--border)] bg-[color:var(--surface-subtle)] p-3"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant={toBadgeVariant(delivery.status)}>{delivery.status}</Badge>
+                    <Badge variant={toBadgeVariant(delivery.status)}>
+                      {translateValueLabel(delivery.status, locale)}
+                    </Badge>
                     <span className="text-sm font-medium text-[color:var(--foreground)]">
                       {delivery.instanceName}
                     </span>
@@ -210,7 +258,7 @@ export function AlertExplanationDrawer({
 
         <Card className="space-y-3 p-4">
           <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[color:var(--muted-foreground)]">
-            Raw payload
+            {copy.rawPayload}
           </h3>
           <JsonPreview value={alert.payload} />
         </Card>

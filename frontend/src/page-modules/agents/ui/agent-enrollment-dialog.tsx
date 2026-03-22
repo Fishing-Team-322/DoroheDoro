@@ -7,24 +7,144 @@ import {
   NoticeBanner,
   StatusBadge,
   TextAreaField,
+  formatMaybeValue,
 } from "@/src/features/operations/ui/operations-ui";
 import type { PolicySummary } from "@/src/shared/lib/runtime-api";
-import { Badge, Button, Card, FormLabel, Input, Select } from "@/src/shared/ui";
+import { Badge, Button, Card, Input, Select } from "@/src/shared/ui";
 
-const BOOTSTRAP_TOKEN_PLACEHOLDER =
-  "Unavailable until the public Edge API bridge is exposed";
+const copyByLocale = {
+  en: {
+    bootstrapTokenPlaceholder:
+      "Unavailable until the public Edge API bridge is exposed",
+    title: "Create Agent",
+    badge: "UI stub",
+    description:
+      "Prepare the future enrollment payload using only data already loaded in WEB. No create or enrollment request is sent from this dialog.",
+    close: "Close",
+    notice: {
+      title: "Public Edge API bridge required",
+      description:
+        "Real agent create and enrollment flows will become available only after Edge exposes a public HTTP bridge for bootstrap token issuance and enrollment.",
+    },
+    form: {
+      agentName: "Agent name",
+      agentNameHelp: "UI-only draft field.",
+      hostname: "Hostname",
+      hostnameHelp: "Preview only. Nothing is persisted.",
+      environment: "Environment",
+      environmentHelp: "For example: prod, staging, lab.",
+      selectPolicy: "Select policy",
+      noPolicies: "No policies loaded",
+      policyHelp: "Uses the policies already fetched on this page.",
+      labels: "Labels / Tags (optional)",
+      labelsHelp:
+        "Optional preview field. Use comma-separated or newline-separated values.",
+    },
+    policyPreview: {
+      title: "Policy preview",
+      description:
+        "Preview is based on the currently loaded policy list and does not call policy creation or bootstrap endpoints.",
+      fields: {
+        name: "Policy name",
+        id: "Policy ID",
+        revision: "Revision",
+        status: "Status",
+      },
+      empty: "Load policies or select one to see the preview.",
+    },
+    parsedLabels: {
+      title: "Parsed labels",
+      empty: "No labels added yet.",
+    },
+    bootstrap: {
+      label: "Bootstrap token",
+      help: "Disabled until Edge exposes the public bridge for `agents.bootstrap-token.issue`.",
+      button: "Issue Bootstrap Token",
+    },
+    commandPreview: {
+      title: "Enrollment command preview",
+      description:
+        "Preview only. The command remains incomplete until a public bootstrap token bridge exists.",
+    },
+    footer:
+      "Real enrollment and create actions stay disabled on purpose until a public Edge API bridge is available for WEB.",
+    cancel: "Cancel",
+    prepare: "Prepare Enrollment",
+  },
+  ru: {
+    bootstrapTokenPlaceholder:
+      "Недоступно, пока не появится публичный мост Edge API",
+    title: "Создать агента",
+    badge: "UI-заглушка",
+    description:
+      "Подготовьте будущий enrollment-payload, используя только данные, уже загруженные в WEB. Из этого диалога не отправляются запросы на создание или enrollment.",
+    close: "Закрыть",
+    notice: {
+      title: "Нужен публичный мост Edge API",
+      description:
+        "Реальные сценарии создания агента и enrollment станут доступны только после того, как Edge откроет публичный HTTP-мост для выдачи bootstrap-токенов и enrollment.",
+    },
+    form: {
+      agentName: "Имя агента",
+      agentNameHelp: "Черновое поле только на уровне UI.",
+      hostname: "Hostname",
+      hostnameHelp: "Только предпросмотр. Ничего не сохраняется.",
+      environment: "Окружение",
+      environmentHelp: "Например: prod, staging, lab.",
+      selectPolicy: "Выберите политику",
+      noPolicies: "Политики не загружены",
+      policyHelp: "Используются политики, уже загруженные на этой странице.",
+      labels: "Labels / Tags (опционально)",
+      labelsHelp:
+        "Опциональное поле предпросмотра. Используйте значения через запятую или с новой строки.",
+    },
+    policyPreview: {
+      title: "Предпросмотр политики",
+      description:
+        "Предпросмотр строится на текущем загруженном списке политик и не вызывает endpoint'ы создания политики или bootstrap.",
+      fields: {
+        name: "Название политики",
+        id: "ID политики",
+        revision: "Ревизия",
+        status: "Статус",
+      },
+      empty: "Загрузите политики или выберите одну, чтобы увидеть предпросмотр.",
+    },
+    parsedLabels: {
+      title: "Разобранные labels",
+      empty: "Labels пока не добавлены.",
+    },
+    bootstrap: {
+      label: "Bootstrap-токен",
+      help: "Отключено, пока Edge не откроет публичный мост для `agents.bootstrap-token.issue`.",
+      button: "Выдать bootstrap-токен",
+    },
+    commandPreview: {
+      title: "Предпросмотр enrollment-команды",
+      description:
+        "Только предпросмотр. Команда останется неполной, пока не появится публичный мост bootstrap-токенов.",
+    },
+    footer:
+      "Реальные действия enrollment и создания специально остаются отключенными, пока для WEB не появится публичный мост Edge API.",
+    cancel: "Отмена",
+    prepare: "Подготовить enrollment",
+  },
+} as const;
 
 export function AgentEnrollmentDialog({
   open,
   onClose,
   policies,
   initialPolicyId,
+  locale,
 }: {
   open: boolean;
   onClose: () => void;
   policies: PolicySummary[];
   initialPolicyId?: string | null;
+  locale: "ru" | "en";
 }) {
+  const copy = copyByLocale[locale];
   const [agentName, setAgentName] = useState("");
   const [hostname, setHostname] = useState("");
   const [environment, setEnvironment] = useState("");
@@ -111,15 +231,13 @@ export function AgentEnrollmentDialog({
                     id="create-agent-dialog-title"
                     className="text-xl font-semibold text-[color:var(--foreground)]"
                   >
-                    Create Agent
+                    {copy.title}
                   </h2>
-                  <Badge variant="warning">UI stub</Badge>
+                  <Badge variant="warning">{copy.badge}</Badge>
                 </div>
 
                 <p className="max-w-3xl text-sm leading-6 text-[color:var(--muted-foreground)]">
-                  Prepare the future enrollment payload using only data already
-                  loaded in WEB. No create or enrollment request is sent from
-                  this dialog.
+                  {copy.description}
                 </p>
               </div>
 
@@ -129,35 +247,35 @@ export function AgentEnrollmentDialog({
                 className="h-10 px-4"
                 onClick={onClose}
               >
-                Close
+                {copy.close}
               </Button>
             </div>
 
             <NoticeBanner
-              title="Public Edge API bridge required"
-              description="Real agent create and enrollment flows will become available only after Edge exposes a public HTTP bridge for bootstrap token issuance and enrollment."
+              title={copy.notice.title}
+              description={copy.notice.description}
             />
 
             <div className="grid gap-4 md:grid-cols-2">
               <Input
-                label="Agent name"
+                label={copy.form.agentName}
                 value={agentName}
                 onChange={(event) => setAgentName(event.target.value)}
-                helperText="UI-only draft field."
+                helperText={copy.form.agentNameHelp}
               />
 
               <Input
-                label="Hostname"
+                label={copy.form.hostname}
                 value={hostname}
                 onChange={(event) => setHostname(event.target.value)}
-                helperText="Preview only. Nothing is persisted."
+                helperText={copy.form.hostnameHelp}
               />
 
               <Input
-                label="Environment"
+                label={copy.form.environment}
                 value={environment}
                 onChange={(event) => setEnvironment(event.target.value)}
-                helperText="For example: prod, staging, lab."
+                helperText={copy.form.environmentHelp}
               />
 
               <div className="space-y-2">
@@ -170,20 +288,22 @@ export function AgentEnrollmentDialog({
                     label: policy.name,
                   }))}
                   placeholder={
-                    policies.length > 0 ? "Select policy" : "No policies loaded"
+                    policies.length > 0
+                      ? copy.form.selectPolicy
+                      : copy.form.noPolicies
                   }
                   disabled={policies.length === 0}
                 />
                 <p className="text-sm text-[color:var(--muted-foreground)]">
-                  Uses the policies already fetched on this page.
+                  {copy.form.policyHelp}
                 </p>
               </div>
             </div>
 
             <TextAreaField
               id="create-agent-labels"
-              label="Labels / Tags (optional)"
-              helperText="Optional preview field. Use comma-separated or newline-separated values."
+              label={copy.form.labels}
+              helperText={copy.form.labelsHelp}
               value={labelsText}
               onChange={(event) => setLabelsText(event.target.value)}
               placeholder={"role=edge\nregion=eu-central-1"}
@@ -193,11 +313,10 @@ export function AgentEnrollmentDialog({
             <div className="space-y-4 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-[color:var(--foreground)]">
-                  Policy preview
+                  {copy.policyPreview.title}
                 </p>
                 <p className="text-sm leading-6 text-[color:var(--muted-foreground)]">
-                  Preview is based on the currently loaded policy list and does
-                  not call policy creation or bootstrap endpoints.
+                  {copy.policyPreview.description}
                 </p>
               </div>
 
@@ -205,19 +324,19 @@ export function AgentEnrollmentDialog({
                 <DetailGrid
                   items={[
                     {
-                      label: "Policy name",
+                      label: copy.policyPreview.fields.name,
                       value: selectedPolicy.name,
                     },
                     {
-                      label: "Policy ID",
+                      label: copy.policyPreview.fields.id,
                       value: selectedPolicy.id,
                     },
                     {
-                      label: "Revision",
-                      value: selectedPolicy.revision ?? "n/a",
+                      label: copy.policyPreview.fields.revision,
+                      value: formatMaybeValue(selectedPolicy.revision, locale),
                     },
                     {
-                      label: "Status",
+                      label: copy.policyPreview.fields.status,
                       value: (
                         <StatusBadge
                           value={
@@ -232,13 +351,13 @@ export function AgentEnrollmentDialog({
                 />
               ) : (
                 <p className="text-sm text-[color:var(--muted-foreground)]">
-                  Load policies or select one to see the preview.
+                  {copy.policyPreview.empty}
                 </p>
               )}
 
               <div className="space-y-2">
                 <p className="text-sm font-medium text-[color:var(--foreground)]">
-                  Parsed labels
+                  {copy.parsedLabels.title}
                 </p>
                 {labelTokens.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
@@ -250,7 +369,7 @@ export function AgentEnrollmentDialog({
                   </div>
                 ) : (
                   <p className="text-sm text-[color:var(--muted-foreground)]">
-                    No labels added yet.
+                    {copy.parsedLabels.empty}
                   </p>
                 )}
               </div>
@@ -259,11 +378,11 @@ export function AgentEnrollmentDialog({
             <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
               <div className="space-y-4 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
                 <Input
-                  label="Bootstrap token"
-                  value={BOOTSTRAP_TOKEN_PLACEHOLDER}
+                  label={copy.bootstrap.label}
+                  value={copy.bootstrapTokenPlaceholder}
                   readOnly
                   disabled
-                  helperText="Disabled until Edge exposes the public bridge for `agents.bootstrap-token.issue`."
+                  helperText={copy.bootstrap.help}
                 />
 
                 <Button
@@ -272,18 +391,17 @@ export function AgentEnrollmentDialog({
                   className="h-10 px-4"
                   disabled
                 >
-                  Issue Bootstrap Token
+                  {copy.bootstrap.button}
                 </Button>
               </div>
 
               <div className="space-y-3 rounded-xl border border-[color:var(--border)] bg-[color:var(--surface)] p-4">
                 <div>
                   <p className="text-sm font-semibold text-[color:var(--foreground)]">
-                    Enrollment command preview
+                    {copy.commandPreview.title}
                   </p>
                   <p className="mt-1 text-sm leading-6 text-[color:var(--muted-foreground)]">
-                    Preview only. The command remains incomplete until a public
-                    bootstrap token bridge exists.
+                    {copy.commandPreview.description}
                   </p>
                 </div>
 
@@ -295,8 +413,7 @@ export function AgentEnrollmentDialog({
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--border)] pt-4">
               <p className="max-w-3xl text-sm leading-6 text-[color:var(--muted-foreground)]">
-                Real enrollment and create actions stay disabled on purpose
-                until a public Edge API bridge is available for WEB.
+                {copy.footer}
               </p>
 
               <div className="flex flex-wrap gap-2">
@@ -306,10 +423,10 @@ export function AgentEnrollmentDialog({
                   className="h-10 px-4"
                   onClick={onClose}
                 >
-                  Cancel
+                  {copy.cancel}
                 </Button>
                 <Button size="sm" className="h-10 px-4" disabled>
-                  Prepare Enrollment
+                  {copy.prepare}
                 </Button>
               </div>
             </div>
