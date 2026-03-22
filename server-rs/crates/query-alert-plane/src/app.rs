@@ -30,6 +30,7 @@ pub async fn run(config: QueryAlertPlaneConfig) -> anyhow::Result<()> {
         ClickHouseClient::new(config.clickhouse.clone()),
         config.rare_fingerprint.clone(),
         config.anomaly.clone(),
+        config.detection.clone(),
     ));
     service
         .initialize()

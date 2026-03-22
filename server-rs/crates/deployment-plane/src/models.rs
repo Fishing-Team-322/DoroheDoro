@@ -393,6 +393,16 @@ pub struct ResolvedArtifact {
     pub checksum_file: String,
     pub sha256: String,
     pub bundle_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_repository: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_digest: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_reference: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_digest_reference: Option<String>,
 }
 
 impl ResolvedArtifact {

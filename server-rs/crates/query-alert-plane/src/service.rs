@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::{Duration as StdDuration, Instant},
@@ -27,9 +27,9 @@ use crate::{
     anomaly::{
         parse_anomaly_rule, BaselineRule, ParsedAnomalyRule, RareFingerprintRule, ThresholdRule,
     },
-    config::{AnomalyEngineConfig, RareFingerprintConfig},
+    config::{AnomalyEngineConfig, DetectionConfig, RareFingerprintConfig},
     models::{format_ts, AlertRuleCondition, AlertRuleRecord},
-    pipeline::DetectionMode,
+    pipeline::{DetectionMode, SignalEnvelope, SignalSource},
     repository::QueryAlertRepository,
     storage::{ClickHouseClient, OpenSearchClient},
 };
@@ -105,6 +105,7 @@ impl QueryAlertService {
         clickhouse: ClickHouseClient,
         rare_config: RareFingerprintConfig,
         anomaly_config: AnomalyEngineConfig,
+        detection_config: DetectionConfig,
     ) -> Self {
         Self {
             repo,
@@ -1230,6 +1231,64 @@ impl QueryAlertService {
             .await;
         }
         Ok(())
+    }
+
+    pub async fn handle_heartbeat_signal(&self, payload: Value) -> AppResult<()> {
+        self.handle_agent_signal(payload, SignalSource::Heartbeat, 1.0)
+            .await
+    }
+
+    pub async fn handle_diagnostics_signal(&self, payload: Value) -> AppResult<()> {
+        self.handle_agent_signal(payload, SignalSource::Diagnostics, 1.0)
+            .await
+    }
+
+    pub async fn handle_security_signal(&self, payload: Value) -> AppResult<()> {
+        self.handle_agent_signal(payload, SignalSource::SecurityPosture, 1.0)
+            .await
+    }
+
+    async fn handle_agent_signal(
+        &self,
+        payload: Value,
+        expected_source: SignalSource,
+        observation: f64,
+    ) -> AppResult<()> {
+        let envelope = Self::decode_signal_payload(payload, expected_source)?;
+        let (host, service) = Self::require_signal_target(&envelope)?;
+        self.record_signal();
+        self.record_baseline(host, service, expected_source.as_str(), observation)
+            .await
+    }
+
+    fn decode_signal_payload(
+        payload: Value,
+        expected_source: SignalSource,
+    ) -> AppResult<SignalEnvelope> {
+        let envelope: SignalEnvelope = serde_json::from_value(payload).map_err(|error| {
+            AppError::invalid_argument(format!(
+                "invalid {} signal payload: {error}",
+                expected_source.as_str()
+            ))
+        })?;
+        if envelope.source != expected_source {
+            return Err(AppError::invalid_argument(format!(
+                "signal source mismatch: expected {}, got {}",
+                expected_source.as_str(),
+                envelope.source.as_str()
+            )));
+        }
+        Ok(envelope)
+    }
+
+    fn require_signal_target(envelope: &SignalEnvelope) -> AppResult<(&str, &str)> {
+        let host = envelope.host.as_deref().ok_or_else(|| {
+            AppError::invalid_argument("signal payload must include host identifier")
+        })?;
+        let service = envelope.service.as_deref().ok_or_else(|| {
+            AppError::invalid_argument("signal payload must include service identifier")
+        })?;
+        Ok((host, service))
     }
 }
 

@@ -99,7 +99,7 @@ impl DeploymentConfig {
         let artifact_version = optional_trimmed(&vars, "AGENT_ARTIFACT_VERSION");
         let preferred_package_type = optional_trimmed(&vars, "AGENT_PREFERRED_PACKAGE_TYPE");
         if let Some(value) = preferred_package_type.as_deref() {
-            if !matches!(value, "deb" | "tar.gz") {
+            if !matches!(value, "deb" | "tar.gz" | "container") {
                 return Err(ConfigError::InvalidEnum("AGENT_PREFERRED_PACKAGE_TYPE"));
             }
         }
@@ -213,7 +213,7 @@ pub enum ConfigError {
 
 #[cfg(test)]
 mod tests {
-    use super::DeploymentConfig;
+    use super::{ConfigError, DeploymentConfig};
     use crate::models::ExecutorKind;
 
     #[test]
@@ -239,7 +239,7 @@ mod tests {
                 "https://downloads.example.local/agent",
             ),
             ("AGENT_ARTIFACT_VERSION", "0.2.0"),
-            ("AGENT_PREFERRED_PACKAGE_TYPE", "deb"),
+            ("AGENT_PREFERRED_PACKAGE_TYPE", "container"),
             ("VAULT_ADDR", "https://vault.example.local"),
             ("VAULT_ROLE_ID", "role-id"),
             ("VAULT_SECRET_ID", "secret-id"),
@@ -270,7 +270,7 @@ mod tests {
             config.artifact_manifest_url.as_deref(),
             Some("https://downloads.example.local/manifest.json")
         );
-        assert_eq!(config.preferred_package_type.as_deref(), Some("deb"));
+        assert_eq!(config.preferred_package_type.as_deref(), Some("container"));
         assert_eq!(
             config.vault_addr.as_deref(),
             Some("https://vault.example.local")
@@ -291,6 +291,26 @@ mod tests {
         assert_eq!(config.shared.postgres_dsn, "postgres://example");
         assert!(config.artifact_resolver_config().unwrap().is_some());
         assert!(config.vault_runtime_config().unwrap().is_some());
+    }
+
+    #[test]
+    fn rejects_unknown_package_type() {
+        let error = DeploymentConfig::from_pairs([
+            ("POSTGRES_DSN", "postgres://example"),
+            ("NATS_URL", "nats://example:4222"),
+            ("DEPLOYMENT_HTTP_ADDR", "127.0.0.1:9191"),
+            ("DEPLOYMENT_EXECUTOR_KIND", "ansible"),
+            ("EDGE_PUBLIC_URL", "https://edge.example.local"),
+            ("EDGE_GRPC_ADDR", "edge.example.local:9090"),
+            ("AGENT_STATE_DIR_DEFAULT", "/srv/doro-agent"),
+            ("AGENT_PREFERRED_PACKAGE_TYPE", "rpm"),
+        ])
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ConfigError::InvalidEnum("AGENT_PREFERRED_PACKAGE_TYPE")
+        ));
     }
 
     #[test]

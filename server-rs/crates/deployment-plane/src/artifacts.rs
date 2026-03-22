@@ -32,10 +32,22 @@ pub struct ReleaseArtifact {
     pub install_mode: String,
     pub artifact_name: String,
     pub artifact_path: String,
+    #[serde(default)]
+    pub source_uri: Option<String>,
     pub checksum_file: String,
     pub bundle_root: Option<String>,
     pub sha256: String,
     pub packaging_preference: Option<i32>,
+    #[serde(default)]
+    pub image_repository: Option<String>,
+    #[serde(default)]
+    pub image_tag: Option<String>,
+    #[serde(default)]
+    pub image_digest: Option<String>,
+    #[serde(default)]
+    pub image_reference: Option<String>,
+    #[serde(default)]
+    pub image_digest_reference: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -184,6 +196,11 @@ pub fn resolve_for_host(
             checksum_file: candidates.checksum_file.clone(),
             sha256: candidates.sha256.clone(),
             bundle_root: candidates.bundle_root.clone(),
+            image_repository: candidates.image_repository.clone(),
+            image_tag: candidates.image_tag.clone(),
+            image_digest: candidates.image_digest.clone(),
+            image_reference: candidates.image_reference.clone(),
+            image_digest_reference: candidates.image_digest_reference.clone(),
         },
         warnings,
     })
@@ -203,6 +220,11 @@ pub fn unresolved_artifact() -> ResolvedArtifact {
         checksum_file: String::new(),
         sha256: String::new(),
         bundle_root: None,
+        image_repository: None,
+        image_tag: None,
+        image_digest: None,
+        image_reference: None,
+        image_digest_reference: None,
     }
 }
 
@@ -261,6 +283,14 @@ fn resolve_source_uri(
     artifact: &ReleaseArtifact,
     settings: &ArtifactResolverConfig,
 ) -> AppResult<String> {
+    if let Some(source) = artifact
+        .source_uri
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|v| !v.is_empty())
+    {
+        return Ok(source.to_string());
+    }
     if looks_like_url(&artifact.artifact_path) {
         return Ok(artifact.artifact_path.clone());
     }
@@ -321,7 +351,7 @@ mod tests {
 
         assert_eq!(manifest.version, "0.2.0");
         assert_eq!(manifest.generated_at, "2026-03-21T12:00:00Z");
-        assert_eq!(manifest.artifacts.len(), 3);
+        assert_eq!(manifest.artifacts.len(), 5);
     }
 
     #[test]
@@ -366,5 +396,41 @@ mod tests {
         let artifact = unresolved_artifact();
         assert_eq!(artifact.version, "unresolved");
         assert_eq!(artifact.package_type, "auto");
+    }
+
+    #[test]
+    fn resolves_container_artifact_when_preferred() {
+        let manifest: super::ReleaseManifest = serde_json::from_str(include_str!(
+            "../../../../deployments/artifacts/example.manifest.json"
+        ))
+        .unwrap();
+        let resolution = resolve_for_host(
+            &manifest,
+            &ArtifactResolverConfig {
+                manifest_url: "deployments/artifacts/example.manifest.json".to_string(),
+                release_base_url: None,
+                artifact_version: Some("0.2.0".to_string()),
+                preferred_package_type: Some("container".to_string()),
+            },
+            &ResolvedHost {
+                host_id: Uuid::new_v4(),
+                hostname: "generic-1".to_string(),
+                ip: "10.0.0.20".to_string(),
+                ssh_port: 22,
+                remote_user: "root".to_string(),
+                labels: BTreeMap::from([("arch".to_string(), "amd64".to_string())]),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(resolution.artifact.package_type, "container");
+        assert_eq!(
+            resolution.artifact.image_reference.as_deref(),
+            Some("docker.io/example/doro-agent:0.2.0")
+        );
+        assert_eq!(
+            resolution.artifact.image_digest_reference.as_deref(),
+            Some("docker.io/example/doro-agent@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+        );
     }
 }
